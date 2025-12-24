@@ -1,7 +1,7 @@
 [project]
 name = "claude-code-publish"
 version = "0.1"
-description = "Add your description here"
+description = "Convert a Claude Code for web session.json to HTML"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [
@@ -9,6 +9,12 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = ["markdown"]
+
+[project.urls]
+Homepage = "https://github.com/simonw/claude-code-publish"
+Changelog = "https://github.com/simonw/claude-code-publish/releases"
+Issues = "https://github.com/simonw/claude-code-publish/issues"
+CI = "https://github.com/simonw/claude-code-publish/actions"
 
 [project.scripts]
 claude-code-publish = "claude_code_publish:main"
