@@ -1,6 +1,6 @@
 [project]
 name = "claude-code-publish"
-version = "0.1"
+version = "0.2"
 description = "Convert a Claude Code for web session.json to HTML"
 readme = "README.md"
 license = "Apache-2.0"
