@@ -1,6 +1,6 @@
 [project]
 name = "claude-code-transcripts"
-version = "0.2"
+version = "0.3"
 description = "Convert Claude Code session files to HTML transcripts"
 readme = "README.md"
 license = "Apache-2.0"
