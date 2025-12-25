@@ -5,6 +5,7 @@ import html
 import os
 import platform
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -640,8 +641,7 @@ def inject_gist_preview_js(output_dir):
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
-                "</body>",
-                f"<script>{GIST_PREVIEW_JS}</script>\n</body>"
+                "</body>", f"<script>{GIST_PREVIEW_JS}</script>\n</body>"
             )
             html_file.write_text(content)
 
@@ -931,7 +931,13 @@ def cli():
     is_flag=True,
     help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
 )
-def session(json_file, output, repo, gist):
+@click.option(
+    "--json",
+    "include_json",
+    is_flag=True,
+    help="Include the original JSON session file in the output directory.",
+)
+def session(json_file, output, repo, gist, include_json):
     """Convert a Claude Code session JSON file to HTML."""
     # Determine output directory
     if gist and output is None:
@@ -943,7 +949,17 @@ def session(json_file, output, repo, gist):
     elif output is None:
         output = "."
 
+    output = Path(output)
     generate_html(json_file, output, github_repo=repo)
+
+    # Copy JSON file to output directory if requested
+    if include_json:
+        output.mkdir(exist_ok=True)
+        json_source = Path(json_file)
+        json_dest = output / json_source.name
+        shutil.copy(json_file, json_dest)
+        json_size_kb = json_dest.stat().st_size / 1024
+        click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
         # Inject gist preview JS and create gist
@@ -1233,7 +1249,13 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     is_flag=True,
     help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
 )
-def import_session(session_id, output, token, org_uuid, repo, gist):
+@click.option(
+    "--json",
+    "include_json",
+    is_flag=True,
+    help="Include the JSON session data in the output directory.",
+)
+def import_session(session_id, output, token, org_uuid, repo, gist, include_json):
     """Import a session from the Claude API and convert to HTML.
 
     If SESSION_ID is not provided, displays an interactive picker to select a session.
@@ -1298,8 +1320,18 @@ def import_session(session_id, output, token, org_uuid, repo, gist):
     elif output is None:
         output = session_id
 
+    output = Path(output)
     click.echo(f"Generating HTML in {output}/...")
     generate_html_from_session_data(session_data, output, github_repo=repo)
+
+    # Save JSON session data if requested
+    if include_json:
+        output.mkdir(exist_ok=True)
+        json_dest = output / f"{session_id}.json"
+        with open(json_dest, "w") as f:
+            json.dump(session_data, f, indent=2)
+        json_size_kb = json_dest.stat().st_size / 1024
+        click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
         # Inject gist preview JS and create gist

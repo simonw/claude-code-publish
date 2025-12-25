@@ -40,6 +40,7 @@ This will generate:
 - `-o, --output DIRECTORY` - output directory (default: current directory)
 - `--repo OWNER/NAME` - GitHub repo for commit links (auto-detected from git push output if not specified)
 - `--gist` - upload the generated HTML files to a GitHub Gist and output a preview URL
+- `--json` - include the original JSON session file in the output directory
 
 ### Publishing to GitHub Gist
 
@@ -74,6 +75,21 @@ claude-code-publish session.json -o ./my-transcript --gist
 
 **Requirements:** The `--gist` option requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated (`gh auth login`).
 
+### Including the JSON source
+
+Use the `--json` option to include the original session JSON file in the output directory:
+
+```bash
+claude-code-publish session.json -o ./my-transcript --json
+```
+
+This will output:
+```
+JSON: ./my-transcript/session_ABC.json (245.3 KB)
+```
+
+The JSON file preserves its original filename. This is useful for archiving the source data alongside the HTML output.
+
 ## Importing from Claude API
 
 You can import sessions directly from the Claude API without needing to export a `session.json` file:
@@ -90,9 +106,14 @@ claude-code-publish import
 
 # Import and publish to gist
 claude-code-publish import SESSION_ID --gist
+
+# Import and save the JSON session data
+claude-code-publish import SESSION_ID --json
 ```
 
 On macOS, the API credentials are automatically retrieved from your keychain (requires being logged into Claude Code). On other platforms, provide `--token` and `--org-uuid` manually.
+
+The `--json` option for the import command saves the session data fetched from the API as `{session_id}.json` in the output directory.
 
 ## Development
 

@@ -577,7 +577,9 @@ class TestSessionGistOption:
         monkeypatch.setattr(subprocess, "run", mock_run)
 
         # Mock tempfile.gettempdir to use our tmp_path
-        monkeypatch.setattr("claude_code_publish.tempfile.gettempdir", lambda: str(tmp_path))
+        monkeypatch.setattr(
+            "claude_code_publish.tempfile.gettempdir", lambda: str(tmp_path)
+        )
 
         runner = CliRunner()
         result = runner.invoke(
@@ -624,6 +626,93 @@ class TestSessionGistOption:
         assert "gistpreview.github.io" in index_content
 
 
+class TestSessionJsonOption:
+    """Tests for the session command --json option."""
+
+    def test_session_json_copies_file(self, output_dir):
+        """Test that session --json copies the JSON file to output."""
+        from click.testing import CliRunner
+        from claude_code_publish import cli
+
+        fixture_path = Path(__file__).parent / "sample_session.json"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["session", str(fixture_path), "-o", str(output_dir), "--json"],
+        )
+
+        assert result.exit_code == 0
+        json_file = output_dir / "sample_session.json"
+        assert json_file.exists()
+        assert "JSON:" in result.output
+        assert "KB" in result.output
+
+    def test_session_json_preserves_original_name(self, output_dir):
+        """Test that --json preserves the original filename."""
+        from click.testing import CliRunner
+        from claude_code_publish import cli
+
+        fixture_path = Path(__file__).parent / "sample_session.json"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["session", str(fixture_path), "-o", str(output_dir), "--json"],
+        )
+
+        assert result.exit_code == 0
+        # Should use original filename, not "session.json"
+        assert (output_dir / "sample_session.json").exists()
+        assert not (output_dir / "session.json").exists()
+
+
+class TestImportJsonOption:
+    """Tests for the import command --json option."""
+
+    def test_import_json_saves_session_data(self, httpx_mock, output_dir):
+        """Test that import --json saves the session JSON."""
+        from click.testing import CliRunner
+        from claude_code_publish import cli
+
+        # Load sample session to mock API response
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        with open(fixture_path) as f:
+            session_data = json.load(f)
+
+        httpx_mock.add_response(
+            url="https://api.anthropic.com/v1/session_ingress/session/test-session-id",
+            json=session_data,
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "import",
+                "test-session-id",
+                "--token",
+                "test-token",
+                "--org-uuid",
+                "test-org",
+                "-o",
+                str(output_dir),
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0
+        json_file = output_dir / "test-session-id.json"
+        assert json_file.exists()
+        assert "JSON:" in result.output
+        assert "KB" in result.output
+
+        # Verify JSON content is valid
+        with open(json_file) as f:
+            saved_data = json.load(f)
+        assert saved_data == session_data
+
+
 class TestImportGistOption:
     """Tests for the import command --gist option."""
 
@@ -657,7 +746,9 @@ class TestImportGistOption:
         monkeypatch.setattr(subprocess, "run", mock_run)
 
         # Mock tempfile.gettempdir
-        monkeypatch.setattr("claude_code_publish.tempfile.gettempdir", lambda: str(tmp_path))
+        monkeypatch.setattr(
+            "claude_code_publish.tempfile.gettempdir", lambda: str(tmp_path)
+        )
 
         runner = CliRunner()
         result = runner.invoke(
