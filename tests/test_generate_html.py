@@ -24,6 +24,9 @@ from claude_code_publish import (
     inject_gist_preview_js,
     create_gist,
     GIST_PREVIEW_JS,
+    parse_session_file,
+    get_session_summary,
+    find_local_sessions,
 )
 
 
@@ -975,3 +978,251 @@ class TestOpenOption:
         assert len(opened_urls) == 1
         assert "index.html" in opened_urls[0]
         assert opened_urls[0].startswith("file://")
+
+
+class TestParseSessionFile:
+    """Tests for parse_session_file which abstracts both JSON and JSONL formats."""
+
+    def test_parses_json_format(self):
+        """Test that standard JSON format is parsed correctly."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        result = parse_session_file(fixture_path)
+
+        assert "loglines" in result
+        assert len(result["loglines"]) > 0
+        # Check first entry
+        first = result["loglines"][0]
+        assert first["type"] == "user"
+        assert "timestamp" in first
+        assert "message" in first
+
+    def test_parses_jsonl_format(self):
+        """Test that JSONL format is parsed and converted to standard format."""
+        fixture_path = Path(__file__).parent / "sample_session.jsonl"
+        result = parse_session_file(fixture_path)
+
+        assert "loglines" in result
+        assert len(result["loglines"]) > 0
+        # Check structure matches JSON format
+        for entry in result["loglines"]:
+            assert "type" in entry
+            # Skip summary entries which don't have message
+            if entry["type"] in ("user", "assistant"):
+                assert "timestamp" in entry
+                assert "message" in entry
+
+    def test_jsonl_skips_non_message_entries(self):
+        """Test that summary and file-history-snapshot entries are skipped."""
+        fixture_path = Path(__file__).parent / "sample_session.jsonl"
+        result = parse_session_file(fixture_path)
+
+        # None of the loglines should be summary or file-history-snapshot
+        for entry in result["loglines"]:
+            assert entry["type"] in ("user", "assistant")
+
+    def test_jsonl_preserves_message_content(self):
+        """Test that message content is preserved correctly."""
+        fixture_path = Path(__file__).parent / "sample_session.jsonl"
+        result = parse_session_file(fixture_path)
+
+        # Find the first user message
+        user_msg = next(e for e in result["loglines"] if e["type"] == "user")
+        assert user_msg["message"]["content"] == "Create a hello world function"
+
+    def test_jsonl_generates_html(self, output_dir, snapshot_html):
+        """Test that JSONL files can be converted to HTML."""
+        fixture_path = Path(__file__).parent / "sample_session.jsonl"
+        generate_html(fixture_path, output_dir)
+
+        index_html = (output_dir / "index.html").read_text()
+        assert "hello world" in index_html.lower()
+        assert index_html == snapshot_html
+
+
+class TestGetSessionSummary:
+    """Tests for get_session_summary which extracts summary from session files."""
+
+    def test_gets_summary_from_jsonl(self):
+        """Test extracting summary from JSONL file."""
+        fixture_path = Path(__file__).parent / "sample_session.jsonl"
+        summary = get_session_summary(fixture_path)
+        assert summary == "Test session for JSONL parsing"
+
+    def test_gets_first_user_message_if_no_summary(self, tmp_path):
+        """Test falling back to first user message when no summary entry."""
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(
+            '{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"Hello world test"}}\n'
+        )
+        summary = get_session_summary(jsonl_file)
+        assert summary == "Hello world test"
+
+    def test_returns_no_summary_for_empty_file(self, tmp_path):
+        """Test handling empty or invalid files."""
+        jsonl_file = tmp_path / "empty.jsonl"
+        jsonl_file.write_text("")
+        summary = get_session_summary(jsonl_file)
+        assert summary == "(no summary)"
+
+    def test_truncates_long_summaries(self, tmp_path):
+        """Test that long summaries are truncated."""
+        jsonl_file = tmp_path / "long.jsonl"
+        long_text = "x" * 300
+        jsonl_file.write_text(f'{{"type":"summary","summary":"{long_text}"}}\n')
+        summary = get_session_summary(jsonl_file, max_length=100)
+        assert len(summary) <= 100
+        assert summary.endswith("...")
+
+
+class TestFindLocalSessions:
+    """Tests for find_local_sessions which discovers local JSONL files."""
+
+    def test_finds_jsonl_files(self, tmp_path):
+        """Test finding JSONL files in projects directory."""
+        # Create mock .claude/projects structure
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        # Create a session file
+        session_file = projects_dir / "session-123.jsonl"
+        session_file.write_text(
+            '{"type":"summary","summary":"Test session"}\n'
+            '{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"Hello"}}\n'
+        )
+
+        results = find_local_sessions(tmp_path / ".claude" / "projects", limit=10)
+        assert len(results) == 1
+        assert results[0][0] == session_file
+        assert results[0][1] == "Test session"
+
+    def test_excludes_agent_files(self, tmp_path):
+        """Test that agent- prefixed files are excluded."""
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        # Create agent file (should be excluded)
+        agent_file = projects_dir / "agent-123.jsonl"
+        agent_file.write_text('{"type":"user","message":{"content":"test"}}\n')
+
+        # Create regular file (should be included)
+        session_file = projects_dir / "session-123.jsonl"
+        session_file.write_text(
+            '{"type":"summary","summary":"Real session"}\n'
+            '{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"Hello"}}\n'
+        )
+
+        results = find_local_sessions(tmp_path / ".claude" / "projects", limit=10)
+        assert len(results) == 1
+        assert "agent-" not in results[0][0].name
+
+    def test_excludes_warmup_sessions(self, tmp_path):
+        """Test that warmup sessions are excluded."""
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        # Create warmup file (should be excluded)
+        warmup_file = projects_dir / "warmup-session.jsonl"
+        warmup_file.write_text('{"type":"summary","summary":"warmup"}\n')
+
+        # Create regular file
+        session_file = projects_dir / "session-123.jsonl"
+        session_file.write_text(
+            '{"type":"summary","summary":"Real session"}\n'
+            '{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"Hello"}}\n'
+        )
+
+        results = find_local_sessions(tmp_path / ".claude" / "projects", limit=10)
+        assert len(results) == 1
+        assert results[0][1] == "Real session"
+
+    def test_sorts_by_modification_time(self, tmp_path):
+        """Test that results are sorted by modification time, newest first."""
+        import time
+
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        # Create files with different mtimes
+        file1 = projects_dir / "older.jsonl"
+        file1.write_text(
+            '{"type":"summary","summary":"Older"}\n{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"test"}}\n'
+        )
+
+        time.sleep(0.1)  # Ensure different mtime
+
+        file2 = projects_dir / "newer.jsonl"
+        file2.write_text(
+            '{"type":"summary","summary":"Newer"}\n{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"test"}}\n'
+        )
+
+        results = find_local_sessions(tmp_path / ".claude" / "projects", limit=10)
+        assert len(results) == 2
+        assert results[0][1] == "Newer"  # Most recent first
+        assert results[1][1] == "Older"
+
+    def test_respects_limit(self, tmp_path):
+        """Test that limit parameter is respected."""
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        # Create 5 files
+        for i in range(5):
+            f = projects_dir / f"session-{i}.jsonl"
+            f.write_text(
+                f'{{"type":"summary","summary":"Session {i}"}}\n{{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{{"role":"user","content":"test"}}}}\n'
+            )
+
+        results = find_local_sessions(tmp_path / ".claude" / "projects", limit=3)
+        assert len(results) == 3
+
+
+class TestLocalSessionCLI:
+    """Tests for CLI behavior with local sessions."""
+
+    def test_list_local_shows_sessions(self, tmp_path, monkeypatch):
+        """Test that 'list-local' command shows local sessions."""
+        from click.testing import CliRunner
+        from claude_code_publish import cli
+
+        # Create mock .claude/projects structure
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        session_file = projects_dir / "session-123.jsonl"
+        session_file.write_text(
+            '{"type":"summary","summary":"Test local session"}\n'
+            '{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"Hello"}}\n'
+        )
+
+        # Mock Path.home() to return our tmp_path
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list-local"])
+
+        assert result.exit_code == 0
+        assert "Test local session" in result.output
+
+    def test_no_args_lists_local_sessions(self, tmp_path, monkeypatch):
+        """Test that running with no arguments lists local sessions."""
+        from click.testing import CliRunner
+        from claude_code_publish import cli
+
+        # Create mock .claude/projects structure
+        projects_dir = tmp_path / ".claude" / "projects" / "test-project"
+        projects_dir.mkdir(parents=True)
+
+        session_file = projects_dir / "session-123.jsonl"
+        session_file.write_text(
+            '{"type":"summary","summary":"Test default session"}\n'
+            '{"type":"user","timestamp":"2025-01-01T00:00:00Z","message":{"role":"user","content":"Hello"}}\n'
+        )
+
+        # Mock Path.home() to return our tmp_path
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [])
+
+        assert result.exit_code == 0
+        assert "Test default session" in result.output

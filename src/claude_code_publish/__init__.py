@@ -38,6 +38,157 @@ API_BASE_URL = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
 
 
+def get_session_summary(filepath, max_length=200):
+    """Extract a human-readable summary from a session file.
+
+    Supports both JSON and JSONL formats.
+    Returns a summary string or "(no summary)" if none found.
+    """
+    filepath = Path(filepath)
+    try:
+        if filepath.suffix == ".jsonl":
+            return _get_jsonl_summary(filepath, max_length)
+        else:
+            # For JSON files, try to get first user message
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            loglines = data.get("loglines", [])
+            for entry in loglines:
+                if entry.get("type") == "user":
+                    msg = entry.get("message", {})
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        if len(content) > max_length:
+                            return content[: max_length - 3] + "..."
+                        return content
+            return "(no summary)"
+    except Exception:
+        return "(no summary)"
+
+
+def _get_jsonl_summary(filepath, max_length=200):
+    """Extract summary from JSONL file."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    # First priority: summary type entries
+                    if obj.get("type") == "summary" and obj.get("summary"):
+                        summary = obj["summary"]
+                        if len(summary) > max_length:
+                            return summary[: max_length - 3] + "..."
+                        return summary
+                except json.JSONDecodeError:
+                    continue
+
+        # Second pass: find first non-meta user message
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if (
+                        obj.get("type") == "user"
+                        and not obj.get("isMeta")
+                        and obj.get("message", {}).get("content")
+                    ):
+                        content = obj["message"]["content"]
+                        if isinstance(content, str):
+                            content = content.strip()
+                            if content and not content.startswith("<"):
+                                if len(content) > max_length:
+                                    return content[: max_length - 3] + "..."
+                                return content
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        pass
+
+    return "(no summary)"
+
+
+def find_local_sessions(folder, limit=10):
+    """Find recent JSONL session files in the given folder.
+
+    Returns a list of (Path, summary) tuples sorted by modification time.
+    Excludes agent files and warmup/empty sessions.
+    """
+    folder = Path(folder)
+    if not folder.exists():
+        return []
+
+    results = []
+    for f in folder.glob("**/*.jsonl"):
+        if f.name.startswith("agent-"):
+            continue
+        summary = get_session_summary(f)
+        # Skip boring/empty sessions
+        if summary.lower() == "warmup" or summary == "(no summary)":
+            continue
+        results.append((f, summary))
+
+    # Sort by modification time, most recent first
+    results.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+    return results[:limit]
+
+
+def parse_session_file(filepath):
+    """Parse a session file and return normalized data.
+
+    Supports both JSON and JSONL formats.
+    Returns a dict with 'loglines' key containing the normalized entries.
+    """
+    filepath = Path(filepath)
+
+    if filepath.suffix == ".jsonl":
+        return _parse_jsonl_file(filepath)
+    else:
+        # Standard JSON format
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+
+def _parse_jsonl_file(filepath):
+    """Parse JSONL file and convert to standard format."""
+    loglines = []
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                entry_type = obj.get("type")
+
+                # Skip non-message entries
+                if entry_type not in ("user", "assistant"):
+                    continue
+
+                # Convert to standard format
+                entry = {
+                    "type": entry_type,
+                    "timestamp": obj.get("timestamp", ""),
+                    "message": obj.get("message", {}),
+                }
+
+                # Preserve isCompactSummary if present
+                if obj.get("isCompactSummary"):
+                    entry["isCompactSummary"] = True
+
+                loglines.append(entry)
+            except json.JSONDecodeError:
+                continue
+
+    return {"loglines": loglines}
+
+
 class CredentialsError(Exception):
     """Raised when credentials cannot be obtained."""
 
@@ -730,9 +881,8 @@ def generate_html(json_path, output_dir, github_repo=None):
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
 
-    # Load JSON file
-    with open(json_path, "r") as f:
-        data = json.load(f)
+    # Load session file (supports both JSON and JSONL)
+    data = parse_session_file(json_path)
 
     loglines = data.get("loglines", [])
 
@@ -920,11 +1070,62 @@ def generate_html(json_path, output_dir, github_repo=None):
     )
 
 
-@click.group(cls=DefaultGroup, default="session", default_if_no_args=False)
+@click.group(cls=DefaultGroup, default="list-local", default_if_no_args=True)
 @click.version_option(None, "-v", "--version", package_name="claude-code-publish")
 def cli():
     """Convert Claude Code session JSON to mobile-friendly HTML pages."""
     pass
+
+
+@cli.command("list-local")
+@click.option(
+    "--limit",
+    default=10,
+    help="Maximum number of sessions to show (default: 10)",
+)
+def list_local(limit):
+    """List available local Claude Code sessions."""
+    projects_folder = Path.home() / ".claude" / "projects"
+
+    if not projects_folder.exists():
+        click.echo(f"Projects folder not found: {projects_folder}")
+        click.echo("No local Claude Code sessions available.")
+        return
+
+    click.echo("Loading local sessions...")
+    results = find_local_sessions(projects_folder, limit=limit)
+
+    if not results:
+        click.echo("No local sessions found.")
+        return
+
+    # Calculate terminal width for formatting
+    try:
+        term_width = shutil.get_terminal_size().columns
+    except Exception:
+        term_width = 80
+
+    # Fixed width: date(16) + spaces(2) + size(8) + spaces(2) = 28
+    fixed_width = 28
+    summary_width = max(20, term_width - fixed_width - 1)
+
+    click.echo("")
+    click.echo("Recent local sessions:")
+    click.echo("")
+
+    from datetime import datetime
+
+    for filepath, summary in results:
+        stat = filepath.stat()
+        mod_time = datetime.fromtimestamp(stat.st_mtime)
+        size_kb = stat.st_size / 1024
+        date_str = mod_time.strftime("%Y-%m-%d %H:%M")
+
+        # Truncate summary if needed
+        if len(summary) > summary_width:
+            summary = summary[: summary_width - 3] + "..."
+
+        click.echo(f"{date_str}  {size_kb:6.0f} KB  {summary}")
 
 
 @cli.command()
