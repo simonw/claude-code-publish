@@ -852,8 +852,16 @@ def generate_html(json_path, output_dir, github_repo=None):
         link = f"page-{page_num:03d}.html#{msg_id}"
         rendered_content = render_markdown_text(conv["user_text"])
 
+        # Collect all messages including from subsequent continuation conversations
+        # This ensures long_texts from continuations appear with the original prompt
+        all_messages = list(conv["messages"])
+        for j in range(i + 1, len(conversations)):
+            if not conversations[j].get("is_continuation"):
+                break
+            all_messages.extend(conversations[j]["messages"])
+
         # Analyze conversation for stats (excluding commits from inline display now)
-        stats = analyze_conversation(conv["messages"])
+        stats = analyze_conversation(all_messages)
         tool_stats_str = format_tool_stats(stats["tool_counts"])
 
         stats_html = ""
@@ -904,8 +912,9 @@ def generate_html(json_path, output_dir, github_repo=None):
     <script>{JS}</script>
 </body>
 </html>"""
-    (output_dir / "index.html").write_text(index_content)
-    print(f"Generated index.html ({total_convs} prompts, {total_pages} pages)")
+    index_path = output_dir / "index.html"
+    index_path.write_text(index_content)
+    print(f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)")
 
 
 @click.group(cls=DefaultGroup, default="session", default_if_no_args=False)
@@ -1172,8 +1181,16 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         link = f"page-{page_num:03d}.html#{msg_id}"
         rendered_content = render_markdown_text(conv["user_text"])
 
+        # Collect all messages including from subsequent continuation conversations
+        # This ensures long_texts from continuations appear with the original prompt
+        all_messages = list(conv["messages"])
+        for j in range(i + 1, len(conversations)):
+            if not conversations[j].get("is_continuation"):
+                break
+            all_messages.extend(conversations[j]["messages"])
+
         # Analyze conversation for stats (excluding commits from inline display now)
-        stats = analyze_conversation(conv["messages"])
+        stats = analyze_conversation(all_messages)
         tool_stats_str = format_tool_stats(stats["tool_counts"])
 
         stats_html = ""
@@ -1224,8 +1241,9 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     <script>{JS}</script>
 </body>
 </html>"""
-    (output_dir / "index.html").write_text(index_content)
-    click.echo(f"Generated index.html ({total_convs} prompts, {total_pages} pages)")
+    index_path = output_dir / "index.html"
+    index_path.write_text(index_content)
+    click.echo(f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)")
 
 
 @cli.command("import")

@@ -626,6 +626,102 @@ class TestSessionGistOption:
         assert "gistpreview.github.io" in index_content
 
 
+class TestContinuationLongTexts:
+    """Tests for long text extraction from continuation conversations."""
+
+    def test_long_text_in_continuation_appears_in_index(self, output_dir):
+        """Test that long texts from continuation conversations appear in index.
+
+        This is a regression test for a bug where conversations marked as
+        continuations (isCompactSummary=True) were completely skipped when
+        building the index, causing their long_texts to be lost.
+        """
+        # Create a session with:
+        # 1. An initial user prompt
+        # 2. Some messages
+        # 3. A continuation prompt (isCompactSummary=True)
+        # 4. An assistant message with a long text summary (>300 chars)
+        session_data = {
+            "loglines": [
+                # Initial user prompt
+                {
+                    "type": "user",
+                    "timestamp": "2025-01-01T10:00:00.000Z",
+                    "message": {"content": "Build a Redis JavaScript module", "role": "user"},
+                },
+                # Some assistant work
+                {
+                    "type": "assistant",
+                    "timestamp": "2025-01-01T10:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "I'll start working on this."}],
+                    },
+                },
+                # Continuation prompt (context was summarized)
+                {
+                    "type": "user",
+                    "timestamp": "2025-01-01T11:00:00.000Z",
+                    "isCompactSummary": True,
+                    "message": {
+                        "content": "This session is being continued from a previous conversation...",
+                        "role": "user",
+                    },
+                },
+                # More assistant work after continuation
+                {
+                    "type": "assistant",
+                    "timestamp": "2025-01-01T11:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Continuing the work..."}],
+                    },
+                },
+                # Final summary - this is a LONG text (>300 chars) that should appear in index
+                {
+                    "type": "assistant",
+                    "timestamp": "2025-01-01T12:00:00.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "All tasks completed successfully. Here's a summary of what was built:\n\n"
+                                    "## Redis JavaScript Module\n\n"
+                                    "A loadable Redis module providing JavaScript scripting via the mquickjs engine.\n\n"
+                                    "### Commands Implemented\n"
+                                    "- JS.EVAL - Execute JavaScript with KEYS/ARGV arrays\n"
+                                    "- JS.LOAD / JS.CALL - Cache and call scripts by SHA1\n"
+                                    "- JS.EXISTS / JS.FLUSH - Manage script cache\n\n"
+                                    "All 41 tests pass. Changes pushed to branch."
+                                ),
+                            }
+                        ],
+                    },
+                },
+            ]
+        }
+
+        # Write the session to a temp file
+        session_file = output_dir / "test_session.json"
+        session_file.write_text(json.dumps(session_data))
+
+        # Generate HTML
+        generate_html(session_file, output_dir)
+
+        # Read the index.html
+        index_html = (output_dir / "index.html").read_text()
+
+        # The long text summary should appear in the index
+        # This is the bug: currently it doesn't because the continuation
+        # conversation is skipped entirely
+        assert "All tasks completed successfully" in index_html, (
+            "Long text from continuation conversation should appear in index"
+        )
+        assert "Redis JavaScript Module" in index_html
+
+
 class TestSessionJsonOption:
     """Tests for the session command --json option."""
 
