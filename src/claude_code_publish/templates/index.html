@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Claude Code transcript - Index{% endblock %}
+
+{% block content %}
+        <h1>Claude Code transcript</h1>
+        {{ pagination_html|safe }}
+        <p style="color: var(--text-muted); margin-bottom: 24px;">{{ prompt_num }} prompts · {{ total_messages }} messages · {{ total_tool_calls }} tool calls · {{ total_commits }} commits · {{ total_pages }} pages</p>
+        {{ index_items_html|safe }}
+        {{ pagination_html|safe }}
+{%- endblock %}

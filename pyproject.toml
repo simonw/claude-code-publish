@@ -12,6 +12,7 @@ dependencies = [
     "click",
     "click-default-group",
     "httpx",
+    "jinja2",
     "markdown",
     "questionary",
 ]

@@ -14,8 +14,25 @@ from pathlib import Path
 import click
 from click_default_group import DefaultGroup
 import httpx
+from jinja2 import Environment, PackageLoader
 import markdown
 import questionary
+
+# Set up Jinja2 environment
+_jinja_env = Environment(
+    loader=PackageLoader("claude_code_publish", "templates"),
+    autoescape=True,
+)
+
+# Load macros template and expose macros
+_macros_template = _jinja_env.get_template("macros.html")
+_macros = _macros_template.module
+
+
+def get_template(name):
+    """Get a Jinja2 template by name."""
+    return _jinja_env.get_template(name)
+
 
 # Regex to match git commit output: [branch hash] message
 COMMIT_PATTERN = re.compile(r"\[[\w\-/]+ ([a-f0-9]{7,})\] (.+?)(?:\n|$)")
@@ -338,34 +355,14 @@ def render_todo_write(tool_input, tool_id):
     todos = tool_input.get("todos", [])
     if not todos:
         return ""
-    items_html = []
-    for todo in todos:
-        status = todo.get("status", "pending")
-        content = todo.get("content", "")
-        if status == "completed":
-            icon, status_class = "✓", "todo-completed"
-        elif status == "in_progress":
-            icon, status_class = "→", "todo-in-progress"
-        else:
-            icon, status_class = "○", "todo-pending"
-        items_html.append(
-            f'<li class="todo-item {status_class}"><span class="todo-icon">{icon}</span><span class="todo-content">{html.escape(content)}</span></li>'
-        )
-    return f'<div class="todo-list" data-tool-id="{html.escape(tool_id)}"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items">{"".join(items_html)}</ul></div>'
+    return _macros.todo_list(todos, tool_id)
 
 
 def render_write_tool(tool_input, tool_id):
     """Render Write tool calls with file path header and content preview."""
     file_path = tool_input.get("file_path", "Unknown file")
     content = tool_input.get("content", "")
-    # Extract filename from path
-    filename = file_path.split("/")[-1] if "/" in file_path else file_path
-    content_preview = html.escape(content)
-    return f"""<div class="file-tool write-tool" data-tool-id="{html.escape(tool_id)}">
-<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{html.escape(filename)}</span></div>
-<div class="file-tool-fullpath">{html.escape(file_path)}</div>
-<div class="truncatable"><div class="truncatable-content"><pre class="file-content">{content_preview}</pre></div><button class="expand-btn">Show more</button></div>
-</div>"""
+    return _macros.write_tool(file_path, content, tool_id)
 
 
 def render_edit_tool(tool_input, tool_id):
@@ -374,34 +371,14 @@ def render_edit_tool(tool_input, tool_id):
     old_string = tool_input.get("old_string", "")
     new_string = tool_input.get("new_string", "")
     replace_all = tool_input.get("replace_all", False)
-    # Extract filename from path
-    filename = file_path.split("/")[-1] if "/" in file_path else file_path
-    replace_note = (
-        ' <span class="edit-replace-all">(replace all)</span>' if replace_all else ""
-    )
-    return f"""<div class="file-tool edit-tool" data-tool-id="{html.escape(tool_id)}">
-<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{html.escape(filename)}</span>{replace_note}</div>
-<div class="file-tool-fullpath">{html.escape(file_path)}</div>
-<div class="truncatable"><div class="truncatable-content">
-<div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content">{html.escape(old_string)}</pre></div>
-<div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content">{html.escape(new_string)}</pre></div>
-</div><button class="expand-btn">Show more</button></div>
-</div>"""
+    return _macros.edit_tool(file_path, old_string, new_string, replace_all, tool_id)
 
 
 def render_bash_tool(tool_input, tool_id):
     """Render Bash tool calls with command as plain text."""
     command = tool_input.get("command", "")
     description = tool_input.get("description", "")
-    desc_html = (
-        f'<div class="tool-description">{html.escape(description)}</div>'
-        if description
-        else ""
-    )
-    return f"""<div class="tool-use bash-tool" data-tool-id="{html.escape(tool_id)}">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-{desc_html}<div class="truncatable"><div class="truncatable-content"><pre class="bash-command">{html.escape(command)}</pre></div><button class="expand-btn">Show more</button></div>
-</div>"""
+    return _macros.bash_tool(command, description, tool_id)
 
 
 def render_content_block(block):
@@ -409,9 +386,11 @@ def render_content_block(block):
         return f"<p>{html.escape(str(block))}</p>"
     block_type = block.get("type", "")
     if block_type == "thinking":
-        return f'<div class="thinking"><div class="thinking-label">Thinking</div>{render_markdown_text(block.get("thinking", ""))}</div>'
+        content_html = render_markdown_text(block.get("thinking", ""))
+        return _macros.thinking(content_html)
     elif block_type == "text":
-        return f'<div class="assistant-text">{render_markdown_text(block.get("text", ""))}</div>'
+        content_html = render_markdown_text(block.get("text", ""))
+        return _macros.assistant_text(content_html)
     elif block_type == "tool_use":
         tool_name = block.get("name", "Unknown tool")
         tool_input = block.get("input", {})
@@ -425,17 +404,12 @@ def render_content_block(block):
         if tool_name == "Bash":
             return render_bash_tool(tool_input, tool_id)
         description = tool_input.get("description", "")
-        desc_html = (
-            f'<div class="tool-description">{html.escape(description)}</div>'
-            if description
-            else ""
-        )
         display_input = {k: v for k, v in tool_input.items() if k != "description"}
-        return f'<div class="tool-use" data-tool-id="{html.escape(tool_id)}"><div class="tool-header"><span class="tool-icon">⚙</span> {html.escape(tool_name)}</div>{desc_html}<div class="truncatable"><div class="truncatable-content">{format_json(display_input)}</div><button class="expand-btn">Show more</button></div></div>'
+        input_json = json.dumps(display_input, indent=2, ensure_ascii=False)
+        return _macros.tool_use(tool_name, description, input_json, tool_id)
     elif block_type == "tool_result":
         content = block.get("content", "")
         is_error = block.get("is_error", False)
-        error_class = " tool-error" if is_error else ""
 
         # Check for git commits and render with styled cards
         if isinstance(content, str):
@@ -452,17 +426,9 @@ def render_content_block(block):
 
                     commit_hash = match.group(1)
                     commit_msg = match.group(2)
-                    if _github_repo:
-                        github_link = (
-                            f"https://github.com/{_github_repo}/commit/{commit_hash}"
-                        )
-                        parts.append(
-                            f'<div class="commit-card"><a href="{github_link}"><span class="commit-card-hash">{commit_hash[:7]}</span> {html.escape(commit_msg)}</a></div>'
-                        )
-                    else:
-                        parts.append(
-                            f'<div class="commit-card"><span class="commit-card-hash">{commit_hash[:7]}</span> {html.escape(commit_msg)}</div>'
-                        )
+                    parts.append(
+                        _macros.commit_card(commit_hash, commit_msg, _github_repo)
+                    )
                     last_end = match.end()
 
                 # Add any remaining content after last commit
@@ -477,7 +443,7 @@ def render_content_block(block):
             content_html = format_json(content)
         else:
             content_html = format_json(content)
-        return f'<div class="tool-result{error_class}"><div class="truncatable"><div class="truncatable-content">{content_html}</div><button class="expand-btn">Show more</button></div></div>'
+        return _macros.tool_result(content_html, is_error)
     else:
         return format_json(block)
 
@@ -486,8 +452,8 @@ def render_user_message_content(message_data):
     content = message_data.get("content", "")
     if isinstance(content, str):
         if is_json_like(content):
-            return f'<div class="user-content">{format_json(content)}</div>'
-        return f'<div class="user-content">{render_markdown_text(content)}</div>'
+            return _macros.user_content(format_json(content))
+        return _macros.user_content(render_markdown_text(content))
     elif isinstance(content, list):
         return "".join(render_content_block(block) for block in content)
     return f"<p>{html.escape(str(content))}</p>"
@@ -610,7 +576,7 @@ def render_message(log_type, message_json, timestamp):
     if not content_html.strip():
         return ""
     msg_id = make_msg_id(timestamp)
-    return f'<div class="message {role_class}" id="{html.escape(msg_id)}"><div class="message-header"><span class="role-label">{role_label}</span><a href="#{html.escape(msg_id)}" class="timestamp-link"><time datetime="{html.escape(timestamp)}" data-timestamp="{html.escape(timestamp)}">{html.escape(timestamp)}</time></a></div><div class="message-content">{content_html}</div></div>'
+    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
 
 
 CSS = """
@@ -837,44 +803,12 @@ def create_gist(output_dir, public=False):
 
 
 def generate_pagination_html(current_page, total_pages):
-    if total_pages <= 1:
-        return '<div class="pagination"><a href="index.html" class="index-link">Index</a></div>'
-    parts = [
-        '<div class="pagination">',
-        '<a href="index.html" class="index-link">Index</a>',
-    ]
-    if current_page > 1:
-        parts.append(f'<a href="page-{current_page-1:03d}.html">← Prev</a>')
-    else:
-        parts.append('<span class="disabled">← Prev</span>')
-    for page in range(1, total_pages + 1):
-        if page == current_page:
-            parts.append(f'<span class="current">{page}</span>')
-        else:
-            parts.append(f'<a href="page-{page:03d}.html">{page}</a>')
-    if current_page < total_pages:
-        parts.append(f'<a href="page-{current_page+1:03d}.html">Next →</a>')
-    else:
-        parts.append('<span class="disabled">Next →</span>')
-    parts.append("</div>")
-    return "\n".join(parts)
+    return _macros.pagination(current_page, total_pages)
 
 
 def generate_index_pagination_html(total_pages):
     """Generate pagination for index page where Index is current (first page)."""
-    if total_pages < 1:
-        return '<div class="pagination"><span class="current">Index</span></div>'
-    parts = ['<div class="pagination">', '<span class="current">Index</span>']
-    # No prev link since Index is first
-    parts.append('<span class="disabled">← Prev</span>')
-    for page in range(1, total_pages + 1):
-        parts.append(f'<a href="page-{page:03d}.html">{page}</a>')
-    if total_pages >= 1:
-        parts.append('<a href="page-001.html">Next →</a>')
-    else:
-        parts.append('<span class="disabled">Next →</span>')
-    parts.append("</div>")
-    return "\n".join(parts)
+    return _macros.index_pagination(total_pages)
 
 
 def generate_html(json_path, output_dir, github_repo=None):
@@ -951,24 +885,15 @@ def generate_html(json_path, output_dir, github_repo=None):
                     messages_html.append(msg_html)
                 is_first = False
         pagination_html = generate_pagination_html(page_num, total_pages)
-        page_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Code transcript - page {page_num}</title>
-    <style>{CSS}</style>
-</head>
-<body>
-    <div class="container">
-        <h1><a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a> - page {page_num}/{total_pages}</h1>
-        {pagination_html}
-        {''.join(messages_html)}
-        {pagination_html}
-    </div>
-    <script>{JS}</script>
-</body>
-</html>"""
+        page_template = get_template("page.html")
+        page_content = page_template.render(
+            css=CSS,
+            js=JS,
+            page_num=page_num,
+            total_pages=total_pages,
+            pagination_html=pagination_html,
+            messages_html="".join(messages_html),
+        )
         (output_dir / f"page-{page_num:03d}.html").write_text(page_content)
         print(f"Generated page-{page_num:03d}.html")
 
@@ -1015,28 +940,23 @@ def generate_html(json_path, output_dir, github_repo=None):
         stats = analyze_conversation(all_messages)
         tool_stats_str = format_tool_stats(stats["tool_counts"])
 
-        stats_html = ""
-        if tool_stats_str or stats["long_texts"]:
-            long_texts_html = ""
-            for lt in stats["long_texts"]:
-                rendered_lt = render_markdown_text(lt)
-                long_texts_html += f'<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content">{rendered_lt}</div></div><button class="expand-btn">Show more</button></div></div>'
+        long_texts_html = ""
+        for lt in stats["long_texts"]:
+            rendered_lt = render_markdown_text(lt)
+            long_texts_html += _macros.index_long_text(rendered_lt)
 
-            stats_line = f"<span>{tool_stats_str}</span>" if tool_stats_str else ""
-            stats_html = (
-                f'<div class="index-item-stats">{stats_line}{long_texts_html}</div>'
-            )
+        stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
 
-        item_html = f'<div class="index-item"><a href="{html.escape(link)}"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{html.escape(conv["timestamp"])}" data-timestamp="{html.escape(conv["timestamp"])}">{html.escape(conv["timestamp"])}</time></div><div class="index-item-content">{rendered_content}</div></a>{stats_html}</div>'
+        item_html = _macros.index_item(
+            prompt_num, link, conv["timestamp"], rendered_content, stats_html
+        )
         timeline_items.append((conv["timestamp"], "prompt", item_html))
 
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
-        if _github_repo:
-            github_link = f"https://github.com/{_github_repo}/commit/{commit_hash}"
-            item_html = f"""<div class="index-commit"><a href="{github_link}"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></a></div>"""
-        else:
-            item_html = f"""<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></div>"""
+        item_html = _macros.index_commit(
+            commit_hash, commit_msg, commit_ts, _github_repo
+        )
         timeline_items.append((commit_ts, "commit", item_html))
 
     # Sort by timestamp
@@ -1044,25 +964,18 @@ def generate_html(json_path, output_dir, github_repo=None):
     index_items = [item[2] for item in timeline_items]
 
     index_pagination = generate_index_pagination_html(total_pages)
-    index_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Code transcript - Index</title>
-    <style>{CSS}</style>
-</head>
-<body>
-    <div class="container">
-        <h1>Claude Code transcript</h1>
-        {index_pagination}
-        <p style="color: var(--text-muted); margin-bottom: 24px;">{prompt_num} prompts · {total_messages} messages · {total_tool_calls} tool calls · {total_commits} commits · {total_pages} pages</p>
-        {''.join(index_items)}
-        {index_pagination}
-    </div>
-    <script>{JS}</script>
-</body>
-</html>"""
+    index_template = get_template("index.html")
+    index_content = index_template.render(
+        css=CSS,
+        js=JS,
+        pagination_html=index_pagination,
+        prompt_num=prompt_num,
+        total_messages=total_messages,
+        total_tool_calls=total_tool_calls,
+        total_commits=total_commits,
+        total_pages=total_pages,
+        index_items_html="".join(index_items),
+    )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content)
     print(
@@ -1386,24 +1299,15 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
                     messages_html.append(msg_html)
                 is_first = False
         pagination_html = generate_pagination_html(page_num, total_pages)
-        page_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Code transcript - page {page_num}</title>
-    <style>{CSS}</style>
-</head>
-<body>
-    <div class="container">
-        <h1><a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a> - page {page_num}/{total_pages}</h1>
-        {pagination_html}
-        {''.join(messages_html)}
-        {pagination_html}
-    </div>
-    <script>{JS}</script>
-</body>
-</html>"""
+        page_template = get_template("page.html")
+        page_content = page_template.render(
+            css=CSS,
+            js=JS,
+            page_num=page_num,
+            total_pages=total_pages,
+            pagination_html=pagination_html,
+            messages_html="".join(messages_html),
+        )
         (output_dir / f"page-{page_num:03d}.html").write_text(page_content)
         click.echo(f"Generated page-{page_num:03d}.html")
 
@@ -1450,28 +1354,23 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         stats = analyze_conversation(all_messages)
         tool_stats_str = format_tool_stats(stats["tool_counts"])
 
-        stats_html = ""
-        if tool_stats_str or stats["long_texts"]:
-            long_texts_html = ""
-            for lt in stats["long_texts"]:
-                rendered_lt = render_markdown_text(lt)
-                long_texts_html += f'<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content">{rendered_lt}</div></div><button class="expand-btn">Show more</button></div></div>'
+        long_texts_html = ""
+        for lt in stats["long_texts"]:
+            rendered_lt = render_markdown_text(lt)
+            long_texts_html += _macros.index_long_text(rendered_lt)
 
-            stats_line = f"<span>{tool_stats_str}</span>" if tool_stats_str else ""
-            stats_html = (
-                f'<div class="index-item-stats">{stats_line}{long_texts_html}</div>'
-            )
+        stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
 
-        item_html = f'<div class="index-item"><a href="{html.escape(link)}"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{html.escape(conv["timestamp"])}" data-timestamp="{html.escape(conv["timestamp"])}">{html.escape(conv["timestamp"])}</time></div><div class="index-item-content">{rendered_content}</div></a>{stats_html}</div>'
+        item_html = _macros.index_item(
+            prompt_num, link, conv["timestamp"], rendered_content, stats_html
+        )
         timeline_items.append((conv["timestamp"], "prompt", item_html))
 
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
-        if _github_repo:
-            github_link = f"https://github.com/{_github_repo}/commit/{commit_hash}"
-            item_html = f"""<div class="index-commit"><a href="{github_link}"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></a></div>"""
-        else:
-            item_html = f"""<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></div>"""
+        item_html = _macros.index_commit(
+            commit_hash, commit_msg, commit_ts, _github_repo
+        )
         timeline_items.append((commit_ts, "commit", item_html))
 
     # Sort by timestamp
@@ -1479,25 +1378,18 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     index_items = [item[2] for item in timeline_items]
 
     index_pagination = generate_index_pagination_html(total_pages)
-    index_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Code transcript - Index</title>
-    <style>{CSS}</style>
-</head>
-<body>
-    <div class="container">
-        <h1>Claude Code transcript</h1>
-        {index_pagination}
-        <p style="color: var(--text-muted); margin-bottom: 24px;">{prompt_num} prompts · {total_messages} messages · {total_tool_calls} tool calls · {total_commits} commits · {total_pages} pages</p>
-        {''.join(index_items)}
-        {index_pagination}
-    </div>
-    <script>{JS}</script>
-</body>
-</html>"""
+    index_template = get_template("index.html")
+    index_content = index_template.render(
+        css=CSS,
+        js=JS,
+        pagination_html=index_pagination,
+        prompt_num=prompt_num,
+        total_messages=total_messages,
+        total_tool_calls=total_tool_calls,
+        total_commits=total_commits,
+        total_pages=total_pages,
+        index_items_html="".join(index_items),
+    )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content)
     click.echo(

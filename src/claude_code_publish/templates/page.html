@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block title %}Claude Code transcript - page {{ page_num }}{% endblock %}
+
+{% block content %}
+        <h1><a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a> - page {{ page_num }}/{{ total_pages }}</h1>
+        {{ pagination_html|safe }}
+        {{ messages_html|safe }}
+        {{ pagination_html|safe }}
+{%- endblock %}

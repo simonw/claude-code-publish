@@ -1,0 +1,182 @@
+{# Pagination for regular pages #}
+{% macro pagination(current_page, total_pages) %}
+{% if total_pages <= 1 %}
+<div class="pagination"><a href="index.html" class="index-link">Index</a></div>
+{%- else %}
+<div class="pagination">
+<a href="index.html" class="index-link">Index</a>
+{% if current_page > 1 -%}
+<a href="page-{{ '%03d'|format(current_page - 1) }}.html">&larr; Prev</a>
+{%- else -%}
+<span class="disabled">&larr; Prev</span>
+{%- endif %}
+{% for page in range(1, total_pages + 1) -%}
+{% if page == current_page -%}
+<span class="current">{{ page }}</span>
+{%- else -%}
+<a href="page-{{ '%03d'|format(page) }}.html">{{ page }}</a>
+{%- endif %}
+{% endfor -%}
+{% if current_page < total_pages -%}
+<a href="page-{{ '%03d'|format(current_page + 1) }}.html">Next &rarr;</a>
+{%- else -%}
+<span class="disabled">Next &rarr;</span>
+{%- endif %}
+</div>
+{%- endif %}
+{% endmacro %}
+
+{# Pagination for index page #}
+{% macro index_pagination(total_pages) %}
+{% if total_pages < 1 %}
+<div class="pagination"><span class="current">Index</span></div>
+{%- else %}
+<div class="pagination">
+<span class="current">Index</span>
+<span class="disabled">&larr; Prev</span>
+{% for page in range(1, total_pages + 1) -%}
+<a href="page-{{ '%03d'|format(page) }}.html">{{ page }}</a>
+{% endfor -%}
+{% if total_pages >= 1 -%}
+<a href="page-001.html">Next &rarr;</a>
+{%- else -%}
+<span class="disabled">Next &rarr;</span>
+{%- endif %}
+</div>
+{%- endif %}
+{% endmacro %}
+
+{# Todo list #}
+{% macro todo_list(todos, tool_id) %}
+<div class="todo-list" data-tool-id="{{ tool_id }}"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items">
+{%- for todo in todos -%}
+{%- set status = todo.status|default('pending') -%}
+{%- set content = todo.content|default('') -%}
+{%- if status == 'completed' -%}
+{%- set icon = '✓' -%}
+{%- set status_class = 'todo-completed' -%}
+{%- elif status == 'in_progress' -%}
+{%- set icon = '→' -%}
+{%- set status_class = 'todo-in-progress' -%}
+{%- else -%}
+{%- set icon = '○' -%}
+{%- set status_class = 'todo-pending' -%}
+{%- endif -%}
+<li class="todo-item {{ status_class }}"><span class="todo-icon">{{ icon }}</span><span class="todo-content">{{ content }}</span></li>
+{%- endfor -%}
+</ul></div>
+{%- endmacro %}
+
+{# Write tool #}
+{% macro write_tool(file_path, content, tool_id) %}
+{%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
+<div class="file-tool write-tool" data-tool-id="{{ tool_id }}">
+<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{{ filename }}</span></div>
+<div class="file-tool-fullpath">{{ file_path }}</div>
+<div class="truncatable"><div class="truncatable-content"><pre class="file-content">{{ content }}</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+{%- endmacro %}
+
+{# Edit tool #}
+{% macro edit_tool(file_path, old_string, new_string, replace_all, tool_id) %}
+{%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
+<div class="file-tool edit-tool" data-tool-id="{{ tool_id }}">
+<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{{ filename }}</span>{% if replace_all %} <span class="edit-replace-all">(replace all)</span>{% endif %}</div>
+<div class="file-tool-fullpath">{{ file_path }}</div>
+<div class="truncatable"><div class="truncatable-content">
+<div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content">{{ old_string }}</pre></div>
+<div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content">{{ new_string }}</pre></div>
+</div><button class="expand-btn">Show more</button></div>
+</div>
+{%- endmacro %}
+
+{# Bash tool #}
+{% macro bash_tool(command, description, tool_id) %}
+<div class="tool-use bash-tool" data-tool-id="{{ tool_id }}">
+<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
+{%- if description %}
+<div class="tool-description">{{ description }}</div>
+{%- endif -%}
+<div class="truncatable"><div class="truncatable-content"><pre class="bash-command">{{ command }}</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+{%- endmacro %}
+
+{# Generic tool use - input_json is pre-formatted so needs |safe #}
+{% macro tool_use(tool_name, description, input_json, tool_id) %}
+<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-icon">⚙</span> {{ tool_name }}</div>
+{%- if description -%}
+<div class="tool-description">{{ description }}</div>
+{%- endif -%}
+<div class="truncatable"><div class="truncatable-content"><pre class="json">{{ input_json }}</pre></div><button class="expand-btn">Show more</button></div></div>
+{%- endmacro %}
+
+{# Tool result - content_html is pre-rendered so needs |safe #}
+{% macro tool_result(content_html, is_error) %}
+{%- set error_class = ' tool-error' if is_error else '' -%}
+<div class="tool-result{{ error_class }}"><div class="truncatable"><div class="truncatable-content">{{ content_html|safe }}</div><button class="expand-btn">Show more</button></div></div>
+{%- endmacro %}
+
+{# Thinking block - content_html is pre-rendered markdown so needs |safe #}
+{% macro thinking(content_html) %}
+<div class="thinking"><div class="thinking-label">Thinking</div>{{ content_html|safe }}</div>
+{%- endmacro %}
+
+{# Assistant text - content_html is pre-rendered markdown so needs |safe #}
+{% macro assistant_text(content_html) %}
+<div class="assistant-text">{{ content_html|safe }}</div>
+{%- endmacro %}
+
+{# User content - content_html is pre-rendered so needs |safe #}
+{% macro user_content(content_html) %}
+<div class="user-content">{{ content_html|safe }}</div>
+{%- endmacro %}
+
+{# Commit card (in tool results) #}
+{% macro commit_card(commit_hash, commit_msg, github_repo) %}
+{%- if github_repo -%}
+{%- set github_link = 'https://github.com/' ~ github_repo ~ '/commit/' ~ commit_hash -%}
+<div class="commit-card"><a href="{{ github_link }}"><span class="commit-card-hash">{{ commit_hash[:7] }}</span> {{ commit_msg }}</a></div>
+{%- else -%}
+<div class="commit-card"><span class="commit-card-hash">{{ commit_hash[:7] }}</span> {{ commit_msg }}</div>
+{%- endif %}
+{%- endmacro %}
+
+{# Message wrapper - content_html is pre-rendered so needs |safe #}
+{% macro message(role_class, role_label, msg_id, timestamp, content_html) %}
+<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></div><div class="message-content">{{ content_html|safe }}</div></div>
+{%- endmacro %}
+
+{# Continuation wrapper - content_html is pre-rendered so needs |safe #}
+{% macro continuation(content_html) %}
+<details class="continuation"><summary>Session continuation summary</summary>{{ content_html|safe }}</details>
+{%- endmacro %}
+
+{# Index item (prompt) - rendered_content and stats_html are pre-rendered so need |safe #}
+{% macro index_item(prompt_num, link, timestamp, rendered_content, stats_html) %}
+<div class="index-item"><a href="{{ link }}"><div class="index-item-header"><span class="index-item-number">#{{ prompt_num }}</span><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></div><div class="index-item-content">{{ rendered_content|safe }}</div></a>{{ stats_html|safe }}</div>
+{%- endmacro %}
+
+{# Index commit #}
+{% macro index_commit(commit_hash, commit_msg, timestamp, github_repo) %}
+{%- if github_repo -%}
+{%- set github_link = 'https://github.com/' ~ github_repo ~ '/commit/' ~ commit_hash -%}
+<div class="index-commit"><a href="{{ github_link }}"><div class="index-commit-header"><span class="index-commit-hash">{{ commit_hash[:7] }}</span><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></div><div class="index-commit-msg">{{ commit_msg }}</div></a></div>
+{%- else -%}
+<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{{ commit_hash[:7] }}</span><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></div><div class="index-commit-msg">{{ commit_msg }}</div></div>
+{%- endif %}
+{%- endmacro %}
+
+{# Index stats - tool_stats_str and long_texts_html are pre-rendered so need |safe #}
+{% macro index_stats(tool_stats_str, long_texts_html) %}
+{%- if tool_stats_str or long_texts_html -%}
+<div class="index-item-stats">
+{%- if tool_stats_str -%}<span>{{ tool_stats_str }}</span>{%- endif -%}
+{{ long_texts_html|safe }}
+</div>
+{%- endif %}
+{%- endmacro %}
+
+{# Long text in index - rendered_content is pre-rendered markdown so needs |safe #}
+{% macro index_long_text(rendered_content) %}
+<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content">{{ rendered_content|safe }}</div></div><button class="expand-btn">Show more</button></div></div>
+{%- endmacro %}
