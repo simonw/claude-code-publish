@@ -647,7 +647,10 @@ class TestContinuationLongTexts:
                 {
                     "type": "user",
                     "timestamp": "2025-01-01T10:00:00.000Z",
-                    "message": {"content": "Build a Redis JavaScript module", "role": "user"},
+                    "message": {
+                        "content": "Build a Redis JavaScript module",
+                        "role": "user",
+                    },
                 },
                 # Some assistant work
                 {
@@ -655,7 +658,9 @@ class TestContinuationLongTexts:
                     "timestamp": "2025-01-01T10:00:05.000Z",
                     "message": {
                         "role": "assistant",
-                        "content": [{"type": "text", "text": "I'll start working on this."}],
+                        "content": [
+                            {"type": "text", "text": "I'll start working on this."}
+                        ],
                     },
                 },
                 # Continuation prompt (context was summarized)
@@ -716,9 +721,9 @@ class TestContinuationLongTexts:
         # The long text summary should appear in the index
         # This is the bug: currently it doesn't because the continuation
         # conversation is skipped entirely
-        assert "All tasks completed successfully" in index_html, (
-            "Long text from continuation conversation should appear in index"
-        )
+        assert (
+            "All tasks completed successfully" in index_html
+        ), "Long text from continuation conversation should appear in index"
         assert "Redis JavaScript Module" in index_html
 
 

@@ -914,7 +914,9 @@ def generate_html(json_path, output_dir, github_repo=None):
 </html>"""
     index_path = output_dir / "index.html"
     index_path.write_text(index_content)
-    print(f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)")
+    print(
+        f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
+    )
 
 
 @click.group(cls=DefaultGroup, default="session", default_if_no_args=False)
@@ -1243,7 +1245,9 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
 </html>"""
     index_path = output_dir / "index.html"
     index_path.write_text(index_content)
-    click.echo(f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)")
+    click.echo(
+        f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
+    )
 
 
 @cli.command("import")
