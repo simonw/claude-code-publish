@@ -1,21 +1,26 @@
 """Convert Claude Code session JSON to a clean mobile-friendly HTML page with pagination."""
 
-import argparse
 import json
 import html
 import re
 from pathlib import Path
 
+import click
+from click_default_group import DefaultGroup
 import markdown
 
 # Regex to match git commit output: [branch hash] message
-COMMIT_PATTERN = re.compile(r'\[[\w\-/]+ ([a-f0-9]{7,})\] (.+?)(?:\n|$)')
+COMMIT_PATTERN = re.compile(r"\[[\w\-/]+ ([a-f0-9]{7,})\] (.+?)(?:\n|$)")
 
 # Regex to detect GitHub repo from git push output (e.g., github.com/owner/repo/pull/new/branch)
-GITHUB_REPO_PATTERN = re.compile(r'github\.com/([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)/pull/new/')
+GITHUB_REPO_PATTERN = re.compile(
+    r"github\.com/([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)/pull/new/"
+)
 
 PROMPTS_PER_PAGE = 5
-LONG_TEXT_THRESHOLD = 1000  # Characters - text blocks longer than this are shown in index
+LONG_TEXT_THRESHOLD = (
+    1000  # Characters - text blocks longer than this are shown in index
+)
 
 # Module-level variable for GitHub repo (set by generate_html)
 _github_repo = None
@@ -54,7 +59,7 @@ def format_json(obj):
         formatted = json.dumps(obj, indent=2, ensure_ascii=False)
         return f'<pre class="json">{html.escape(formatted)}</pre>'
     except (json.JSONDecodeError, TypeError):
-        return f'<pre>{html.escape(str(obj))}</pre>'
+        return f"<pre>{html.escape(str(obj))}</pre>"
 
 
 def render_markdown_text(text):
@@ -67,7 +72,9 @@ def is_json_like(text):
     if not text or not isinstance(text, str):
         return False
     text = text.strip()
-    return (text.startswith("{") and text.endswith("}")) or (text.startswith("[") and text.endswith("]"))
+    return (text.startswith("{") and text.endswith("}")) or (
+        text.startswith("[") and text.endswith("]")
+    )
 
 
 def render_todo_write(tool_input, tool_id):
@@ -84,7 +91,9 @@ def render_todo_write(tool_input, tool_id):
             icon, status_class = "→", "todo-in-progress"
         else:
             icon, status_class = "○", "todo-pending"
-        items_html.append(f'<li class="todo-item {status_class}"><span class="todo-icon">{icon}</span><span class="todo-content">{html.escape(content)}</span></li>')
+        items_html.append(
+            f'<li class="todo-item {status_class}"><span class="todo-icon">{icon}</span><span class="todo-content">{html.escape(content)}</span></li>'
+        )
     return f'<div class="todo-list" data-tool-id="{html.escape(tool_id)}"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items">{"".join(items_html)}</ul></div>'
 
 
@@ -95,11 +104,11 @@ def render_write_tool(tool_input, tool_id):
     # Extract filename from path
     filename = file_path.split("/")[-1] if "/" in file_path else file_path
     content_preview = html.escape(content)
-    return f'''<div class="file-tool write-tool" data-tool-id="{html.escape(tool_id)}">
+    return f"""<div class="file-tool write-tool" data-tool-id="{html.escape(tool_id)}">
 <div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{html.escape(filename)}</span></div>
 <div class="file-tool-fullpath">{html.escape(file_path)}</div>
 <div class="truncatable"><div class="truncatable-content"><pre class="file-content">{content_preview}</pre></div><button class="expand-btn">Show more</button></div>
-</div>'''
+</div>"""
 
 
 def render_edit_tool(tool_input, tool_id):
@@ -110,26 +119,32 @@ def render_edit_tool(tool_input, tool_id):
     replace_all = tool_input.get("replace_all", False)
     # Extract filename from path
     filename = file_path.split("/")[-1] if "/" in file_path else file_path
-    replace_note = ' <span class="edit-replace-all">(replace all)</span>' if replace_all else ""
-    return f'''<div class="file-tool edit-tool" data-tool-id="{html.escape(tool_id)}">
+    replace_note = (
+        ' <span class="edit-replace-all">(replace all)</span>' if replace_all else ""
+    )
+    return f"""<div class="file-tool edit-tool" data-tool-id="{html.escape(tool_id)}">
 <div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{html.escape(filename)}</span>{replace_note}</div>
 <div class="file-tool-fullpath">{html.escape(file_path)}</div>
 <div class="truncatable"><div class="truncatable-content">
 <div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content">{html.escape(old_string)}</pre></div>
 <div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content">{html.escape(new_string)}</pre></div>
 </div><button class="expand-btn">Show more</button></div>
-</div>'''
+</div>"""
 
 
 def render_bash_tool(tool_input, tool_id):
     """Render Bash tool calls with command as plain text."""
     command = tool_input.get("command", "")
     description = tool_input.get("description", "")
-    desc_html = f'<div class="tool-description">{html.escape(description)}</div>' if description else ""
-    return f'''<div class="tool-use bash-tool" data-tool-id="{html.escape(tool_id)}">
+    desc_html = (
+        f'<div class="tool-description">{html.escape(description)}</div>'
+        if description
+        else ""
+    )
+    return f"""<div class="tool-use bash-tool" data-tool-id="{html.escape(tool_id)}">
 <div class="tool-header"><span class="tool-icon">$</span> Bash</div>
 {desc_html}<div class="truncatable"><div class="truncatable-content"><pre class="bash-command">{html.escape(command)}</pre></div><button class="expand-btn">Show more</button></div>
-</div>'''
+</div>"""
 
 
 def render_content_block(block):
@@ -153,7 +168,11 @@ def render_content_block(block):
         if tool_name == "Bash":
             return render_bash_tool(tool_input, tool_id)
         description = tool_input.get("description", "")
-        desc_html = f'<div class="tool-description">{html.escape(description)}</div>' if description else ""
+        desc_html = (
+            f'<div class="tool-description">{html.escape(description)}</div>'
+            if description
+            else ""
+        )
         display_input = {k: v for k, v in tool_input.items() if k != "description"}
         return f'<div class="tool-use" data-tool-id="{html.escape(tool_id)}"><div class="tool-header"><span class="tool-icon">⚙</span> {html.escape(tool_name)}</div>{desc_html}<div class="truncatable"><div class="truncatable-content">{format_json(display_input)}</div><button class="expand-btn">Show more</button></div></div>'
     elif block_type == "tool_result":
@@ -170,25 +189,31 @@ def render_content_block(block):
                 last_end = 0
                 for match in commits_found:
                     # Add any content before this commit
-                    before = content[last_end:match.start()].strip()
+                    before = content[last_end : match.start()].strip()
                     if before:
-                        parts.append(f'<pre>{html.escape(before)}</pre>')
+                        parts.append(f"<pre>{html.escape(before)}</pre>")
 
                     commit_hash = match.group(1)
                     commit_msg = match.group(2)
                     if _github_repo:
-                        github_link = f'https://github.com/{_github_repo}/commit/{commit_hash}'
-                        parts.append(f'<div class="commit-card"><a href="{github_link}"><span class="commit-card-hash">{commit_hash[:7]}</span> {html.escape(commit_msg)}</a></div>')
+                        github_link = (
+                            f"https://github.com/{_github_repo}/commit/{commit_hash}"
+                        )
+                        parts.append(
+                            f'<div class="commit-card"><a href="{github_link}"><span class="commit-card-hash">{commit_hash[:7]}</span> {html.escape(commit_msg)}</a></div>'
+                        )
                     else:
-                        parts.append(f'<div class="commit-card"><span class="commit-card-hash">{commit_hash[:7]}</span> {html.escape(commit_msg)}</div>')
+                        parts.append(
+                            f'<div class="commit-card"><span class="commit-card-hash">{commit_hash[:7]}</span> {html.escape(commit_msg)}</div>'
+                        )
                     last_end = match.end()
 
                 # Add any remaining content after last commit
                 after = content[last_end:].strip()
                 if after:
-                    parts.append(f'<pre>{html.escape(after)}</pre>')
+                    parts.append(f"<pre>{html.escape(after)}</pre>")
 
-                content_html = ''.join(parts)
+                content_html = "".join(parts)
             else:
                 content_html = f"<pre>{html.escape(content)}</pre>"
         elif isinstance(content, list) or is_json_like(content):
@@ -331,7 +356,7 @@ def render_message(log_type, message_json, timestamp):
     return f'<div class="message {role_class}" id="{html.escape(msg_id)}"><div class="message-header"><span class="role-label">{role_label}</span><a href="#{html.escape(msg_id)}" class="timestamp-link"><time datetime="{html.escape(timestamp)}" data-timestamp="{html.escape(timestamp)}">{html.escape(timestamp)}</time></a></div><div class="message-content">{content_html}</div></div>'
 
 
-CSS = '''
+CSS = """
 :root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
@@ -448,9 +473,9 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
 .index-item-long-text-content { color: var(--text-color); }
 @media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } }
-'''
+"""
 
-JS = '''
+JS = """
 document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
     const timestamp = el.getAttribute('data-timestamp');
     const date = new Date(timestamp);
@@ -479,13 +504,16 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         });
     }
 });
-'''
+"""
 
 
 def generate_pagination_html(current_page, total_pages):
     if total_pages <= 1:
         return '<div class="pagination"><a href="index.html" class="index-link">Index</a></div>'
-    parts = ['<div class="pagination">', '<a href="index.html" class="index-link">Index</a>']
+    parts = [
+        '<div class="pagination">',
+        '<a href="index.html" class="index-link">Index</a>',
+    ]
     if current_page > 1:
         parts.append(f'<a href="page-{current_page-1:03d}.html">← Prev</a>')
     else:
@@ -499,8 +527,8 @@ def generate_pagination_html(current_page, total_pages):
         parts.append(f'<a href="page-{current_page+1:03d}.html">Next →</a>')
     else:
         parts.append('<span class="disabled">Next →</span>')
-    parts.append('</div>')
-    return '\n'.join(parts)
+    parts.append("</div>")
+    return "\n".join(parts)
 
 
 def generate_index_pagination_html(total_pages):
@@ -516,8 +544,8 @@ def generate_index_pagination_html(total_pages):
         parts.append('<a href="page-001.html">Next →</a>')
     else:
         parts.append('<span class="disabled">Next →</span>')
-    parts.append('</div>')
-    return '\n'.join(parts)
+    parts.append("</div>")
+    return "\n".join(parts)
 
 
 def generate_html(json_path, output_dir, github_repo=None):
@@ -536,7 +564,9 @@ def generate_html(json_path, output_dir, github_repo=None):
         if github_repo:
             print(f"Auto-detected GitHub repo: {github_repo}")
         else:
-            print("Warning: Could not auto-detect GitHub repo. Commit links will be disabled.")
+            print(
+                "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
+            )
 
     # Set module-level variable for render functions
     global _github_repo
@@ -593,7 +623,7 @@ def generate_html(json_path, output_dir, github_repo=None):
                     messages_html.append(msg_html)
                 is_first = False
         pagination_html = generate_pagination_html(page_num, total_pages)
-        page_content = f'''<!DOCTYPE html>
+        page_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -610,7 +640,7 @@ def generate_html(json_path, output_dir, github_repo=None):
     </div>
     <script>{JS}</script>
 </body>
-</html>'''
+</html>"""
         (output_dir / f"page-{page_num:03d}.html").write_text(page_content)
         print(f"Generated page-{page_num:03d}.html")
 
@@ -656,8 +686,10 @@ def generate_html(json_path, output_dir, github_repo=None):
                 rendered_lt = render_markdown_text(lt)
                 long_texts_html += f'<div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content">{rendered_lt}</div></div><button class="expand-btn">Show more</button></div></div>'
 
-            stats_line = f'<span>{tool_stats_str}</span>' if tool_stats_str else ""
-            stats_html = f'<div class="index-item-stats">{stats_line}{long_texts_html}</div>'
+            stats_line = f"<span>{tool_stats_str}</span>" if tool_stats_str else ""
+            stats_html = (
+                f'<div class="index-item-stats">{stats_line}{long_texts_html}</div>'
+            )
 
         item_html = f'<div class="index-item"><a href="{html.escape(link)}"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{html.escape(conv["timestamp"])}" data-timestamp="{html.escape(conv["timestamp"])}">{html.escape(conv["timestamp"])}</time></div><div class="index-item-content">{rendered_content}</div></a>{stats_html}</div>'
         timeline_items.append((conv["timestamp"], "prompt", item_html))
@@ -666,9 +698,9 @@ def generate_html(json_path, output_dir, github_repo=None):
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
         if _github_repo:
             github_link = f"https://github.com/{_github_repo}/commit/{commit_hash}"
-            item_html = f'''<div class="index-commit"><a href="{github_link}"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></a></div>'''
+            item_html = f"""<div class="index-commit"><a href="{github_link}"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></a></div>"""
         else:
-            item_html = f'''<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></div>'''
+            item_html = f"""<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{commit_hash[:7]}</span><time datetime="{html.escape(commit_ts)}" data-timestamp="{html.escape(commit_ts)}">{html.escape(commit_ts)}</time></div><div class="index-commit-msg">{html.escape(commit_msg)}</div></div>"""
         timeline_items.append((commit_ts, "commit", item_html))
 
     # Sort by timestamp
@@ -676,7 +708,7 @@ def generate_html(json_path, output_dir, github_repo=None):
     index_items = [item[2] for item in timeline_items]
 
     index_pagination = generate_index_pagination_html(total_pages)
-    index_content = f'''<!DOCTYPE html>
+    index_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -694,27 +726,34 @@ def generate_html(json_path, output_dir, github_repo=None):
     </div>
     <script>{JS}</script>
 </body>
-</html>'''
+</html>"""
     (output_dir / "index.html").write_text(index_content)
     print(f"Generated index.html ({total_convs} prompts, {total_pages} pages)")
 
 
+@click.group(cls=DefaultGroup, default="session", default_if_no_args=False)
+def cli():
+    """Convert Claude Code session JSON to mobile-friendly HTML pages."""
+    pass
+
+
+@cli.command()
+@click.argument("json_file", type=click.Path(exists=True))
+@click.option(
+    "-o",
+    "--output",
+    default=".",
+    type=click.Path(),
+    help="Output directory (default: current directory)",
+)
+@click.option(
+    "--repo",
+    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+)
+def session(json_file, output, repo):
+    """Convert a Claude Code session JSON file to HTML."""
+    generate_html(json_file, output, github_repo=repo)
+
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Convert Claude Code session JSON to mobile-friendly HTML pages."
-    )
-    parser.add_argument(
-        "json_file",
-        help="Path to the Claude Code session JSON file"
-    )
-    parser.add_argument(
-        "-o", "--output",
-        default=".",
-        help="Output directory (default: current directory)"
-    )
-    parser.add_argument(
-        "--repo",
-        help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified."
-    )
-    args = parser.parse_args()
-    generate_html(args.json_file, args.output, github_repo=args.repo)
+    cli()

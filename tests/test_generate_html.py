@@ -26,6 +26,7 @@ from claude_code_publish import (
 
 class HTMLSnapshotExtension(SingleFileSnapshotExtension):
     """Snapshot extension that saves HTML files."""
+
     _write_mode = WriteMode.TEXT
     file_extension = "html"
 
@@ -106,7 +107,7 @@ class TestRenderFunctions:
     def test_is_json_like(self):
         """Test JSON-like string detection."""
         assert is_json_like('{"key": "value"}')
-        assert is_json_like('[1, 2, 3]')
+        assert is_json_like("[1, 2, 3]")
         assert not is_json_like("plain text")
         assert not is_json_like("")
         assert not is_json_like(None)
@@ -116,7 +117,11 @@ class TestRenderFunctions:
         tool_input = {
             "todos": [
                 {"content": "First task", "status": "completed", "activeForm": "First"},
-                {"content": "Second task", "status": "in_progress", "activeForm": "Second"},
+                {
+                    "content": "Second task",
+                    "status": "in_progress",
+                    "activeForm": "Second",
+                },
                 {"content": "Third task", "status": "pending", "activeForm": "Third"},
             ]
         }
@@ -132,7 +137,7 @@ class TestRenderFunctions:
         """Test Write tool rendering."""
         tool_input = {
             "file_path": "/project/src/main.py",
-            "content": "def hello():\n    print('hello world')\n"
+            "content": "def hello():\n    print('hello world')\n",
         }
         result = render_write_tool(tool_input, "tool-123")
         assert result == snapshot_html
@@ -142,7 +147,7 @@ class TestRenderFunctions:
         tool_input = {
             "file_path": "/project/file.py",
             "old_string": "old code here",
-            "new_string": "new code here"
+            "new_string": "new code here",
         }
         result = render_edit_tool(tool_input, "tool-123")
         assert result == snapshot_html
@@ -153,7 +158,7 @@ class TestRenderFunctions:
             "file_path": "/project/file.py",
             "old_string": "old",
             "new_string": "new",
-            "replace_all": True
+            "replace_all": True,
         }
         result = render_edit_tool(tool_input, "tool-123")
         assert result == snapshot_html
@@ -162,7 +167,7 @@ class TestRenderFunctions:
         """Test Bash tool rendering."""
         tool_input = {
             "command": "pytest tests/ -v",
-            "description": "Run tests with verbose output"
+            "description": "Run tests with verbose output",
         }
         result = render_bash_tool(tool_input, "tool-123")
         assert result == snapshot_html
@@ -173,7 +178,10 @@ class TestRenderContentBlock:
 
     def test_thinking_block(self, snapshot_html):
         """Test thinking block rendering."""
-        block = {"type": "thinking", "thinking": "Let me think about this...\n\n1. First consideration\n2. Second point"}
+        block = {
+            "type": "thinking",
+            "thinking": "Let me think about this...\n\n1. First consideration\n2. Second point",
+        }
         result = render_content_block(block)
         assert result == snapshot_html
 
@@ -188,7 +196,7 @@ class TestRenderContentBlock:
         block = {
             "type": "tool_result",
             "content": "Command completed successfully\nOutput line 1\nOutput line 2",
-            "is_error": False
+            "is_error": False,
         }
         result = render_content_block(block)
         assert result == snapshot_html
@@ -198,7 +206,7 @@ class TestRenderContentBlock:
         block = {
             "type": "tool_result",
             "content": "Error: file not found\nTraceback follows...",
-            "is_error": True
+            "is_error": True,
         }
         result = render_content_block(block)
         assert result == snapshot_html
@@ -207,13 +215,14 @@ class TestRenderContentBlock:
         """Test tool result with git commit output."""
         # Need to set the global _github_repo for commit link rendering
         import claude_code_publish
+
         old_repo = claude_code_publish._github_repo
         claude_code_publish._github_repo = "example/repo"
         try:
             block = {
                 "type": "tool_result",
                 "content": "[main abc1234] Add new feature\n 2 files changed, 10 insertions(+)",
-                "is_error": False
+                "is_error": False,
             }
             result = render_content_block(block)
             assert result == snapshot_html
@@ -227,13 +236,34 @@ class TestAnalyzeConversation:
     def test_counts_tools(self):
         """Test that tool usage is counted."""
         messages = [
-            ("assistant", json.dumps({
-                "content": [
-                    {"type": "tool_use", "name": "Bash", "id": "1", "input": {}},
-                    {"type": "tool_use", "name": "Bash", "id": "2", "input": {}},
-                    {"type": "tool_use", "name": "Write", "id": "3", "input": {}},
-                ]
-            }), "2025-01-01T00:00:00Z"),
+            (
+                "assistant",
+                json.dumps(
+                    {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "Bash",
+                                "id": "1",
+                                "input": {},
+                            },
+                            {
+                                "type": "tool_use",
+                                "name": "Bash",
+                                "id": "2",
+                                "input": {},
+                            },
+                            {
+                                "type": "tool_use",
+                                "name": "Write",
+                                "id": "3",
+                                "input": {},
+                            },
+                        ]
+                    }
+                ),
+                "2025-01-01T00:00:00Z",
+            ),
         ]
         result = analyze_conversation(messages)
         assert result["tool_counts"]["Bash"] == 2
@@ -242,14 +272,20 @@ class TestAnalyzeConversation:
     def test_extracts_commits(self):
         """Test that git commits are extracted."""
         messages = [
-            ("user", json.dumps({
-                "content": [
+            (
+                "user",
+                json.dumps(
                     {
-                        "type": "tool_result",
-                        "content": "[main abc1234] Add new feature\n 1 file changed"
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "content": "[main abc1234] Add new feature\n 1 file changed",
+                            }
+                        ]
                     }
-                ]
-            }), "2025-01-01T00:00:00Z"),
+                ),
+                "2025-01-01T00:00:00Z",
+            ),
         ]
         result = analyze_conversation(messages)
         assert len(result["commits"]) == 1
@@ -278,11 +314,7 @@ class TestIsToolResultMessage:
 
     def test_detects_tool_result_only(self):
         """Test detection of tool-result-only messages."""
-        message = {
-            "content": [
-                {"type": "tool_result", "content": "result"}
-            ]
-        }
+        message = {"content": [{"type": "tool_result", "content": "result"}]}
         assert is_tool_result_message(message) is True
 
     def test_rejects_mixed_content(self):
@@ -290,7 +322,7 @@ class TestIsToolResultMessage:
         message = {
             "content": [
                 {"type": "text", "text": "hello"},
-                {"type": "tool_result", "content": "result"}
+                {"type": "tool_result", "content": "result"},
             ]
         }
         assert is_tool_result_message(message) is False

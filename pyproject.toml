@@ -8,7 +8,11 @@ authors = [
     { name = "Simon Willison" }
 ]
 requires-python = ">=3.10"
-dependencies = ["markdown"]
+dependencies = [
+    "click",
+    "click-default-group",
+    "markdown",
+]
 
 [project.urls]
 Homepage = "https://github.com/simonw/claude-code-publish"
