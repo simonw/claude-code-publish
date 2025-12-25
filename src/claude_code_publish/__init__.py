@@ -921,6 +921,7 @@ def generate_html(json_path, output_dir, github_repo=None):
 
 
 @click.group(cls=DefaultGroup, default="session", default_if_no_args=False)
+@click.version_option(None, "-v", "--version", package_name="claude-code-publish")
 def cli():
     """Convert Claude Code session JSON to mobile-friendly HTML pages."""
     pass
