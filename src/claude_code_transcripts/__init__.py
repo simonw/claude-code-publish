@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -275,7 +276,9 @@ def find_all_sessions(folder, include_agents=False):
     return result
 
 
-def generate_batch_html(source_folder, output_dir, include_agents=False):
+def generate_batch_html(
+    source_folder, output_dir, include_agents=False, progress_callback=None
+):
     """Generate HTML archive for all sessions in a Claude projects folder.
 
     Creates:
@@ -283,7 +286,14 @@ def generate_batch_html(source_folder, output_dir, include_agents=False):
     - Per-project directories with index.html listing sessions
     - Per-session directories with transcript pages
 
-    Returns statistics dict with total_projects, total_sessions, output_dir.
+    Args:
+        source_folder: Path to the Claude projects folder
+        output_dir: Path for output archive
+        include_agents: Whether to include agent-* session files
+        progress_callback: Optional callback(project_name, session_name, current, total)
+            called after each session is processed
+
+    Returns statistics dict with total_projects, total_sessions, failed_sessions, output_dir.
     """
     source_folder = Path(source_folder)
     output_dir = Path(output_dir)
@@ -292,7 +302,11 @@ def generate_batch_html(source_folder, output_dir, include_agents=False):
     # Find all sessions
     projects = find_all_sessions(source_folder, include_agents=include_agents)
 
-    total_sessions = 0
+    # Calculate total for progress tracking
+    total_session_count = sum(len(p["sessions"]) for p in projects)
+    processed_count = 0
+    successful_sessions = 0
+    failed_sessions = []
 
     # Process each project
     for project in projects:
@@ -304,9 +318,26 @@ def generate_batch_html(source_folder, output_dir, include_agents=False):
             session_name = session["path"].stem
             session_dir = project_dir / session_name
 
-            # Generate transcript HTML
-            generate_html(session["path"], session_dir)
-            total_sessions += 1
+            # Generate transcript HTML with error handling
+            try:
+                generate_html(session["path"], session_dir)
+                successful_sessions += 1
+            except Exception as e:
+                failed_sessions.append(
+                    {
+                        "project": project["name"],
+                        "session": session_name,
+                        "error": str(e),
+                    }
+                )
+
+            processed_count += 1
+
+            # Call progress callback if provided
+            if progress_callback:
+                progress_callback(
+                    project["name"], session_name, processed_count, total_session_count
+                )
 
         # Generate project index
         _generate_project_index(project, project_dir)
@@ -316,15 +347,14 @@ def generate_batch_html(source_folder, output_dir, include_agents=False):
 
     return {
         "total_projects": len(projects),
-        "total_sessions": total_sessions,
+        "total_sessions": successful_sessions,
+        "failed_sessions": failed_sessions,
         "output_dir": output_dir,
     }
 
 
 def _generate_project_index(project, output_dir):
     """Generate index.html for a single project."""
-    from datetime import datetime
-
     template = get_template("project_index.html")
 
     # Format sessions for template
@@ -354,8 +384,6 @@ def _generate_project_index(project, output_dir):
 
 def _generate_master_index(projects, output_dir):
     """Generate master index.html listing all projects."""
-    from datetime import datetime
-
     template = get_template("master_index.html")
 
     # Format projects for template
@@ -1271,8 +1299,6 @@ def cli():
 )
 def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit):
     """Select and convert a local Claude Code session to HTML."""
-    from datetime import datetime
-
     projects_folder = Path.home() / ".claude" / "projects"
 
     if not projects_folder.exists():
@@ -1817,7 +1843,13 @@ def web_cmd(
     is_flag=True,
     help="Open the generated archive in your default browser.",
 )
-def batch_cmd(source, output, include_agents, dry_run, open_browser):
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    help="Suppress all output except errors.",
+)
+def batch_cmd(source, output, include_agents, dry_run, open_browser, quiet):
     """Convert all local Claude Code sessions to a browsable HTML archive.
 
     Creates a directory structure with:
@@ -1825,8 +1857,6 @@ def batch_cmd(source, output, include_agents, dry_run, open_browser):
     - Per-project pages listing sessions
     - Individual session transcripts
     """
-    from datetime import datetime
-
     # Default source folder
     if source is None:
         source = Path.home() / ".claude" / "projects"
@@ -1838,17 +1868,21 @@ def batch_cmd(source, output, include_agents, dry_run, open_browser):
 
     output = Path(output)
 
-    click.echo(f"Scanning {source}...")
+    if not quiet:
+        click.echo(f"Scanning {source}...")
+
     projects = find_all_sessions(source, include_agents=include_agents)
 
     if not projects:
-        click.echo("No sessions found.")
+        if not quiet:
+            click.echo("No sessions found.")
         return
 
     # Calculate totals
     total_sessions = sum(len(p["sessions"]) for p in projects)
 
-    click.echo(f"Found {len(projects)} projects with {total_sessions} sessions")
+    if not quiet:
+        click.echo(f"Found {len(projects)} projects with {total_sessions} sessions")
 
     if dry_run:
         click.echo("\nDry run - would convert:")
@@ -1863,36 +1897,36 @@ def batch_cmd(source, output, include_agents, dry_run, open_browser):
                 click.echo(f"    ... and {len(project['sessions']) - 3} more")
         return
 
-    click.echo(f"\nGenerating archive in {output}...")
+    if not quiet:
+        click.echo(f"\nGenerating archive in {output}...")
 
-    # Track progress
-    processed = 0
-    for project in projects:
-        project_dir = output / project["name"]
-        project_dir.mkdir(parents=True, exist_ok=True)
+    # Progress callback for non-quiet mode
+    def on_progress(project_name, session_name, current, total):
+        if not quiet and current % 10 == 0:
+            click.echo(f"  Processed {current}/{total} sessions...")
 
-        for session in project["sessions"]:
-            session_name = session["path"].stem
-            session_dir = project_dir / session_name
-
-            # Generate transcript HTML
-            generate_html(session["path"], session_dir)
-            processed += 1
-
-            # Progress indicator
-            if processed % 10 == 0:
-                click.echo(f"  Processed {processed}/{total_sessions} sessions...")
-
-        # Generate project index
-        _generate_project_index(project, project_dir)
-
-    # Generate master index
-    _generate_master_index(projects, output)
-
-    click.echo(
-        f"\nGenerated archive with {len(projects)} projects, {total_sessions} sessions"
+    # Generate the archive using the library function
+    stats = generate_batch_html(
+        source,
+        output,
+        include_agents=include_agents,
+        progress_callback=on_progress,
     )
-    click.echo(f"Output: {output.resolve()}")
+
+    # Report any failures
+    if stats["failed_sessions"]:
+        click.echo(f"\nWarning: {len(stats['failed_sessions'])} session(s) failed:")
+        for failure in stats["failed_sessions"]:
+            click.echo(
+                f"  {failure['project']}/{failure['session']}: {failure['error']}"
+            )
+
+    if not quiet:
+        click.echo(
+            f"\nGenerated archive with {stats['total_projects']} projects, "
+            f"{stats['total_sessions']} sessions"
+        )
+        click.echo(f"Output: {output.resolve()}")
 
     if open_browser:
         index_url = (output / "index.html").resolve().as_uri()

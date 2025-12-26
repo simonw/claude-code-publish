@@ -238,7 +238,67 @@ class TestGenerateBatchHtml:
 
         assert stats["total_projects"] == 2
         assert stats["total_sessions"] == 3  # 2 + 1
+        assert stats["failed_sessions"] == []
         assert "output_dir" in stats
+
+    def test_progress_callback_called(self, mock_projects_dir, output_dir):
+        """Test that progress callback is called for each session."""
+        progress_calls = []
+
+        def on_progress(project_name, session_name, current, total):
+            progress_calls.append((project_name, session_name, current, total))
+
+        generate_batch_html(
+            mock_projects_dir, output_dir, progress_callback=on_progress
+        )
+
+        # Should be called for each session (3 total)
+        assert len(progress_calls) == 3
+        # Last call should have current == total
+        assert progress_calls[-1][2] == progress_calls[-1][3]
+
+    def test_handles_failed_session_gracefully(self, output_dir):
+        """Test that failed session conversion doesn't crash the batch."""
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            projects_dir = Path(tmpdir)
+
+            # Create a project with 2 sessions
+            project = projects_dir / "-home-user-projects-test"
+            project.mkdir(parents=True)
+
+            # Session 1
+            session1 = project / "session1.jsonl"
+            session1.write_text(
+                '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Hello from session 1"}}\n'
+            )
+
+            # Session 2
+            session2 = project / "session2.jsonl"
+            session2.write_text(
+                '{"type": "user", "timestamp": "2025-01-02T10:00:00.000Z", "message": {"role": "user", "content": "Hello from session 2"}}\n'
+            )
+
+            # Patch generate_html to fail on one specific session
+            original_generate_html = __import__("claude_code_transcripts").generate_html
+
+            def mock_generate_html(json_path, output_dir, github_repo=None):
+                if "session1" in str(json_path):
+                    raise RuntimeError("Simulated failure")
+                return original_generate_html(json_path, output_dir, github_repo)
+
+            with patch(
+                "claude_code_transcripts.generate_html", side_effect=mock_generate_html
+            ):
+                stats = generate_batch_html(projects_dir, output_dir)
+
+            # Should have processed session2 successfully
+            assert stats["total_sessions"] == 1
+            # Should have recorded session1 as failed
+            assert len(stats["failed_sessions"]) == 1
+            assert "session1" in stats["failed_sessions"][0]["session"]
+            assert "Simulated failure" in stats["failed_sessions"][0]["error"]
 
 
 class TestBatchCommand:
@@ -309,3 +369,26 @@ class TestBatchCommand:
         project_a_dir = output_dir / "project-a"
         session_dirs = [d for d in project_a_dir.iterdir() if d.is_dir()]
         assert len(session_dirs) == 3  # 2 regular + 1 agent
+
+    def test_batch_quiet_flag(self, mock_projects_dir, output_dir):
+        """Test --quiet flag suppresses non-error output."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "batch",
+                "--source",
+                str(mock_projects_dir),
+                "--output",
+                str(output_dir),
+                "--quiet",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # Should create the archive
+        assert (output_dir / "index.html").exists()
+        # Output should be minimal (no progress messages)
+        assert "Scanning" not in result.output
+        assert "Processed" not in result.output
+        assert "Generating" not in result.output
