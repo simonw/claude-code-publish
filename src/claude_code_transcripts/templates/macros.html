@@ -68,46 +68,74 @@
 {%- endmacro %}
 
 {# Write tool #}
-{% macro write_tool(file_path, content, tool_id) %}
+{% macro write_tool(file_path, content, tool_id, tool_result_html='') %}
 {%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
 <div class="file-tool write-tool" data-tool-id="{{ tool_id }}">
-<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{{ filename }}</span></div>
+<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write Tool <span class="file-tool-path">{{ filename }}</span></div>
 <div class="file-tool-fullpath">{{ file_path }}</div>
 <div class="truncatable"><div class="truncatable-content"><pre class="file-content">{{ content }}</pre></div><button class="expand-btn">Show more</button></div>
+{%- if tool_result_html -%}
+<div class="tool-response-section">
+<div class="tool-response-label">Response:</div>
+{{ tool_result_html|safe }}
+</div>
+{%- endif -%}
 </div>
 {%- endmacro %}
 
 {# Edit tool #}
-{% macro edit_tool(file_path, old_string, new_string, replace_all, tool_id) %}
+{% macro edit_tool(file_path, old_string, new_string, replace_all, tool_id, tool_result_html='') %}
 {%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
 <div class="file-tool edit-tool" data-tool-id="{{ tool_id }}">
-<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{{ filename }}</span>{% if replace_all %} <span class="edit-replace-all">(replace all)</span>{% endif %}</div>
+<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit Tool <span class="file-tool-path">{{ filename }}</span>{% if replace_all %} <span class="edit-replace-all">(replace all)</span>{% endif %}</div>
 <div class="file-tool-fullpath">{{ file_path }}</div>
 <div class="truncatable"><div class="truncatable-content">
 <div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content">{{ old_string }}</pre></div>
 <div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content">{{ new_string }}</pre></div>
 </div><button class="expand-btn">Show more</button></div>
+{%- if tool_result_html -%}
+<div class="tool-response-section">
+<div class="tool-response-label">Response:</div>
+{{ tool_result_html|safe }}
+</div>
+{%- endif -%}
 </div>
 {%- endmacro %}
 
 {# Bash tool #}
-{% macro bash_tool(command, description, tool_id) %}
+{% macro bash_tool(command, description, tool_id, tool_result_html='') %}
 <div class="tool-use bash-tool" data-tool-id="{{ tool_id }}">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
+<div class="tool-header"><span class="tool-icon">$</span> Bash Tool</div>
 {%- if description %}
 <div class="tool-description">{{ description }}</div>
 {%- endif -%}
+<div class="tool-command-section">
+<div class="tool-command-label">Command:</div>
 <div class="truncatable"><div class="truncatable-content"><pre class="bash-command">{{ command }}</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+{%- if tool_result_html -%}
+<div class="tool-response-section">
+<div class="tool-response-label">Response:</div>
+{{ tool_result_html|safe }}
+</div>
+{%- endif -%}
 </div>
 {%- endmacro %}
 
 {# Generic tool use - input_json is pre-formatted so needs |safe #}
-{% macro tool_use(tool_name, description, input_json, tool_id) %}
-<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-icon">⚙</span> {{ tool_name }}</div>
+{% macro tool_use(tool_name, description, input_json, tool_id, tool_result_html='') %}
+<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-icon">⚙</span> {{ tool_name }} Tool</div>
 {%- if description -%}
 <div class="tool-description">{{ description }}</div>
 {%- endif -%}
-<div class="truncatable"><div class="truncatable-content"><pre class="json">{{ input_json }}</pre></div><button class="expand-btn">Show more</button></div></div>
+<div class="truncatable"><div class="truncatable-content"><pre class="json">{{ input_json }}</pre></div><button class="expand-btn">Show more</button></div>
+{%- if tool_result_html -%}
+<div class="tool-response-section">
+<div class="tool-response-label">Response:</div>
+{{ tool_result_html|safe }}
+</div>
+{%- endif -%}
+</div>
 {%- endmacro %}
 
 {# Tool result - content_html is pre-rendered so needs |safe #}

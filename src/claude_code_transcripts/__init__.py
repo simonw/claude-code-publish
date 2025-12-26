@@ -351,37 +351,84 @@ def is_json_like(text):
     )
 
 
-def render_todo_write(tool_input, tool_id):
+def render_todo_write(tool_input, tool_id, tool_result_html=""):
     todos = tool_input.get("todos", [])
     if not todos:
         return ""
     return _macros.todo_list(todos, tool_id)
 
 
-def render_write_tool(tool_input, tool_id):
+def render_write_tool(tool_input, tool_id, tool_result_html=""):
     """Render Write tool calls with file path header and content preview."""
     file_path = tool_input.get("file_path", "Unknown file")
     content = tool_input.get("content", "")
-    return _macros.write_tool(file_path, content, tool_id)
+    return _macros.write_tool(file_path, content, tool_id, tool_result_html)
 
 
-def render_edit_tool(tool_input, tool_id):
+def render_edit_tool(tool_input, tool_id, tool_result_html=""):
     """Render Edit tool calls with diff-like old/new display."""
     file_path = tool_input.get("file_path", "Unknown file")
     old_string = tool_input.get("old_string", "")
     new_string = tool_input.get("new_string", "")
     replace_all = tool_input.get("replace_all", False)
-    return _macros.edit_tool(file_path, old_string, new_string, replace_all, tool_id)
+    return _macros.edit_tool(file_path, old_string, new_string, replace_all, tool_id, tool_result_html)
 
 
-def render_bash_tool(tool_input, tool_id):
+def render_bash_tool(tool_input, tool_id, tool_result_html=""):
     """Render Bash tool calls with command as plain text."""
     command = tool_input.get("command", "")
     description = tool_input.get("description", "")
-    return _macros.bash_tool(command, description, tool_id)
+    return _macros.bash_tool(command, description, tool_id, tool_result_html)
 
 
-def render_content_block(block):
+def render_tool_result_block(block):
+    """Render tool result block content (without the message wrapper)."""
+    content = block.get("content", "")
+    is_error = block.get("is_error", False)
+
+    # Check for git commits and render with styled cards
+    if isinstance(content, str):
+        commits_found = list(COMMIT_PATTERN.finditer(content))
+        if commits_found:
+            # Build commit cards + remaining content
+            parts = []
+            last_end = 0
+            for match in commits_found:
+                # Add any content before this commit
+                before = content[last_end : match.start()].strip()
+                if before:
+                    parts.append(f"<pre>{html.escape(before)}</pre>")
+
+                commit_hash = match.group(1)
+                commit_msg = match.group(2)
+                parts.append(
+                    _macros.commit_card(commit_hash, commit_msg, _github_repo)
+                )
+                last_end = match.end()
+
+            # Add any remaining content after last commit
+            after = content[last_end:].strip()
+            if after:
+                parts.append(f"<pre>{html.escape(after)}</pre>")
+
+            content_html = "".join(parts)
+        else:
+            content_html = f"<pre>{html.escape(content)}</pre>"
+    elif isinstance(content, list) or is_json_like(content):
+        content_html = format_json(content)
+    else:
+        content_html = format_json(content)
+
+    return _macros.tool_result(content_html, is_error)
+
+
+def render_content_block(block, tool_results_map=None):
+    """Render a content block, optionally including its tool result if available.
+
+    Args:
+        block: The content block to render
+        tool_results_map: Optional dict mapping tool_id -> tool_result block
+    """
     if not isinstance(block, dict):
         return f"<p>{html.escape(str(block))}</p>"
     block_type = block.get("type", "")
@@ -395,18 +442,25 @@ def render_content_block(block):
         tool_name = block.get("name", "Unknown tool")
         tool_input = block.get("input", {})
         tool_id = block.get("id", "")
+
+        # Get the corresponding tool result if available
+        tool_result_html = ""
+        if tool_results_map and tool_id in tool_results_map:
+            result_block = tool_results_map[tool_id]
+            tool_result_html = render_tool_result_block(result_block)
+
         if tool_name == "TodoWrite":
-            return render_todo_write(tool_input, tool_id)
+            return render_todo_write(tool_input, tool_id, tool_result_html)
         if tool_name == "Write":
-            return render_write_tool(tool_input, tool_id)
+            return render_write_tool(tool_input, tool_id, tool_result_html)
         if tool_name == "Edit":
-            return render_edit_tool(tool_input, tool_id)
+            return render_edit_tool(tool_input, tool_id, tool_result_html)
         if tool_name == "Bash":
-            return render_bash_tool(tool_input, tool_id)
+            return render_bash_tool(tool_input, tool_id, tool_result_html)
         description = tool_input.get("description", "")
         display_input = {k: v for k, v in tool_input.items() if k != "description"}
         input_json = json.dumps(display_input, indent=2, ensure_ascii=False)
-        return _macros.tool_use(tool_name, description, input_json, tool_id)
+        return _macros.tool_use(tool_name, description, input_json, tool_id, tool_result_html)
     elif block_type == "tool_result":
         content = block.get("content", "")
         is_error = block.get("is_error", False)
@@ -459,11 +513,17 @@ def render_user_message_content(message_data):
     return f"<p>{html.escape(str(content))}</p>"
 
 
-def render_assistant_message(message_data):
+def render_assistant_message(message_data, tool_results_map=None):
+    """Render assistant message content, optionally with tool results nested inline.
+
+    Args:
+        message_data: The message data dict
+        tool_results_map: Optional dict mapping tool_id -> tool_result block
+    """
     content = message_data.get("content", [])
     if not isinstance(content, list):
         return f"<p>{html.escape(str(content))}</p>"
-    return "".join(render_content_block(block) for block in content)
+    return "".join(render_content_block(block, tool_results_map) for block in content)
 
 
 def make_msg_id(timestamp):
@@ -554,7 +614,15 @@ def is_tool_result_message(message_data):
     )
 
 
-def render_message(log_type, message_json, timestamp):
+def render_message(log_type, message_json, timestamp, tool_results_map=None):
+    """Render a message.
+
+    Args:
+        log_type: Type of message ('user' or 'assistant')
+        message_json: JSON string of message data
+        timestamp: Timestamp string
+        tool_results_map: Optional dict mapping tool_id -> tool_result block (for assistant messages)
+    """
     if not message_json:
         return ""
     try:
@@ -563,13 +631,12 @@ def render_message(log_type, message_json, timestamp):
         return ""
     if log_type == "user":
         content_html = render_user_message_content(message_data)
-        # Check if this is a tool result message
+        # Check if this is a tool result message - we'll skip these since they're nested
         if is_tool_result_message(message_data):
-            role_class, role_label = "tool-reply", "Tool reply"
-        else:
-            role_class, role_label = "user", "User"
+            return ""  # Skip tool reply messages - they're rendered inline
+        role_class, role_label = "user", "User"
     elif log_type == "assistant":
-        content_html = render_assistant_message(message_data)
+        content_html = render_assistant_message(message_data, tool_results_map)
         role_class, role_label = "assistant", "Assistant"
     else:
         return ""
@@ -580,122 +647,948 @@ def render_message(log_type, message_json, timestamp):
 
 
 CSS = """
-:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Outfit:wght@400;500;600&display=swap');
+
+:root {
+  --bg-color: #fafaf9;
+  --text-primary: #0a0a0a;
+  --text-secondary: #525252;
+  --text-tertiary: #a3a3a3;
+  --border-light: #e7e5e4;
+  --border-medium: #d6d3d1;
+  --accent-user: #2563eb;
+  --accent-thinking: #d97706;
+  --accent-tool: #7c3aed;
+  --surface-elevated: #ffffff;
+  --surface-subtle: #f5f5f4;
+  --code-bg: #18181b;
+  --code-text: #a1a1aa;
+
+  /* Tinted backgrounds for message types */
+  --bg-user: #eff6ff;
+  --bg-assistant: #f5f5f4;
+  --bg-thinking: #fefce8;
+  --bg-tool: #faf5ff;
+}
+
 * { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
-.container { max-width: 800px; margin: 0 auto; }
-h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
-.message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
-.message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
-.tool-reply .role-label { color: #e65100; }
-.tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
-.tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.user .role-label { color: var(--user-border); }
-time { color: var(--text-muted); font-size: 0.8rem; }
-.timestamp-link { color: inherit; text-decoration: none; }
-.timestamp-link:hover { text-decoration: underline; }
-.message:target { animation: highlight 2s ease-out; }
-@keyframes highlight { 0% { background-color: rgba(25, 118, 210, 0.2); } 100% { background-color: transparent; } }
-.message-content { padding: 16px; }
-.message-content p { margin: 0 0 12px 0; }
-.message-content p:last-child { margin-bottom: 0; }
-.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 0.9rem; color: var(--thinking-text); }
-.thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
-.thinking p { margin: 8px 0; }
-.assistant-text { margin: 8px 0; }
-.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.tool-icon { font-size: 1.1rem; }
-.tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
-.tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-result.tool-error { background: var(--tool-error-bg); }
-.file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
-.write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
-.edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
-.file-tool-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.write-header { color: #2e7d32; }
-.edit-header { color: #e65100; }
-.file-tool-icon { font-size: 1rem; }
-.file-tool-path { font-family: monospace; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 4px; }
-.file-tool-fullpath { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
-.file-content { margin: 0; }
-.edit-section { display: flex; margin: 4px 0; border-radius: 4px; overflow: hidden; }
-.edit-label { padding: 8px 12px; font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
-.edit-old { background: #fce4ec; }
-.edit-old .edit-label { color: #b71c1c; background: #f8bbd9; }
-.edit-old .edit-content { color: #880e4f; }
-.edit-new { background: #e8f5e9; }
-.edit-new .edit-label { color: #1b5e20; background: #a5d6a7; }
-.edit-new .edit-content { color: #1b5e20; }
-.edit-content { margin: 0; flex: 1; background: transparent; font-size: 0.85rem; }
-.edit-replace-all { font-size: 0.75rem; font-weight: normal; color: var(--text-muted); }
-.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #e6f4ea); }
-.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff0e5); }
-.todo-list { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border: 1px solid #81c784; border-radius: 8px; padding: 12px; margin: 12px 0; }
-.todo-header { font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.todo-items { list-style: none; margin: 0; padding: 0; }
-.todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 0.9rem; }
-.todo-item:last-child { border-bottom: none; }
-.todo-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%; }
-.todo-completed .todo-icon { color: #2e7d32; background: rgba(46, 125, 50, 0.15); }
-.todo-completed .todo-content { color: #558b2f; text-decoration: line-through; }
-.todo-in-progress .todo-icon { color: #f57c00; background: rgba(245, 124, 0, 0.15); }
-.todo-in-progress .todo-content { color: #e65100; font-weight: 500; }
-.todo-pending .todo-icon { color: #757575; background: rgba(0,0,0,0.05); }
-.todo-pending .todo-content { color: #616161; }
-pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
-pre.json { color: #e0e0e0; }
-code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-pre code { background: none; padding: 0; }
-.user-content { margin: 0; }
-.truncatable { position: relative; }
-.truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
-.truncatable.truncated::after { content: ''; position: absolute; bottom: 32px; left: 0; right: 0; height: 60px; background: linear-gradient(to bottom, transparent, var(--card-bg)); pointer-events: none; }
-.message.user .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--user-bg)); }
-.message.tool-reply .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.tool-use .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-bg)); }
-.tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-result-bg)); }
-.expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
-.expand-btn:hover { background: rgba(0,0,0,0.1); }
-.truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
-.pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
-.pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
-.pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
-.pagination a:hover { background: var(--user-bg); }
-.pagination .current { background: var(--user-border); color: white; }
-.pagination .disabled { color: var(--text-muted); border: 1px solid #ddd; }
-.pagination .index-link { background: var(--user-border); color: white; }
-details.continuation { margin-bottom: 16px; }
-details.continuation summary { cursor: pointer; padding: 12px 16px; background: var(--user-bg); border-left: 4px solid var(--user-border); border-radius: 12px; font-weight: 500; color: var(--text-muted); }
-details.continuation summary:hover { background: rgba(25, 118, 210, 0.15); }
-details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom: 0; }
-.index-item { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background: var(--user-bg); border-left: 4px solid var(--user-border); }
-.index-item a { display: block; text-decoration: none; color: inherit; }
-.index-item a:hover { background: rgba(25, 118, 210, 0.1); }
-.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.index-item-number { font-weight: 600; color: var(--user-border); }
-.index-item-content { padding: 16px; }
-.index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
-.index-item-commit { margin-top: 6px; padding: 4px 8px; background: #fff3e0; border-radius: 4px; font-size: 0.85rem; color: #e65100; }
-.index-item-commit code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; margin-right: 6px; }
-.commit-card { margin: 8px 0; padding: 10px 14px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 6px; }
-.commit-card a { text-decoration: none; color: #5d4037; display: block; }
-.commit-card a:hover { color: #e65100; }
-.commit-card-hash { font-family: monospace; color: #e65100; font-weight: 600; margin-right: 8px; }
-.index-commit { margin-bottom: 12px; padding: 10px 16px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.index-commit a { display: block; text-decoration: none; color: inherit; }
-.index-commit a:hover { background: rgba(255, 152, 0, 0.1); margin: -10px -16px; padding: 10px 16px; border-radius: 8px; }
-.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 4px; }
-.index-commit-hash { font-family: monospace; color: #e65100; font-weight: 600; }
-.index-commit-msg { color: #5d4037; }
-.index-item-long-text { margin-top: 8px; padding: 12px; background: var(--card-bg); border-radius: 8px; border-left: 3px solid var(--assistant-border); }
-.index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
-.index-item-long-text-content { color: var(--text-color); }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } }
+
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg-color);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 32px 24px;
+  line-height: 1.75;
+  font-size: 17px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 48px 0;
+  padding: 0 0 16px 0;
+  border-bottom: 1px solid var(--border-light);
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+/* Message containers with typographic differentiation */
+.message {
+  margin-bottom: 56px;
+  position: relative;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message.user {
+  border-left: 3px solid var(--accent-user);
+  padding-left: 24px;
+  background: var(--bg-user);
+  padding: 20px 20px 20px 24px;
+  border-radius: 4px;
+}
+
+.message.assistant {
+  border-left: 3px solid var(--border-medium);
+  padding-left: 24px;
+  background: var(--bg-assistant);
+  padding: 20px 20px 20px 24px;
+  border-radius: 4px;
+}
+
+.message.tool-reply {
+  border-left: 3px solid var(--accent-tool);
+  padding-left: 24px;
+  background: var(--bg-tool);
+  padding: 20px 20px 20px 24px;
+  border-radius: 4px;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 16px;
+}
+
+.role-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-tertiary);
+}
+
+.user .role-label {
+  color: var(--accent-user);
+}
+
+.assistant .role-label {
+  color: var(--text-secondary);
+}
+
+.tool-reply .role-label {
+  color: var(--accent-tool);
+}
+
+time {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.timestamp-link {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.timestamp-link:hover {
+  color: var(--text-secondary);
+}
+
+.message:target {
+  animation: highlight 1.5s ease-out;
+}
+
+@keyframes highlight {
+  0% { border-left-color: var(--accent-user); border-left-width: 6px; }
+  100% { border-left-width: 3px; }
+}
+
+.message-content {
+  font-size: 17px;
+  line-height: 1.75;
+}
+
+.message-content p {
+  margin: 0 0 1.25em 0;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* User messages: larger type with Futura-like font */
+.user .message-content {
+  font-family: Futura, 'Outfit', 'Trebuchet MS', 'Arial Narrow', sans-serif;
+  font-size: 1.25rem;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.015em;
+}
+/* Thinking blocks: italicized, smaller serif */
+.thinking {
+  margin: 24px 0;
+  padding: 16px 16px 16px 24px;
+  border-left: 2px solid var(--accent-thinking);
+  background: var(--bg-thinking);
+  border-radius: 4px;
+}
+
+.thinking-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-thinking);
+  margin-bottom: 12px;
+  display: block;
+}
+
+.thinking p {
+  margin: 0 0 1em 0;
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.thinking p:last-child {
+  margin-bottom: 0;
+}
+
+.assistant-text {
+  margin: 16px 0;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+/* Tool use: compact, monospaced headers */
+.tool-use {
+  background: #e7e5e4;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 20px 0;
+}
+
+.tool-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+}
+
+.tool-icon {
+  font-size: 1rem;
+  opacity: 0.5;
+}
+
+.tool-description {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.tool-result {
+  background: transparent;
+  border-left: 2px solid var(--border-light);
+  padding: 16px 0 16px 20px;
+  margin: 16px 0;
+}
+
+.tool-result.tool-error {
+  border-left-color: #dc2626;
+}
+
+/* Tool response section - nested inside tool use */
+.tool-response-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.tool-response-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.tool-command-section {
+  margin-bottom: 0;
+}
+
+.tool-command-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+/* Nested tool results have simplified styling */
+.tool-response-section .tool-result {
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.tool-response-section .tool-result.tool-error pre {
+  color: #dc2626;
+}
+
+.tool-reply .tool-result {
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.tool-reply .tool-result .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--bg-color));
+}
+/* File tools: Write and Edit */
+.file-tool {
+  border-radius: 6px;
+  padding: 16px;
+  margin: 20px 0;
+  background: #e7e5e4;
+  border: 1px solid var(--border-light);
+}
+
+.write-tool {
+  border-left: 3px solid #10b981;
+}
+
+.edit-tool {
+  border-left: 3px solid #f59e0b;
+}
+
+.file-tool-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+}
+
+.write-header {
+  color: #10b981;
+}
+
+.edit-header {
+  color: #f59e0b;
+}
+
+.file-tool-icon {
+  font-size: 1rem;
+  opacity: 0.7;
+}
+
+.file-tool-path {
+  font-family: 'IBM Plex Mono', monospace;
+  background: var(--surface-subtle);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.file-tool-fullpath {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.file-content {
+  margin: 0;
+}
+
+.edit-section {
+  display: flex;
+  margin: 8px 0;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+}
+
+.edit-label {
+  padding: 12px;
+  font-weight: 500;
+  font-family: 'IBM Plex Mono', monospace;
+  display: flex;
+  align-items: flex-start;
+  font-size: 0.75rem;
+  min-width: 32px;
+  justify-content: center;
+}
+
+.edit-old {
+  background: #fef2f2;
+}
+
+.edit-old .edit-label {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.edit-old .edit-content {
+  color: #991b1b;
+}
+
+.edit-new {
+  background: #f0fdf4;
+}
+
+.edit-new .edit-label {
+  color: #16a34a;
+  background: #dcfce7;
+}
+
+.edit-new .edit-content {
+  color: #166534;
+}
+
+.edit-content {
+  margin: 0;
+  flex: 1;
+  background: transparent;
+  font-size: 0.8125rem;
+  padding: 12px;
+}
+
+.edit-replace-all {
+  font-size: 0.6875rem;
+  font-weight: normal;
+  color: var(--text-tertiary);
+  font-family: 'DM Sans', sans-serif;
+}
+
+.write-tool .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, #e7e5e4);
+}
+
+.edit-tool .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, #e7e5e4);
+}
+/* Todo list */
+.todo-list {
+  background: #e7e5e4;
+  border: 1px solid var(--border-light);
+  border-left: 3px solid #10b981;
+  border-radius: 6px;
+  padding: 16px;
+  margin: 20px 0;
+}
+
+.todo-header {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #10b981;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.01em;
+}
+
+.todo-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+}
+
+.todo-item:last-child {
+  border-bottom: none;
+}
+
+.todo-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.todo-completed .todo-icon {
+  color: #10b981;
+}
+
+.todo-completed .todo-content {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+.todo-in-progress .todo-icon {
+  color: #f59e0b;
+}
+
+.todo-in-progress .todo-content {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.todo-pending .todo-icon {
+  color: var(--text-tertiary);
+}
+
+.todo-pending .todo-content {
+  color: var(--text-secondary);
+}
+
+/* Code blocks */
+pre {
+  font-family: 'IBM Plex Mono', monospace;
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: 16px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  margin: 16px 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+pre.json {
+  color: #e4e4e7;
+}
+
+code {
+  font-family: 'IBM Plex Mono', monospace;
+  background: var(--surface-subtle);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.875em;
+  color: var(--text-primary);
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.user-content {
+  margin: 0;
+  font-family: Futura, 'Outfit', 'Trebuchet MS', 'Arial Narrow', sans-serif;
+}
+/* Truncatable content */
+.truncatable {
+  position: relative;
+}
+
+.truncatable.truncated .truncatable-content {
+  max-height: 240px;
+  overflow: hidden;
+}
+
+.truncatable.truncated::after {
+  content: '';
+  position: absolute;
+  bottom: 40px;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: linear-gradient(to bottom, transparent, var(--bg-color));
+  pointer-events: none;
+}
+
+.message.user .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--bg-user));
+}
+
+.message.assistant .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--bg-assistant));
+}
+
+.message.tool-reply .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--bg-tool));
+}
+
+.thinking .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--bg-thinking));
+}
+
+.tool-use .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, #e7e5e4);
+}
+
+.tool-result .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--bg-color));
+}
+
+.expand-btn {
+  display: none;
+  width: 100%;
+  padding: 10px 16px;
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.expand-btn:hover {
+  background: var(--surface-subtle);
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.truncatable.truncated .expand-btn,
+.truncatable.expanded .expand-btn {
+  display: block;
+}
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 48px 0 32px 0;
+  flex-wrap: wrap;
+}
+
+.pagination a,
+.pagination span {
+  font-family: 'IBM Plex Mono', monospace;
+  padding: 8px 12px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 0.8125rem;
+  transition: all 0.2s ease;
+}
+
+.pagination a {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+}
+
+.pagination a:hover {
+  background: var(--surface-subtle);
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.pagination .current {
+  background: var(--text-primary);
+  color: var(--bg-color);
+  border: 1px solid var(--text-primary);
+  font-weight: 500;
+}
+
+.pagination .disabled {
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-light);
+  opacity: 0.5;
+}
+
+.pagination .index-link {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+}
+
+.pagination .index-link:hover {
+  background: var(--surface-subtle);
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+/* Continuation details */
+details.continuation {
+  margin-bottom: 32px;
+}
+
+details.continuation summary {
+  cursor: pointer;
+  padding: 16px 20px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--accent-user);
+  border-radius: 6px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+details.continuation summary:hover {
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+}
+
+details.continuation[open] summary {
+  border-radius: 6px 6px 0 0;
+  margin-bottom: 0;
+  border-bottom-color: transparent;
+}
+/* Index page items */
+.index-item {
+  margin-bottom: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--accent-user);
+  transition: all 0.2s ease;
+}
+
+.index-item a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.index-item a:hover {
+  background: var(--surface-subtle);
+}
+
+.index-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 16px 20px 12px 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.index-item-number {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-user);
+  letter-spacing: 0.02em;
+}
+
+.index-item-content {
+  padding: 16px 20px;
+  font-family: Futura, 'Outfit', 'Trebuchet MS', 'Arial Narrow', sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.6;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.index-item-stats {
+  padding: 12px 20px 16px 20px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8125rem;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--border-light);
+}
+
+.index-item-commit {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--surface-subtle);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.index-item-commit code {
+  font-family: 'IBM Plex Mono', monospace;
+  background: var(--surface-elevated);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  margin-right: 6px;
+}
+
+/* Commit cards */
+.commit-card {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+}
+
+.commit-card a {
+  text-decoration: none;
+  color: var(--text-primary);
+  display: block;
+  transition: color 0.2s ease;
+}
+
+.commit-card a:hover {
+  color: #f59e0b;
+}
+
+.commit-card-hash {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #f59e0b;
+  font-weight: 600;
+  margin-right: 8px;
+  font-size: 0.8125rem;
+}
+
+.index-commit {
+  margin-bottom: 24px;
+  padding: 14px 18px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid #f59e0b;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.index-commit a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.index-commit a:hover {
+  color: #f59e0b;
+}
+
+.index-commit:hover {
+  background: var(--surface-subtle);
+}
+
+.index-commit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8125rem;
+  margin-bottom: 6px;
+}
+
+.index-commit-hash {
+  font-family: 'IBM Plex Mono', monospace;
+  color: #f59e0b;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.index-commit-msg {
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.index-item-long-text {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--surface-subtle);
+  border-radius: 4px;
+  border-left: 2px solid var(--border-medium);
+}
+
+.index-item-long-text .truncatable.truncated::after {
+  background: linear-gradient(to bottom, transparent, var(--surface-subtle));
+}
+
+.index-item-long-text-content {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+}
+/* Responsive design */
+@media (max-width: 768px) {
+  body {
+    padding: 24px 16px;
+    font-size: 16px;
+  }
+
+  .container {
+    max-width: 100%;
+  }
+
+  h1 {
+    font-size: 1.125rem;
+    margin-bottom: 32px;
+  }
+
+  .message {
+    margin-bottom: 40px;
+  }
+
+  .user .message-content {
+    font-size: 1.125rem;
+  }
+
+  .message-content {
+    font-size: 16px;
+  }
+
+  .thinking p {
+    font-size: 0.875rem;
+  }
+
+  .index-item-content {
+    font-size: 1rem;
+  }
+
+  pre {
+    font-size: 0.75rem;
+    padding: 12px;
+  }
+
+  .pagination {
+    gap: 4px;
+  }
+
+  .pagination a,
+  .pagination span {
+    padding: 6px 10px;
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    padding: 20px 12px;
+  }
+
+  .message {
+    padding-left: 16px;
+    margin-bottom: 32px;
+  }
+
+  .thinking {
+    padding-left: 16px;
+  }
+
+  .tool-use,
+  .file-tool,
+  .todo-list {
+    padding: 12px;
+  }
+
+  .index-item-header,
+  .index-item-content,
+  .index-item-stats {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
 """
 
 JS = """
@@ -876,8 +1769,29 @@ def generate_html(json_path, output_dir, github_repo=None):
         messages_html = []
         for conv in page_convs:
             is_first = True
-            for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
+            messages = conv["messages"]
+
+            # Build a global tool_results_map for the entire conversation
+            # This maps tool_use_id -> tool_result block across ALL messages
+            global_tool_results_map = {}
+            for log_type, message_json, _ in messages:
+                if log_type == "user" and message_json:
+                    try:
+                        message_data = json.loads(message_json)
+                        if is_tool_result_message(message_data):
+                            for block in message_data.get("content", []):
+                                if isinstance(block, dict) and block.get("type") == "tool_result":
+                                    tool_id = block.get("tool_use_id", "")
+                                    if tool_id:
+                                        global_tool_results_map[tool_id] = block
+                    except json.JSONDecodeError:
+                        pass
+
+            for i, (log_type, message_json, timestamp) in enumerate(messages):
+                # Pass the global tool results map to assistant messages
+                tool_results_map = global_tool_results_map if log_type == "assistant" else None
+
+                msg_html = render_message(log_type, message_json, timestamp, tool_results_map)
                 if msg_html:
                     # Wrap continuation summaries in collapsed details
                     if is_first and conv.get("is_continuation"):
@@ -1292,8 +2206,29 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         messages_html = []
         for conv in page_convs:
             is_first = True
-            for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
+            messages = conv["messages"]
+
+            # Build a global tool_results_map for the entire conversation
+            # This maps tool_use_id -> tool_result block across ALL messages
+            global_tool_results_map = {}
+            for log_type, message_json, _ in messages:
+                if log_type == "user" and message_json:
+                    try:
+                        message_data = json.loads(message_json)
+                        if is_tool_result_message(message_data):
+                            for block in message_data.get("content", []):
+                                if isinstance(block, dict) and block.get("type") == "tool_result":
+                                    tool_id = block.get("tool_use_id", "")
+                                    if tool_id:
+                                        global_tool_results_map[tool_id] = block
+                    except json.JSONDecodeError:
+                        pass
+
+            for i, (log_type, message_json, timestamp) in enumerate(messages):
+                # Pass the global tool results map to assistant messages
+                tool_results_map = global_tool_results_map if log_type == "assistant" else None
+
+                msg_html = render_message(log_type, message_json, timestamp, tool_results_map)
                 if msg_html:
                     # Wrap continuation summaries in collapsed details
                     if is_first and conv.get("is_continuation"):
