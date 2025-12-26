@@ -747,6 +747,30 @@ GIST_PREVIEW_JS = r"""
         var anchor = parts.length > 1 ? '#' + parts[1] : '';
         link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
     });
+
+    // Handle fragment navigation after dynamic content loads
+    // gistpreview.github.io loads content dynamically, so the browser's
+    // native fragment navigation fails because the element doesn't exist yet
+    function scrollToFragment() {
+        var hash = window.location.hash;
+        if (!hash) return false;
+        var targetId = hash.substring(1);
+        var target = document.getElementById(targetId);
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return true;
+        }
+        return false;
+    }
+
+    // Try immediately in case content is already loaded
+    if (!scrollToFragment()) {
+        // Retry with increasing delays to handle dynamic content loading
+        var delays = [100, 300, 500, 1000];
+        delays.forEach(function(delay) {
+            setTimeout(scrollToFragment, delay);
+        });
+    }
 })();
 """
 

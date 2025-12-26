@@ -365,6 +365,24 @@ class TestInjectGistPreviewJs:
         assert index_content.endswith("</body></html>")
         assert "<script>" in index_content
 
+    def test_gist_preview_js_handles_fragment_navigation(self):
+        """Test that GIST_PREVIEW_JS includes fragment navigation handling.
+
+        When accessing a gistpreview URL with a fragment like:
+        https://gistpreview.github.io/?GIST_ID/page-001.html#msg-2025-12-26T15-30-45-910Z
+
+        The content loads dynamically, so the browser's native fragment
+        navigation fails because the element doesn't exist yet. The JS
+        should scroll to the fragment element after content loads.
+        """
+        # The JS should check for fragment in URL
+        assert (
+            "location.hash" in GIST_PREVIEW_JS
+            or "window.location.hash" in GIST_PREVIEW_JS
+        )
+        # The JS should scroll to the element
+        assert "scrollIntoView" in GIST_PREVIEW_JS
+
     def test_skips_files_without_body(self, output_dir):
         """Test that files without </body> are not modified."""
         original_content = "<html><head><title>Test</title></head></html>"
