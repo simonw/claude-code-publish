@@ -755,13 +755,13 @@ def inject_gist_preview_js(output_dir):
     """Inject gist preview JavaScript into all HTML files in the output directory."""
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
-        content = html_file.read_text()
+        content = html_file.read_text(encoding="utf-8")
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
                 "</body>", f"<script>{GIST_PREVIEW_JS}</script>\n</body>"
             )
-            html_file.write_text(content)
+            html_file.write_text(content, encoding="utf-8")
 
 
 def create_gist(output_dir, public=False):
@@ -894,7 +894,9 @@ def generate_html(json_path, output_dir, github_repo=None):
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
         )
-        (output_dir / f"page-{page_num:03d}.html").write_text(page_content)
+        (output_dir / f"page-{page_num:03d}.html").write_text(
+            page_content, encoding="utf-8"
+        )
         print(f"Generated page-{page_num:03d}.html")
 
     # Calculate overall stats and collect all commits for timeline
@@ -977,7 +979,7 @@ def generate_html(json_path, output_dir, github_repo=None):
         index_items_html="".join(index_items),
     )
     index_path = output_dir / "index.html"
-    index_path.write_text(index_content)
+    index_path.write_text(index_content, encoding="utf-8")
     print(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
@@ -1308,7 +1310,9 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
         )
-        (output_dir / f"page-{page_num:03d}.html").write_text(page_content)
+        (output_dir / f"page-{page_num:03d}.html").write_text(
+            page_content, encoding="utf-8"
+        )
         click.echo(f"Generated page-{page_num:03d}.html")
 
     # Calculate overall stats and collect all commits for timeline
@@ -1391,7 +1395,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         index_items_html="".join(index_items),
     )
     index_path = output_dir / "index.html"
-    index_path.write_text(index_content)
+    index_path.write_text(index_content, encoding="utf-8")
     click.echo(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
