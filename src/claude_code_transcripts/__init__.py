@@ -155,6 +155,244 @@ def find_local_sessions(folder, limit=10):
     return results[:limit]
 
 
+def get_project_display_name(folder_name):
+    """Convert encoded folder name to readable project name.
+
+    Claude Code stores projects in folders like:
+    - -home-user-projects-myproject -> myproject
+    - -mnt-c-Users-name-Projects-app -> app
+
+    For nested paths under common roots (home, projects, code, Users, etc.),
+    extracts the meaningful project portion.
+    """
+    # Common path prefixes to strip
+    prefixes_to_strip = [
+        "-home-",
+        "-mnt-c-Users-",
+        "-mnt-c-users-",
+        "-Users-",
+    ]
+
+    name = folder_name
+    for prefix in prefixes_to_strip:
+        if name.lower().startswith(prefix.lower()):
+            name = name[len(prefix) :]
+            break
+
+    # Split on dashes and find meaningful parts
+    parts = name.split("-")
+
+    # Common intermediate directories to skip
+    skip_dirs = {"projects", "code", "repos", "src", "dev", "work", "documents"}
+
+    # Find the first meaningful part (after skipping username and common dirs)
+    meaningful_parts = []
+    found_project = False
+
+    for i, part in enumerate(parts):
+        if not part:
+            continue
+        # Skip the first part if it looks like a username (before common dirs)
+        if i == 0 and not found_project:
+            # Check if next parts contain common dirs
+            remaining = [p.lower() for p in parts[i + 1 :]]
+            if any(d in remaining for d in skip_dirs):
+                continue
+        if part.lower() in skip_dirs:
+            found_project = True
+            continue
+        meaningful_parts.append(part)
+        found_project = True
+
+    if meaningful_parts:
+        return "-".join(meaningful_parts)
+
+    # Fallback: return last non-empty part or original
+    for part in reversed(parts):
+        if part:
+            return part
+    return folder_name
+
+
+def find_all_sessions(folder, include_agents=False):
+    """Find all sessions in a Claude projects folder, grouped by project.
+
+    Returns a list of project dicts, each containing:
+    - name: display name for the project
+    - path: Path to the project folder
+    - sessions: list of session dicts with path, summary, mtime, size
+
+    Sessions are sorted by modification time (most recent first) within each project.
+    Projects are sorted by their most recent session.
+    """
+    folder = Path(folder)
+    if not folder.exists():
+        return []
+
+    projects = {}
+
+    for session_file in folder.glob("**/*.jsonl"):
+        # Skip agent files unless requested
+        if not include_agents and session_file.name.startswith("agent-"):
+            continue
+
+        # Get summary and skip boring sessions
+        summary = get_session_summary(session_file)
+        if summary.lower() == "warmup" or summary == "(no summary)":
+            continue
+
+        # Get project folder
+        project_folder = session_file.parent
+        project_key = project_folder.name
+
+        if project_key not in projects:
+            projects[project_key] = {
+                "name": get_project_display_name(project_key),
+                "path": project_folder,
+                "sessions": [],
+            }
+
+        stat = session_file.stat()
+        projects[project_key]["sessions"].append(
+            {
+                "path": session_file,
+                "summary": summary,
+                "mtime": stat.st_mtime,
+                "size": stat.st_size,
+            }
+        )
+
+    # Sort sessions within each project by mtime (most recent first)
+    for project in projects.values():
+        project["sessions"].sort(key=lambda s: s["mtime"], reverse=True)
+
+    # Convert to list and sort projects by most recent session
+    result = list(projects.values())
+    result.sort(
+        key=lambda p: p["sessions"][0]["mtime"] if p["sessions"] else 0, reverse=True
+    )
+
+    return result
+
+
+def generate_batch_html(source_folder, output_dir, include_agents=False):
+    """Generate HTML archive for all sessions in a Claude projects folder.
+
+    Creates:
+    - Master index.html listing all projects
+    - Per-project directories with index.html listing sessions
+    - Per-session directories with transcript pages
+
+    Returns statistics dict with total_projects, total_sessions, output_dir.
+    """
+    source_folder = Path(source_folder)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find all sessions
+    projects = find_all_sessions(source_folder, include_agents=include_agents)
+
+    total_sessions = 0
+
+    # Process each project
+    for project in projects:
+        project_dir = output_dir / project["name"]
+        project_dir.mkdir(exist_ok=True)
+
+        # Process each session
+        for session in project["sessions"]:
+            session_name = session["path"].stem
+            session_dir = project_dir / session_name
+
+            # Generate transcript HTML
+            generate_html(session["path"], session_dir)
+            total_sessions += 1
+
+        # Generate project index
+        _generate_project_index(project, project_dir)
+
+    # Generate master index
+    _generate_master_index(projects, output_dir)
+
+    return {
+        "total_projects": len(projects),
+        "total_sessions": total_sessions,
+        "output_dir": output_dir,
+    }
+
+
+def _generate_project_index(project, output_dir):
+    """Generate index.html for a single project."""
+    from datetime import datetime
+
+    template = get_template("project_index.html")
+
+    # Format sessions for template
+    sessions_data = []
+    for session in project["sessions"]:
+        mod_time = datetime.fromtimestamp(session["mtime"])
+        sessions_data.append(
+            {
+                "name": session["path"].stem,
+                "summary": session["summary"],
+                "date": mod_time.strftime("%Y-%m-%d %H:%M"),
+                "size_kb": session["size"] / 1024,
+            }
+        )
+
+    html = template.render(
+        project_name=project["name"],
+        sessions=sessions_data,
+        session_count=len(sessions_data),
+        css=CSS,
+        js=JS,
+    )
+
+    output_path = output_dir / "index.html"
+    output_path.write_text(html, encoding="utf-8")
+
+
+def _generate_master_index(projects, output_dir):
+    """Generate master index.html listing all projects."""
+    from datetime import datetime
+
+    template = get_template("master_index.html")
+
+    # Format projects for template
+    projects_data = []
+    total_sessions = 0
+
+    for project in projects:
+        session_count = len(project["sessions"])
+        total_sessions += session_count
+
+        # Get most recent session date
+        if project["sessions"]:
+            most_recent = datetime.fromtimestamp(project["sessions"][0]["mtime"])
+            recent_date = most_recent.strftime("%Y-%m-%d")
+        else:
+            recent_date = "N/A"
+
+        projects_data.append(
+            {
+                "name": project["name"],
+                "session_count": session_count,
+                "recent_date": recent_date,
+            }
+        )
+
+    html = template.render(
+        projects=projects_data,
+        total_projects=len(projects),
+        total_sessions=total_sessions,
+        css=CSS,
+        js=JS,
+    )
+
+    output_path = output_dir / "index.html"
+    output_path.write_text(html, encoding="utf-8")
+
+
 def parse_session_file(filepath):
     """Parse a session file and return normalized data.
 
@@ -1545,6 +1783,118 @@ def web_cmd(
         click.echo(f"Preview: {preview_url}")
 
     if open_browser or auto_open:
+        index_url = (output / "index.html").resolve().as_uri()
+        webbrowser.open(index_url)
+
+
+@cli.command("batch")
+@click.option(
+    "-s",
+    "--source",
+    type=click.Path(exists=True),
+    help="Source directory containing Claude projects (default: ~/.claude/projects).",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(),
+    default="./claude-archive",
+    help="Output directory for the archive (default: ./claude-archive).",
+)
+@click.option(
+    "--include-agents",
+    is_flag=True,
+    help="Include agent-* session files (excluded by default).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be converted without creating files.",
+)
+@click.option(
+    "--open",
+    "open_browser",
+    is_flag=True,
+    help="Open the generated archive in your default browser.",
+)
+def batch_cmd(source, output, include_agents, dry_run, open_browser):
+    """Convert all local Claude Code sessions to a browsable HTML archive.
+
+    Creates a directory structure with:
+    - Master index listing all projects
+    - Per-project pages listing sessions
+    - Individual session transcripts
+    """
+    from datetime import datetime
+
+    # Default source folder
+    if source is None:
+        source = Path.home() / ".claude" / "projects"
+    else:
+        source = Path(source)
+
+    if not source.exists():
+        raise click.ClickException(f"Source directory not found: {source}")
+
+    output = Path(output)
+
+    click.echo(f"Scanning {source}...")
+    projects = find_all_sessions(source, include_agents=include_agents)
+
+    if not projects:
+        click.echo("No sessions found.")
+        return
+
+    # Calculate totals
+    total_sessions = sum(len(p["sessions"]) for p in projects)
+
+    click.echo(f"Found {len(projects)} projects with {total_sessions} sessions")
+
+    if dry_run:
+        click.echo("\nDry run - would convert:")
+        for project in projects:
+            click.echo(f"\n  {project['name']} ({len(project['sessions'])} sessions)")
+            for session in project["sessions"][:3]:  # Show first 3
+                mod_time = datetime.fromtimestamp(session["mtime"])
+                click.echo(
+                    f"    - {session['path'].stem} ({mod_time.strftime('%Y-%m-%d')})"
+                )
+            if len(project["sessions"]) > 3:
+                click.echo(f"    ... and {len(project['sessions']) - 3} more")
+        return
+
+    click.echo(f"\nGenerating archive in {output}...")
+
+    # Track progress
+    processed = 0
+    for project in projects:
+        project_dir = output / project["name"]
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        for session in project["sessions"]:
+            session_name = session["path"].stem
+            session_dir = project_dir / session_name
+
+            # Generate transcript HTML
+            generate_html(session["path"], session_dir)
+            processed += 1
+
+            # Progress indicator
+            if processed % 10 == 0:
+                click.echo(f"  Processed {processed}/{total_sessions} sessions...")
+
+        # Generate project index
+        _generate_project_index(project, project_dir)
+
+    # Generate master index
+    _generate_master_index(projects, output)
+
+    click.echo(
+        f"\nGenerated archive with {len(projects)} projects, {total_sessions} sessions"
+    )
+    click.echo(f"Output: {output.resolve()}")
+
+    if open_browser:
         index_url = (output / "index.html").resolve().as_uri()
         webbrowser.open(index_url)
 
