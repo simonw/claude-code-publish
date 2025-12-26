@@ -26,11 +26,12 @@ uvx claude-code-transcripts --help
 
 This tool converts Claude Code session files into browseable multi-page HTML transcripts.
 
-There are three commands available:
+There are four commands available:
 
 - `local` (default) - select from local Claude Code sessions stored in `~/.claude/projects`
 - `web` - select from web sessions via the Claude API
 - `json` - convert a specific JSON or JSONL session file
+- `batch` - convert all local sessions to a browsable HTML archive
 
 The quickest way to view a recent local session:
 
@@ -98,6 +99,44 @@ claude-code-transcripts json session.jsonl --open
 ```
 
 When using [Claude Code for web](https://claude.ai/code) you can export your session as a `session.json` file using the `teleport` command.
+
+### Batch conversion
+
+Convert all your local Claude Code sessions to a browsable HTML archive:
+
+```bash
+claude-code-transcripts batch
+```
+
+This creates a directory structure with:
+- A master index listing all projects
+- Per-project pages listing sessions
+- Individual session transcripts
+
+Options:
+
+- `-s, --source DIRECTORY` - source directory (default: `~/.claude/projects`)
+- `-o, --output DIRECTORY` - output directory (default: `./claude-archive`)
+- `--include-agents` - include agent session files (excluded by default)
+- `--dry-run` - show what would be converted without creating files
+- `--open` - open the generated archive in your default browser
+- `-q, --quiet` - suppress all output except errors
+
+Examples:
+
+```bash
+# Preview what would be converted
+claude-code-transcripts batch --dry-run
+
+# Convert all sessions and open in browser
+claude-code-transcripts batch --open
+
+# Convert to a specific directory
+claude-code-transcripts batch -o ./my-archive
+
+# Include agent sessions
+claude-code-transcripts batch --include-agents
+```
 
 ### Auto-naming output directories
 
