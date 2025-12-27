@@ -48,6 +48,33 @@ LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
 
+
+def extract_text_from_content(content):
+    """Extract plain text from message content.
+
+    Handles both string content (older format) and array content (newer format).
+
+    Args:
+        content: Either a string or a list of content blocks like
+                 [{"type": "text", "text": "..."}, {"type": "image", ...}]
+
+    Returns:
+        The extracted text as a string, or empty string if no text found.
+    """
+    if isinstance(content, str):
+        return content.strip()
+    elif isinstance(content, list):
+        # Extract text from content blocks of type "text"
+        texts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "")
+                if text:
+                    texts.append(text)
+        return " ".join(texts).strip()
+    return ""
+
+
 # Module-level variable for GitHub repo (set by generate_html)
 _github_repo = None
 
@@ -75,10 +102,11 @@ def get_session_summary(filepath, max_length=200):
                 if entry.get("type") == "user":
                     msg = entry.get("message", {})
                     content = msg.get("content", "")
-                    if isinstance(content, str) and content.strip():
-                        if len(content) > max_length:
-                            return content[: max_length - 3] + "..."
-                        return content
+                    text = extract_text_from_content(content)
+                    if text:
+                        if len(text) > max_length:
+                            return text[: max_length - 3] + "..."
+                        return text
             return "(no summary)"
     except Exception:
         return "(no summary)"
@@ -117,12 +145,11 @@ def _get_jsonl_summary(filepath, max_length=200):
                         and obj.get("message", {}).get("content")
                     ):
                         content = obj["message"]["content"]
-                        if isinstance(content, str):
-                            content = content.strip()
-                            if content and not content.startswith("<"):
-                                if len(content) > max_length:
-                                    return content[: max_length - 3] + "..."
-                                return content
+                        text = extract_text_from_content(content)
+                        if text and not text.startswith("<"):
+                            if len(text) > max_length:
+                                return text[: max_length - 3] + "..."
+                            return text
                 except json.JSONDecodeError:
                     continue
     except Exception:
@@ -1144,9 +1171,10 @@ def generate_html(json_path, output_dir, github_repo=None):
         user_text = None
         if log_type == "user":
             content = message_data.get("content", "")
-            if isinstance(content, str) and content.strip():
+            text = extract_text_from_content(content)
+            if text:
                 is_user_prompt = True
-                user_text = content
+                user_text = text
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)
@@ -1558,9 +1586,10 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         user_text = None
         if log_type == "user":
             content = message_data.get("content", "")
-            if isinstance(content, str) and content.strip():
+            text = extract_text_from_content(content)
+            if text:
                 is_user_prompt = True
-                user_text = content
+                user_text = text
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)

@@ -91,6 +91,32 @@ class TestGenerateHtml:
         repo = detect_github_repo(loglines)
         assert repo == "example/project"
 
+    def test_handles_array_content_format(self, tmp_path):
+        """Test that user messages with array content format are recognized.
+
+        Claude Code v2.0.76+ uses array content format like:
+        {"type": "user", "message": {"content": [{"type": "text", "text": "..."}]}}
+        instead of the simpler string format:
+        {"type": "user", "message": {"content": "..."}}
+        """
+        jsonl_file = tmp_path / "session.jsonl"
+        jsonl_file.write_text(
+            '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Hello from array format"}]}}\n'
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there!"}]}}\n'
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(jsonl_file, output_dir)
+
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+        # Should have 1 prompt, not 0
+        assert "1 prompts" in index_html or "1 prompt" in index_html
+        assert "0 prompts" not in index_html
+        # The page file should exist
+        assert (output_dir / "page-001.html").exists()
+
 
 class TestRenderFunctions:
     """Tests for individual render functions."""
