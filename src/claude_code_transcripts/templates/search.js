@@ -15,6 +15,42 @@
     // Show search box (progressive enhancement)
     searchBox.style.display = 'flex';
 
+    // Gist preview support - detect if we're on gistpreview.github.io
+    var isGistPreview = window.location.hostname === 'gistpreview.github.io';
+    var gistId = null;
+    var gistOwner = null;
+    var gistInfoLoaded = false;
+
+    if (isGistPreview) {
+        // Extract gist ID from URL path like /gist-id/index.html or /gist-id/raw/index.html
+        var pathMatch = window.location.pathname.match(/^\/([a-f0-9]+)/i);
+        if (pathMatch) {
+            gistId = pathMatch[1];
+        }
+    }
+
+    async function loadGistInfo() {
+        if (!isGistPreview || !gistId || gistInfoLoaded) return;
+        try {
+            var response = await fetch('https://api.github.com/gists/' + gistId);
+            if (response.ok) {
+                var info = await response.json();
+                gistOwner = info.owner.login;
+                gistInfoLoaded = true;
+            }
+        } catch (e) {
+            console.error('Failed to load gist info:', e);
+        }
+    }
+
+    function getPageUrl(pageFile) {
+        if (isGistPreview && gistOwner && gistId) {
+            // Use raw gist URL for fetching
+            return 'https://gist.githubusercontent.com/' + gistOwner + '/' + gistId + '/raw/' + pageFile;
+        }
+        return pageFile;
+    }
+
     function escapeHtml(text) {
         var div = document.createElement('div');
         div.textContent = text;
@@ -135,6 +171,16 @@
         searchResults.innerHTML = '';
         searchStatus.textContent = 'Searching...';
 
+        // Load gist info if on gistpreview (needed for constructing URLs)
+        if (isGistPreview && !gistInfoLoaded) {
+            searchStatus.textContent = 'Loading gist info...';
+            await loadGistInfo();
+            if (!gistOwner) {
+                searchStatus.textContent = 'Failed to load gist info. Search unavailable.';
+                return;
+            }
+        }
+
         var resultsFound = 0;
         var pagesSearched = 0;
 
@@ -144,6 +190,8 @@
             pagesToFetch.push('page-' + String(i).padStart(3, '0') + '.html');
         }
 
+        searchStatus.textContent = 'Searching...';
+
         // Process pages in batches of 3, but show results immediately as each completes
         var batchSize = 3;
         for (var i = 0; i < pagesToFetch.length; i += batchSize) {
@@ -151,7 +199,7 @@
 
             // Create promises that process results immediately when each fetch completes
             var promises = batch.map(function(pageFile) {
-                return fetch(pageFile)
+                return fetch(getPageUrl(pageFile))
                     .then(function(response) {
                         if (!response.ok) throw new Error('Failed to fetch');
                         return response.text();
