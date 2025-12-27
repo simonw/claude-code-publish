@@ -81,6 +81,15 @@
         });
     }
 
+    function fixInternalLinks(element, pageFile) {
+        // Update all internal anchor links to include the page file
+        var links = element.querySelectorAll('a[href^="#"]');
+        links.forEach(function(link) {
+            var href = link.getAttribute('href');
+            link.setAttribute('href', pageFile + href);
+        });
+    }
+
     function processPage(pageFile, html, query) {
         var parser = new DOMParser();
         var doc = parser.parseFromString(html, 'text/html');
@@ -99,6 +108,8 @@
 
                 // Clone the message HTML and highlight matches
                 var clone = msg.cloneNode(true);
+                // Fix internal links to include the page file
+                fixInternalLinks(clone, pageFile);
                 highlightTextNodes(clone, query);
 
                 var resultDiv = document.createElement('div');
