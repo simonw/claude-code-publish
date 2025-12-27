@@ -11,6 +11,7 @@ from claude_code_transcripts import (
     CodeViewData,
     extract_file_operations,
     build_file_tree,
+    generate_code_view_html,
     PROMPTS_PER_PAGE,
 )
 
@@ -539,3 +540,48 @@ class TestReconstructFileWithBlame:
         assert "x = 1" in final_content
         assert "y = 2" in final_content
         assert "return x + y" in final_content
+
+
+class TestGenerateCodeViewHtml:
+    """Tests for generate_code_view_html function."""
+
+    def test_escapes_script_tags_in_json(self, tmp_path):
+        """Test that </script> and <!-- are escaped to prevent HTML injection."""
+        # Content with dangerous HTML sequences
+        content = 'console.log("</script>"); // <!-- comment'
+
+        fs = FileState("/test/path.js")
+        fs.operations = [
+            FileOperation(
+                file_path="/test/path.js",
+                operation_type="write",
+                tool_id="t1",
+                timestamp="2024-01-01T10:00:00Z",
+                page_num=1,
+                msg_id="msg-001",
+                content=content,
+            )
+        ]
+        fs.final_content = content
+        fs.blame_lines = [(content, fs.operations[0])]
+        fs.diff_only = False
+
+        file_states = {"/test/path.js": fs}
+
+        generate_code_view_html(tmp_path, file_states, mode="full")
+
+        html = (tmp_path / "code.html").read_text()
+
+        # Find the JSON part - between const fileData and the first semicolon
+        start = html.find("const fileData")
+        end = html.find("</script>", start)  # Should find the closing tag, not content
+
+        json_section = html[start:end]
+
+        # Check that </script> is escaped in the JSON
+        assert "<\\/script>" in json_section
+        # Check that <!-- is escaped
+        assert "<\\!--" in json_section
+        # Make sure the literal strings don't appear unescaped
+        assert "</script>" not in json_section
+        assert "<!--" not in json_section

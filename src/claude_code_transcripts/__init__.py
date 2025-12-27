@@ -704,8 +704,13 @@ def generate_code_view_html(
     file_tree_html = render_file_tree_html(file_tree)
 
     # Convert file states to JSON for JavaScript
+    # Escape sequences that would break HTML parsing when embedded in <script>
     file_data = {path: file_state_to_dict(fs) for path, fs in file_states.items()}
     file_data_json = json.dumps(file_data)
+    # Escape </ to prevent </script> from closing the script tag prematurely
+    file_data_json = file_data_json.replace("</", "<\\/")
+    # Escape <!-- to prevent HTML comment injection
+    file_data_json = file_data_json.replace("<!--", "<\\!--")
 
     # Get templates
     code_view_template = get_template("code_view.html")
