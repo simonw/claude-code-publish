@@ -299,23 +299,23 @@ class TestGenerateBatchHtml:
             assert "Simulated failure" in stats["failed_sessions"][0]["error"]
 
 
-class TestBatchCommand:
-    """Tests for the batch CLI command."""
+class TestAllCommand:
+    """Tests for the all CLI command."""
 
-    def test_batch_command_exists(self):
-        """Test that batch command is registered."""
+    def test_all_command_exists(self):
+        """Test that all command is registered."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["batch", "--help"])
+        result = runner.invoke(cli, ["all", "--help"])
         assert result.exit_code == 0
-        assert "batch" in result.output.lower() or "convert" in result.output.lower()
+        assert "all" in result.output.lower() or "convert" in result.output.lower()
 
-    def test_batch_dry_run(self, mock_projects_dir, output_dir):
+    def test_all_dry_run(self, mock_projects_dir, output_dir):
         """Test dry-run mode shows what would be converted."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "batch",
+                "all",
                 "--source",
                 str(mock_projects_dir),
                 "--output",
@@ -330,13 +330,13 @@ class TestBatchCommand:
         # Dry run should not create files
         assert not (output_dir / "index.html").exists()
 
-    def test_batch_creates_archive(self, mock_projects_dir, output_dir):
-        """Test batch command creates full archive."""
+    def test_all_creates_archive(self, mock_projects_dir, output_dir):
+        """Test all command creates full archive."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "batch",
+                "all",
                 "--source",
                 str(mock_projects_dir),
                 "--output",
@@ -347,13 +347,13 @@ class TestBatchCommand:
         assert result.exit_code == 0
         assert (output_dir / "index.html").exists()
 
-    def test_batch_include_agents_flag(self, mock_projects_dir, output_dir):
+    def test_all_include_agents_flag(self, mock_projects_dir, output_dir):
         """Test --include-agents flag includes agent sessions."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "batch",
+                "all",
                 "--source",
                 str(mock_projects_dir),
                 "--output",
@@ -368,13 +368,13 @@ class TestBatchCommand:
         session_dirs = [d for d in project_a_dir.iterdir() if d.is_dir()]
         assert len(session_dirs) == 3  # 2 regular + 1 agent
 
-    def test_batch_quiet_flag(self, mock_projects_dir, output_dir):
+    def test_all_quiet_flag(self, mock_projects_dir, output_dir):
         """Test --quiet flag suppresses non-error output."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "batch",
+                "all",
                 "--source",
                 str(mock_projects_dir),
                 "--output",
@@ -391,13 +391,13 @@ class TestBatchCommand:
         assert "Processed" not in result.output
         assert "Generating" not in result.output
 
-    def test_batch_quiet_with_dry_run(self, mock_projects_dir, output_dir):
+    def test_all_quiet_with_dry_run(self, mock_projects_dir, output_dir):
         """Test --quiet flag works with --dry-run."""
         runner = CliRunner()
         result = runner.invoke(
             cli,
             [
-                "batch",
+                "all",
                 "--source",
                 str(mock_projects_dir),
                 "--output",

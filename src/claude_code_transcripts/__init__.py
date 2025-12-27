@@ -1813,7 +1813,7 @@ def web_cmd(
         webbrowser.open(index_url)
 
 
-@cli.command("batch")
+@cli.command("all")
 @click.option(
     "-s",
     "--source",
@@ -1849,7 +1849,7 @@ def web_cmd(
     is_flag=True,
     help="Suppress all output except errors.",
 )
-def batch_cmd(source, output, include_agents, dry_run, open_browser, quiet):
+def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
     """Convert all local Claude Code sessions to a browsable HTML archive.
 
     Creates a directory structure with:

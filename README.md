@@ -31,7 +31,7 @@ There are four commands available:
 - `local` (default) - select from local Claude Code sessions stored in `~/.claude/projects`
 - `web` - select from web sessions via the Claude API
 - `json` - convert a specific JSON or JSONL session file
-- `batch` - convert all local sessions to a browsable HTML archive
+- `all` - convert all local sessions to a browsable HTML archive
 
 The quickest way to view a recent local session:
 
@@ -100,12 +100,12 @@ claude-code-transcripts json session.jsonl --open
 
 When using [Claude Code for web](https://claude.ai/code) you can export your session as a `session.json` file using the `teleport` command.
 
-### Batch conversion
+### Converting all sessions
 
 Convert all your local Claude Code sessions to a browsable HTML archive:
 
 ```bash
-claude-code-transcripts batch
+claude-code-transcripts all
 ```
 
 This creates a directory structure with:
@@ -126,16 +126,16 @@ Examples:
 
 ```bash
 # Preview what would be converted
-claude-code-transcripts batch --dry-run
+claude-code-transcripts all --dry-run
 
 # Convert all sessions and open in browser
-claude-code-transcripts batch --open
+claude-code-transcripts all --open
 
 # Convert to a specific directory
-claude-code-transcripts batch -o ./my-archive
+claude-code-transcripts all -o ./my-archive
 
 # Include agent sessions
-claude-code-transcripts batch --include-agents
+claude-code-transcripts all --include-agents
 ```
 
 ### Auto-naming output directories
