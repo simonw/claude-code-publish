@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Claude Code Archive{% endblock %}
+
+{% block content %}
+        <h1>Claude Code Archive</h1>
+        <p style="color: var(--text-muted); margin-bottom: 24px;">{{ total_projects }} projects · {{ total_sessions }} sessions</p>
+
+        {% for project in projects %}
+        <div class="index-item">
+            <a href="{{ project.name }}/index.html">
+                <div class="index-item-header">
+                    <span class="index-item-number">{{ project.name }}</span>
+                    <time>{{ project.recent_date }}</time>
+                </div>
+                <div class="index-item-content">
+                    <p style="margin: 0;">{{ project.session_count }} session{% if project.session_count != 1 %}s{% endif %}</p>
+                </div>
+            </a>
+        </div>
+        {% endfor %}
+{%- endblock %}
