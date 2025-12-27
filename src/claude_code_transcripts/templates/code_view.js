@@ -10,7 +10,6 @@ import {markdown} from 'https://esm.sh/@codemirror/lang-markdown@6';
 
 // File data embedded in page
 const fileData = {{ file_data_json|safe }};
-const mode = '{{ mode }}';
 
 // Current editor instance
 let currentEditor = null;

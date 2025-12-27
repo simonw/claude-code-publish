@@ -14,9 +14,6 @@
         <div class="code-viewer">
             <div class="file-tree-panel">
                 <h3>Files Modified</h3>
-                <div class="mode-badge {{ 'full-mode' if mode == 'full' else 'diff-mode' }}">
-                    {{ 'Full View' if mode == 'full' else 'Diff Only' }}
-                </div>
                 <ul class="file-tree" id="file-tree">
                     {{ file_tree_html|safe }}
                 </ul>

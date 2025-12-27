@@ -1,6 +1,5 @@
 """Convert Claude Code session JSON to a clean mobile-friendly HTML page with pagination."""
 
-import base64
 import json
 import html
 import os
@@ -336,99 +335,6 @@ def parse_repo_value(repo: Optional[str]) -> Tuple[Optional[str], Optional[Path]
     return None, None
 
 
-def get_initial_file_content(
-    file_path: str,
-    repo_path: Optional[str],
-    session_cwd: Optional[str] = None,
-) -> Optional[str]:
-    """Get the initial content of a file from git (before session modifications).
-
-    Supports both local git repos and public GitHub URLs.
-
-    Args:
-        file_path: Absolute path to the file.
-        repo_path: Either a local path to a git repo, or a GitHub URL.
-        session_cwd: The session's working directory (for resolving relative paths).
-
-    Returns:
-        The file content, or None if the file doesn't exist or can't be fetched.
-    """
-    if not repo_path:
-        return None
-
-    # Determine if repo_path is a URL or local path
-    if is_url(repo_path):
-        return _get_file_from_github(file_path, repo_path, session_cwd)
-    else:
-        return _get_file_from_local_git(file_path, repo_path)
-
-
-def _get_file_from_local_git(file_path: str, repo_path: str) -> Optional[str]:
-    """Get file content from a local git repo using git show."""
-    repo = Path(repo_path)
-    target = Path(file_path)
-
-    # Get relative path from repo root
-    try:
-        rel_path = target.relative_to(repo)
-    except ValueError:
-        # File is not inside the repo
-        return None
-
-    # Use git show HEAD:path to get the committed content
-    try:
-        result = subprocess.run(
-            ["git", "show", f"HEAD:{rel_path}"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            return result.stdout
-        return None
-    except Exception:
-        return None
-
-
-def _get_file_from_github(
-    file_path: str, github_url: str, session_cwd: Optional[str] = None
-) -> Optional[str]:
-    """Get file content from a public GitHub repo via the API."""
-    # Extract owner/repo from URL
-    match = re.search(r"github\.com/([^/]+/[^/?#]+)", github_url)
-    if not match:
-        return None
-
-    owner_repo = match.group(1)
-    if owner_repo.endswith(".git"):
-        owner_repo = owner_repo[:-4]
-
-    # Get relative path from session cwd
-    if session_cwd:
-        try:
-            rel_path = Path(file_path).relative_to(session_cwd)
-        except ValueError:
-            # Fall back to using the file path as-is
-            rel_path = Path(file_path).name
-    else:
-        rel_path = Path(file_path).name
-
-    # Fetch from GitHub API
-    api_url = f"https://api.github.com/repos/{owner_repo}/contents/{rel_path}"
-    try:
-        response = httpx.get(api_url, timeout=10.0)
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-
-        data = response.json()
-        if data.get("encoding") == "base64":
-            return base64.b64decode(data["content"]).decode("utf-8")
-        return None
-    except Exception:
-        return None
-
-
 def reconstruct_file_with_blame(
     initial_content: Optional[str],
     operations: List[FileOperation],
@@ -526,15 +432,11 @@ def reconstruct_file_with_blame(
 
 def build_file_states(
     operations: List[FileOperation],
-    repo_path: Optional[str] = None,
-    session_cwd: Optional[str] = None,
 ) -> Dict[str, FileState]:
     """Build FileState objects from a list of file operations.
 
     Args:
         operations: List of FileOperation objects.
-        repo_path: Optional path to git repo or GitHub URL for full mode.
-        session_cwd: The session's working directory (for resolving relative paths).
 
     Returns:
         Dict mapping file paths to FileState objects.
@@ -557,28 +459,9 @@ def build_file_states(
             diff_only=True,  # Default to diff-only
         )
 
-        # Determine initial content
-        initial_content = None
-
-        # Check if first operation is a Write (file creation)
+        # If first operation is a Write (file creation), we can show full content
         if ops[0].operation_type == "write":
-            # File was created during session - no initial content needed
-            initial_content = None
-            file_state.diff_only = False
-        elif repo_path:
-            # Try to get initial content from git/GitHub
-            initial_content = get_initial_file_content(
-                file_path, repo_path, session_cwd
-            )
-            if initial_content is not None:
-                file_state.initial_content = initial_content
-                file_state.diff_only = False
-
-        # Reconstruct final content with blame if we can
-        if not file_state.diff_only or ops[0].operation_type == "write":
-            final_content, blame_lines = reconstruct_file_with_blame(
-                initial_content, ops
-            )
+            final_content, blame_lines = reconstruct_file_with_blame(None, ops)
             file_state.final_content = final_content
             file_state.blame_lines = blame_lines
             file_state.diff_only = False
@@ -688,14 +571,12 @@ def file_state_to_dict(file_state: FileState) -> Dict[str, Any]:
 def generate_code_view_html(
     output_dir: Path,
     file_states: Dict[str, FileState],
-    mode: str = "diff_only",
 ) -> None:
     """Generate the code.html file.
 
     Args:
         output_dir: Output directory.
         file_states: Dict of file paths to FileState objects.
-        mode: Either "full" or "diff_only".
     """
     # Build file tree
     file_tree = build_file_tree(file_states)
@@ -719,14 +600,12 @@ def generate_code_view_html(
     # Render JavaScript with data
     code_view_js = code_view_js_template.render(
         file_data_json=file_data_json,
-        mode=mode,
     )
 
     # Render page
     page_content = code_view_template.render(
         css=CSS,
         js=JS,
-        mode=mode,
         file_tree_html=file_tree_html,
         code_view_js=code_view_js,
     )
@@ -1969,13 +1848,6 @@ def generate_html(
     total_convs = len(conversations)
     total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
 
-    # Get session cwd for code view file path resolution
-    session_cwd = None
-    for entry in loglines:
-        if entry.get("type") == "system" and "cwd" in entry.get("message", {}):
-            session_cwd = entry["message"]["cwd"]
-            break
-
     # Determine if code view will be generated (for tab navigation)
     has_code_view = False
     file_operations = None
@@ -2102,11 +1974,8 @@ def generate_html(
 
     # Generate code view if requested
     if has_code_view:
-        file_states = build_file_states(
-            file_operations, repo_path=repo_path, session_cwd=session_cwd
-        )
-        mode = "full" if repo_path else "diff_only"
-        generate_code_view_html(output_dir, file_states, mode=mode)
+        file_states = build_file_states(file_operations)
+        generate_code_view_html(output_dir, file_states)
         print(f"Generated code.html ({len(file_states)} files)")
 
 
@@ -2462,13 +2331,6 @@ def generate_html_from_session_data(
     total_convs = len(conversations)
     total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
 
-    # Get session cwd for code view file path resolution
-    session_cwd = None
-    for entry in loglines:
-        if entry.get("type") == "system" and "cwd" in entry.get("message", {}):
-            session_cwd = entry["message"]["cwd"]
-            break
-
     # Determine if code view will be generated (for tab navigation)
     has_code_view = False
     file_operations = None
@@ -2595,11 +2457,8 @@ def generate_html_from_session_data(
 
     # Generate code view if requested
     if has_code_view:
-        file_states = build_file_states(
-            file_operations, repo_path=repo_path, session_cwd=session_cwd
-        )
-        mode = "full" if repo_path else "diff_only"
-        generate_code_view_html(output_dir, file_states, mode=mode)
+        file_states = build_file_states(file_operations)
+        generate_code_view_html(output_dir, file_states)
         click.echo(f"Generated code.html ({len(file_states)} files)")
 
 

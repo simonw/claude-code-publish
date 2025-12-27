@@ -299,115 +299,6 @@ class TestCodeViewDataDataclass:
         assert data.repo_path == "/path/to/repo"
 
 
-class TestGetInitialFileContent:
-    """Tests for the get_initial_file_content function."""
-
-    def test_local_git_repo(self, tmp_path):
-        """Test fetching file content from a local git repo."""
-        from claude_code_transcripts import get_initial_file_content
-        import subprocess
-
-        # Create a git repo with a file
-        repo_dir = tmp_path / "repo"
-        repo_dir.mkdir()
-        test_file = repo_dir / "test.py"
-        test_file.write_text("print('hello')\n")
-
-        # Initialize git repo and commit
-        subprocess.run(["git", "init"], cwd=repo_dir, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"],
-            cwd=repo_dir,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"], cwd=repo_dir, capture_output=True
-        )
-        subprocess.run(["git", "add", "test.py"], cwd=repo_dir, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-m", "Initial"], cwd=repo_dir, capture_output=True
-        )
-
-        # Get content using the function
-        content = get_initial_file_content(str(test_file), str(repo_dir))
-        assert content == "print('hello')\n"
-
-    def test_local_repo_file_not_found(self, tmp_path):
-        """Test that non-existent file returns None."""
-        from claude_code_transcripts import get_initial_file_content
-        import subprocess
-
-        # Create an empty git repo
-        repo_dir = tmp_path / "repo"
-        repo_dir.mkdir()
-        subprocess.run(["git", "init"], cwd=repo_dir, capture_output=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"],
-            cwd=repo_dir,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"], cwd=repo_dir, capture_output=True
-        )
-        # Create and commit a dummy file to make HEAD valid
-        dummy = repo_dir / "dummy.txt"
-        dummy.write_text("dummy")
-        subprocess.run(["git", "add", "dummy.txt"], cwd=repo_dir, capture_output=True)
-        subprocess.run(
-            ["git", "commit", "-m", "Initial"], cwd=repo_dir, capture_output=True
-        )
-
-        # Try to get non-existent file
-        content = get_initial_file_content(
-            str(repo_dir / "nonexistent.py"), str(repo_dir)
-        )
-        assert content is None
-
-    def test_github_url_public_repo(self, httpx_mock):
-        """Test fetching file content from a public GitHub repo."""
-        from claude_code_transcripts import get_initial_file_content
-
-        # Mock GitHub API response
-        httpx_mock.add_response(
-            url="https://api.github.com/repos/owner/repo/contents/src/main.py",
-            json={
-                "content": "cHJpbnQoJ2hlbGxvJykK",  # base64 for "print('hello')\n"
-                "encoding": "base64",
-            },
-        )
-
-        content = get_initial_file_content(
-            "/path/to/project/src/main.py",
-            "https://github.com/owner/repo",
-            session_cwd="/path/to/project",
-        )
-        assert content == "print('hello')\n"
-
-    def test_github_url_file_not_found(self, httpx_mock):
-        """Test that non-existent GitHub file returns None."""
-        from claude_code_transcripts import get_initial_file_content
-
-        # Mock 404 response
-        httpx_mock.add_response(
-            url="https://api.github.com/repos/owner/repo/contents/nonexistent.py",
-            status_code=404,
-        )
-
-        content = get_initial_file_content(
-            "/path/to/project/nonexistent.py",
-            "https://github.com/owner/repo",
-            session_cwd="/path/to/project",
-        )
-        assert content is None
-
-    def test_no_repo_path_returns_none(self):
-        """Test that None repo_path returns None content."""
-        from claude_code_transcripts import get_initial_file_content
-
-        content = get_initial_file_content("/some/file.py", None)
-        assert content is None
-
-
 class TestReconstructFileWithBlame:
     """Tests for the reconstruct_file_with_blame function."""
 
@@ -568,7 +459,7 @@ class TestGenerateCodeViewHtml:
 
         file_states = {"/test/path.js": fs}
 
-        generate_code_view_html(tmp_path, file_states, mode="full")
+        generate_code_view_html(tmp_path, file_states)
 
         html = (tmp_path / "code.html").read_text()
 
