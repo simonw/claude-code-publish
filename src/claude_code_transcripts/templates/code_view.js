@@ -129,9 +129,75 @@ const activeRangeField = StateField.define({
     provide: f => EditorView.decorations.from(f)
 });
 
+// Create the scrollbar minimap showing blame range positions
+function createMinimap(container, blameRanges, totalLines, editor) {
+    // Remove existing minimap if any
+    const existing = container.querySelector('.blame-minimap');
+    if (existing) existing.remove();
+
+    // Only show minimap if there are ranges with msg_id
+    const hasRanges = blameRanges.some(r => r.msg_id);
+    if (!hasRanges || totalLines === 0) return null;
+
+    const minimap = document.createElement('div');
+    minimap.className = 'blame-minimap';
+
+    // Track color index only for ranges with msg_id (same logic as decorations)
+    let colorIndex = 0;
+
+    blameRanges.forEach((range, index) => {
+        if (!range.msg_id) return;
+
+        const color = rangeColors[colorIndex % rangeColors.length];
+        colorIndex++;
+
+        const startPercent = ((range.start - 1) / totalLines) * 100;
+        const endPercent = (range.end / totalLines) * 100;
+        const height = Math.max(endPercent - startPercent, 0.5); // Min 0.5% height
+
+        const marker = document.createElement('div');
+        marker.className = 'minimap-marker';
+        marker.style.top = startPercent + '%';
+        marker.style.height = height + '%';
+        marker.style.backgroundColor = color.replace('0.15', '0.6'); // More opaque
+        marker.dataset.rangeIndex = index;
+        marker.dataset.line = range.start;
+        marker.title = `Lines ${range.start}-${range.end}`;
+
+        // Click to scroll to that range
+        marker.addEventListener('click', () => {
+            const doc = editor.state.doc;
+            if (range.start <= doc.lines) {
+                const lineInfo = doc.line(range.start);
+                editor.dispatch({
+                    effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' })
+                });
+                highlightRange(index, blameRanges, editor);
+                if (range.msg_id) {
+                    scrollToMessage(range.msg_id);
+                }
+            }
+        });
+
+        minimap.appendChild(marker);
+    });
+
+    container.appendChild(minimap);
+    return minimap;
+}
+
 // Create editor for a file
 function createEditor(container, content, blameRanges, filePath) {
     container.innerHTML = '';
+
+    // Create wrapper for editor + minimap
+    const wrapper = document.createElement('div');
+    wrapper.className = 'editor-wrapper';
+    container.appendChild(wrapper);
+
+    const editorContainer = document.createElement('div');
+    editorContainer.className = 'editor-container';
+    wrapper.appendChild(editorContainer);
 
     const doc = EditorState.create({doc: content}).doc;
     const rangeDecorations = createRangeDecorations(blameRanges, doc);
@@ -177,8 +243,11 @@ function createEditor(container, content, blameRanges, filePath) {
 
     currentEditor = new EditorView({
         state,
-        parent: container,
+        parent: editorContainer,
     });
+
+    // Create minimap after editor
+    createMinimap(wrapper, blameRanges, doc.lines, currentEditor);
 
     return currentEditor;
 }

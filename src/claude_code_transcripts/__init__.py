@@ -1924,6 +1924,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 #current-file-path { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-weight: 600; font-size: 0.9rem; word-break: break-all; }
 #code-content { flex: 1; overflow: auto; }
 .no-file-selected { padding: 32px; text-align: center; color: var(--text-muted); }
+.editor-wrapper { display: flex; height: 100%; }
+.editor-container { flex: 1; overflow: auto; }
+.blame-minimap { width: 10px; background: rgba(0,0,0,0.05); position: relative; flex-shrink: 0; border-left: 1px solid rgba(0,0,0,0.1); }
+.minimap-marker { position: absolute; left: 0; right: 0; cursor: pointer; transition: opacity 0.15s; }
+.minimap-marker:hover { opacity: 0.8; }
 
 /* File Tree */
 .file-tree { list-style: none; padding: 0; margin: 0; }
