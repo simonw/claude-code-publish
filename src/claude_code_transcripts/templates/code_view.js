@@ -194,9 +194,35 @@ function highlightRange(rangeIndex, blameRanges, view) {
     });
 }
 
+// Initialize truncation for elements within a container
+function initTruncation(container) {
+    container.querySelectorAll('.truncatable:not(.truncation-initialized)').forEach(function(wrapper) {
+        wrapper.classList.add('truncation-initialized');
+        const content = wrapper.querySelector('.truncatable-content');
+        const btn = wrapper.querySelector('.expand-btn');
+        if (content && content.scrollHeight > 250) {
+            wrapper.classList.add('truncated');
+            if (btn) {
+                btn.addEventListener('click', function() {
+                    if (wrapper.classList.contains('truncated')) {
+                        wrapper.classList.remove('truncated');
+                        wrapper.classList.add('expanded');
+                        btn.textContent = 'Show less';
+                    } else {
+                        wrapper.classList.remove('expanded');
+                        wrapper.classList.add('truncated');
+                        btn.textContent = 'Show more';
+                    }
+                });
+            }
+        }
+    });
+}
+
 // Render a chunk of messages to the transcript panel
 function renderMessagesUpTo(targetIndex) {
     const transcriptContent = document.getElementById('transcript-content');
+    const startIndex = renderedCount;
 
     while (renderedCount <= targetIndex && renderedCount < messagesData.length) {
         const msg = messagesData[renderedCount];
@@ -207,6 +233,11 @@ function renderMessagesUpTo(targetIndex) {
             transcriptContent.appendChild(div.firstChild);
         }
         renderedCount++;
+    }
+
+    // Initialize truncation for newly rendered messages
+    if (renderedCount > startIndex) {
+        initTruncation(transcriptContent);
     }
 }
 
