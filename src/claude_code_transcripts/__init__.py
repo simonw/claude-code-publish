@@ -622,6 +622,10 @@ def _parse_jsonl_file(filepath):
                 if obj.get("isCompactSummary"):
                     entry["isCompactSummary"] = True
 
+                # Preserve toolUseResult if present (needed for originalFile content)
+                if "toolUseResult" in obj:
+                    entry["toolUseResult"] = obj["toolUseResult"]
+
                 loglines.append(entry)
             except json.JSONDecodeError:
                 continue
