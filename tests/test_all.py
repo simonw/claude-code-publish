@@ -9,6 +9,8 @@ from click.testing import CliRunner
 from claude_code_transcripts import (
     cli,
     find_all_sessions,
+    find_existing_sessions,
+    merge_sessions,
     get_project_display_name,
     generate_batch_html,
 )
@@ -413,3 +415,452 @@ class TestAllCommand:
         assert "project-a" not in result.output
         # Should not create any files
         assert not (output_dir / "index.html").exists()
+
+
+@pytest.fixture
+def mock_existing_archive():
+    """Create a mock existing archive with project index HTML files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_dir = Path(tmpdir)
+
+        # Create project-a with 2 sessions
+        project_a = archive_dir / "project-a"
+        project_a.mkdir(parents=True)
+
+        # Create project index HTML
+        project_a_index = """<!DOCTYPE html>
+<html>
+<head><title>project-a - Claude Code Archive</title></head>
+<body>
+<div class="index-item">
+    <a href="abc123/index.html">
+        <div class="index-item-header">
+            <span class="index-item-number">2025-01-01</span>
+            <span style="color: var(--text-muted);">15 KB</span>
+        </div>
+        <div class="index-item-content">
+            <p style="margin: 0;">Hello from project A</p>
+        </div>
+    </a>
+</div>
+<div class="index-item">
+    <a href="def456/index.html">
+        <div class="index-item-header">
+            <span class="index-item-number">2025-01-02</span>
+            <span style="color: var(--text-muted);">20 KB</span>
+        </div>
+        <div class="index-item-content">
+            <p style="margin: 0;">Second session in project A</p>
+        </div>
+    </a>
+</div>
+</body>
+</html>"""
+        (project_a / "index.html").write_text(project_a_index)
+
+        # Create session directories with index.html
+        (project_a / "abc123").mkdir()
+        (project_a / "abc123" / "index.html").write_text("<html>Session abc123</html>")
+        (project_a / "def456").mkdir()
+        (project_a / "def456" / "index.html").write_text("<html>Session def456</html>")
+
+        # Create project-b with 1 session
+        project_b = archive_dir / "project-b"
+        project_b.mkdir(parents=True)
+
+        project_b_index = """<!DOCTYPE html>
+<html>
+<head><title>project-b - Claude Code Archive</title></head>
+<body>
+<div class="index-item">
+    <a href="ghi789/index.html">
+        <div class="index-item-header">
+            <span class="index-item-number">2025-01-03</span>
+            <span style="color: var(--text-muted);">10 KB</span>
+        </div>
+        <div class="index-item-content">
+            <p style="margin: 0;">Hello from project B</p>
+        </div>
+    </a>
+</div>
+</body>
+</html>"""
+        (project_b / "index.html").write_text(project_b_index)
+
+        (project_b / "ghi789").mkdir()
+        (project_b / "ghi789" / "index.html").write_text("<html>Session ghi789</html>")
+
+        # Create master index (not parsed, but should exist)
+        (archive_dir / "index.html").write_text("<html>Master index</html>")
+
+        yield archive_dir
+
+
+class TestFindExistingSessions:
+    """Tests for find_existing_sessions function."""
+
+    def test_finds_existing_projects(self, mock_existing_archive):
+        """Test that existing projects are discovered."""
+        result = find_existing_sessions(mock_existing_archive)
+
+        assert len(result) == 2
+        project_names = [p["name"] for p in result]
+        assert "project-a" in project_names
+        assert "project-b" in project_names
+
+    def test_finds_existing_sessions(self, mock_existing_archive):
+        """Test that sessions within projects are discovered."""
+        result = find_existing_sessions(mock_existing_archive)
+
+        project_a = next(p for p in result if p["name"] == "project-a")
+        assert len(project_a["sessions"]) == 2
+
+        session_names = [s["path"].name for s in project_a["sessions"]]
+        assert "abc123" in session_names
+        assert "def456" in session_names
+
+    def test_extracts_session_metadata(self, mock_existing_archive):
+        """Test that session summary is extracted from HTML."""
+        result = find_existing_sessions(mock_existing_archive)
+
+        project_a = next(p for p in result if p["name"] == "project-a")
+        session = next(s for s in project_a["sessions"] if s["path"].name == "abc123")
+
+        assert session["summary"] == "Hello from project A"
+        assert "mtime" in session
+        assert "size" in session
+
+    def test_returns_empty_for_nonexistent_dir(self):
+        """Test handling of non-existent output directory."""
+        result = find_existing_sessions(Path("/nonexistent/path"))
+        assert result == []
+
+    def test_returns_empty_for_empty_dir(self, output_dir):
+        """Test handling of empty output directory."""
+        result = find_existing_sessions(output_dir)
+        assert result == []
+
+
+class TestMergeSessions:
+    """Tests for merge_sessions function."""
+
+    def test_merge_includes_all_source_sessions(self):
+        """Test that all source sessions are included in merged result."""
+        source = [
+            {
+                "name": "project-a",
+                "path": Path("/src/project-a"),
+                "sessions": [
+                    {
+                        "path": Path("/src/abc.jsonl"),
+                        "summary": "Session A",
+                        "mtime": 100,
+                        "size": 1000,
+                    },
+                ],
+            }
+        ]
+        existing = []
+
+        result = merge_sessions(source, existing)
+
+        assert len(result) == 1
+        assert result[0]["name"] == "project-a"
+        assert len(result[0]["sessions"]) == 1
+
+    def test_merge_preserves_orphaned_sessions(self):
+        """Test that sessions only in archive are preserved in merged result."""
+        source = [
+            {
+                "name": "project-a",
+                "path": Path("/src/project-a"),
+                "sessions": [
+                    {
+                        "path": Path("/src/abc.jsonl"),
+                        "summary": "New session",
+                        "mtime": 200,
+                        "size": 1000,
+                    },
+                ],
+            }
+        ]
+        existing = [
+            {
+                "name": "project-a",
+                "path": None,
+                "sessions": [
+                    {
+                        "path": Path("/archive/project-a/orphan"),
+                        "summary": "Orphan session",
+                        "mtime": 100,
+                        "size": 500,
+                    },
+                ],
+            }
+        ]
+
+        result = merge_sessions(source, existing)
+
+        # Should have 1 project with 2 sessions
+        assert len(result) == 1
+        project_a = result[0]
+        assert len(project_a["sessions"]) == 2
+
+        # Both sessions should be present
+        summaries = [s["summary"] for s in project_a["sessions"]]
+        assert "New session" in summaries
+        assert "Orphan session" in summaries
+
+    def test_merge_combines_projects(self):
+        """Test that projects from both sources are combined."""
+        source = [
+            {
+                "name": "project-a",
+                "path": Path("/src/project-a"),
+                "sessions": [
+                    {
+                        "path": Path("/src/abc.jsonl"),
+                        "summary": "Session A",
+                        "mtime": 100,
+                        "size": 1000,
+                    },
+                ],
+            }
+        ]
+        existing = [
+            {
+                "name": "project-b",
+                "path": None,
+                "sessions": [
+                    {
+                        "path": Path("/archive/project-b/xyz"),
+                        "summary": "Session B",
+                        "mtime": 50,
+                        "size": 500,
+                    },
+                ],
+            }
+        ]
+
+        result = merge_sessions(source, existing)
+
+        # Should have 2 projects
+        assert len(result) == 2
+        project_names = [p["name"] for p in result]
+        assert "project-a" in project_names
+        assert "project-b" in project_names
+
+    def test_merge_source_overwrites_existing_with_same_name(self):
+        """Test that source session replaces existing session with same name."""
+        source = [
+            {
+                "name": "project-a",
+                "path": Path("/src/project-a"),
+                "sessions": [
+                    {
+                        "path": Path("/src/abc123.jsonl"),
+                        "summary": "Updated session",
+                        "mtime": 200,
+                        "size": 2000,
+                    },
+                ],
+            }
+        ]
+        existing = [
+            {
+                "name": "project-a",
+                "path": None,
+                "sessions": [
+                    {
+                        "path": Path("/archive/project-a/abc123"),
+                        "summary": "Old session",
+                        "mtime": 100,
+                        "size": 1000,
+                    },
+                ],
+            }
+        ]
+
+        result = merge_sessions(source, existing)
+
+        # Should have 1 project with 1 session (source wins)
+        assert len(result) == 1
+        assert len(result[0]["sessions"]) == 1
+        # The source session should be present (identified by stem)
+        assert result[0]["sessions"][0]["summary"] == "Updated session"
+
+
+class TestGenerateBatchHtmlMerge:
+    """Tests for generate_batch_html with merge functionality."""
+
+    def test_merge_mode_regenerates_source_sessions(
+        self, mock_projects_dir, output_dir
+    ):
+        """Test that source sessions are regenerated in merge mode."""
+        # First run: create initial archive
+        generate_batch_html(mock_projects_dir, output_dir)
+        assert (output_dir / "project-a" / "abc123" / "index.html").exists()
+
+        # Get initial mtime
+        initial_mtime = (
+            (output_dir / "project-a" / "abc123" / "index.html").stat().st_mtime
+        )
+
+        # Wait a tiny bit to ensure mtime changes
+        import time
+
+        time.sleep(0.01)
+
+        # Second run with merge: should regenerate
+        generate_batch_html(mock_projects_dir, output_dir, merge=True)
+
+        # File should still exist and be regenerated (mtime updated)
+        assert (output_dir / "project-a" / "abc123" / "index.html").exists()
+        new_mtime = (output_dir / "project-a" / "abc123" / "index.html").stat().st_mtime
+        assert new_mtime >= initial_mtime
+
+    def test_merge_mode_preserves_orphans_in_index(self, output_dir):
+        """Test that orphan sessions are preserved in the index when merging."""
+        # Create initial archive with a session
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source1 = Path(tmpdir)
+            project = source1 / "-home-user-projects-project-a"
+            project.mkdir(parents=True)
+
+            session = project / "original.jsonl"
+            session.write_text(
+                '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Original session"}}\n'
+            )
+
+            generate_batch_html(source1, output_dir)
+
+        # Verify original session exists
+        assert (output_dir / "project-a" / "original" / "index.html").exists()
+
+        # Create a new source without the original session
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source2 = Path(tmpdir)
+            project = source2 / "-home-user-projects-project-a"
+            project.mkdir(parents=True)
+
+            session = project / "new.jsonl"
+            session.write_text(
+                '{"type": "user", "timestamp": "2025-01-02T10:00:00.000Z", "message": {"role": "user", "content": "New session"}}\n'
+            )
+
+            # Merge: should add new session AND preserve orphan in index
+            generate_batch_html(source2, output_dir, merge=True)
+
+        # Both sessions should exist
+        assert (output_dir / "project-a" / "original" / "index.html").exists()
+        assert (output_dir / "project-a" / "new" / "index.html").exists()
+
+        # Project index should list both sessions
+        project_index = (output_dir / "project-a" / "index.html").read_text()
+        assert "original" in project_index
+        assert "new" in project_index
+
+    def test_prefix_in_session_index(self, mock_projects_dir, output_dir):
+        """Test that prefix is shown in project index."""
+        generate_batch_html(mock_projects_dir, output_dir, prefix="laptop")
+
+        # Check project index contains prefix
+        project_index = (output_dir / "project-a" / "index.html").read_text()
+        assert "laptop" in project_index
+
+
+class TestAllMergeCommand:
+    """Tests for the all command with --merge and --prefix options."""
+
+    def test_merge_option_exists(self):
+        """Test that --merge option is recognized."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["all", "--help"])
+        assert result.exit_code == 0
+        assert "--merge" in result.output or "-m" in result.output
+
+    def test_prefix_option_exists(self):
+        """Test that --prefix option is recognized."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["all", "--help"])
+        assert result.exit_code == 0
+        assert "--prefix" in result.output
+
+    def test_merge_preserves_orphan_sessions(self, output_dir):
+        """Test that --merge preserves orphan sessions in the index."""
+        runner = CliRunner()
+
+        # Create initial archive with a session
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source1 = Path(tmpdir)
+            project = source1 / "-home-user-projects-project-a"
+            project.mkdir(parents=True)
+
+            session = project / "original.jsonl"
+            session.write_text(
+                '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Original session"}}\n'
+            )
+
+            result = runner.invoke(
+                cli,
+                ["all", "--source", str(source1), "--output", str(output_dir)],
+            )
+            assert result.exit_code == 0
+
+        # Verify original session exists
+        assert (output_dir / "project-a" / "original" / "index.html").exists()
+
+        # Create a new source without the original session
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source2 = Path(tmpdir)
+            project = source2 / "-home-user-projects-project-a"
+            project.mkdir(parents=True)
+
+            session = project / "new.jsonl"
+            session.write_text(
+                '{"type": "user", "timestamp": "2025-01-02T10:00:00.000Z", "message": {"role": "user", "content": "New session"}}\n'
+            )
+
+            # Merge: should add new session AND preserve orphan in index
+            result = runner.invoke(
+                cli,
+                [
+                    "all",
+                    "--source",
+                    str(source2),
+                    "--output",
+                    str(output_dir),
+                    "--merge",
+                ],
+            )
+            assert result.exit_code == 0
+
+        # Both sessions should exist
+        assert (output_dir / "project-a" / "original" / "index.html").exists()
+        assert (output_dir / "project-a" / "new" / "index.html").exists()
+
+        # Project index should list both sessions
+        project_index = (output_dir / "project-a" / "index.html").read_text()
+        assert "original" in project_index
+        assert "new" in project_index
+
+    def test_prefix_in_cli(self, mock_projects_dir, output_dir):
+        """Test that --prefix adds prefix to sessions in index."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "all",
+                "--source",
+                str(mock_projects_dir),
+                "--output",
+                str(output_dir),
+                "--prefix",
+                "workstation",
+            ],
+        )
+        assert result.exit_code == 0
+
+        # Check project index contains prefix
+        project_index = (output_dir / "project-a" / "index.html").read_text()
+        assert "workstation" in project_index

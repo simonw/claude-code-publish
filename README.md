@@ -175,6 +175,8 @@ Options:
 - `--dry-run` - show what would be converted without creating files
 - `--open` - open the generated archive in your default browser
 - `-q, --quiet` - suppress all output except errors
+- `-m, --merge` - merge with existing archive (preserve orphan sessions)
+- `--prefix NAME` - prefix for sessions in index (e.g., machine name)
 
 Examples:
 
@@ -191,6 +193,28 @@ claude-code-transcripts all -o ./my-archive
 # Include agent sessions
 claude-code-transcripts all --include-agents
 ```
+
+### Merging archives from multiple machines
+
+Use `-m`/`--merge` to combine sessions from different machines into a single archive:
+
+```bash
+# Machine A: create initial archive
+claude-code-transcripts all -o /shared/archive
+
+# Machine B: merge additional sessions
+claude-code-transcripts all -o /shared/archive -m
+
+# With prefix (shown in index)
+claude-code-transcripts all -o /shared/archive --merge --prefix=laptop
+```
+
+The `--merge` option:
+- Regenerates all sessions found in the source directory
+- Preserves "orphan" sessions in the archive that are no longer in the source
+- Useful for maintaining a unified archive from multiple machines
+
+The `--prefix` option adds a label to sessions in the index, helping identify which machine they came from.
 
 ## Development
 

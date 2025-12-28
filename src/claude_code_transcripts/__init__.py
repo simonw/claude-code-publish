@@ -303,8 +303,179 @@ def find_all_sessions(folder, include_agents=False):
     return result
 
 
+def find_existing_sessions(output_dir):
+    """Find existing sessions in an output archive directory.
+
+    Scans the output directory structure to find already-generated sessions.
+    Returns a list of project dicts in the same format as find_all_sessions().
+
+    Args:
+        output_dir: Path to the archive directory (e.g., ./claude-archive)
+
+    Returns:
+        List of project dicts: [{"name": str, "path": None, "sessions": [...]}]
+        Session dicts contain: path (session dir), summary, mtime, size
+    """
+    output_dir = Path(output_dir)
+    if not output_dir.exists():
+        return []
+
+    # Regex patterns to extract session info from project index HTML
+    session_pattern = re.compile(
+        r'<a href="([^"]+)/index\.html">\s*'
+        r'<div class="index-item-header">\s*'
+        r'<span class="index-item-number">([^<]+)</span>\s*'
+        r"<span[^>]*>([^<]+)</span>\s*"
+        r"</div>\s*"
+        r'<div class="index-item-content">\s*'
+        r"<p[^>]*>([^<]*)",
+        re.DOTALL,
+    )
+
+    projects = []
+
+    # Iterate over subdirectories (projects)
+    for project_dir in output_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        # Skip if it's the master index.html in root
+        if project_dir.name == "index.html":
+            continue
+
+        project_index = project_dir / "index.html"
+        if not project_index.exists():
+            continue
+
+        # Parse project index HTML
+        html_content = project_index.read_text()
+        sessions = []
+
+        for match in session_pattern.finditer(html_content):
+            session_name = match.group(1)
+            # date = match.group(2)  # Not used currently
+            # size_str = match.group(3)  # e.g., "15 KB"
+            summary = match.group(4).strip()
+            # Handle truncated summaries (ending with ...)
+            if summary.endswith("..."):
+                summary = summary[:-3]
+
+            session_dir = project_dir / session_name
+            if not session_dir.exists() or not session_dir.is_dir():
+                continue
+
+            # Get mtime from session directory
+            try:
+                mtime = session_dir.stat().st_mtime
+            except OSError:
+                mtime = 0
+
+            # Calculate size as sum of HTML files in session
+            size = sum(
+                f.stat().st_size
+                for f in session_dir.iterdir()
+                if f.is_file() and f.suffix == ".html"
+            )
+
+            sessions.append(
+                {
+                    "path": session_dir,
+                    "summary": summary,
+                    "mtime": mtime,
+                    "size": size,
+                }
+            )
+
+        if sessions:
+            # Sort sessions by mtime (most recent first)
+            sessions.sort(key=lambda s: s["mtime"], reverse=True)
+            projects.append(
+                {
+                    "name": project_dir.name,
+                    "path": None,  # No source path for existing sessions
+                    "sessions": sessions,
+                }
+            )
+
+    # Sort projects by most recent session
+    projects.sort(
+        key=lambda p: p["sessions"][0]["mtime"] if p["sessions"] else 0, reverse=True
+    )
+
+    return projects
+
+
+def merge_sessions(source_sessions, existing_sessions):
+    """Merge sessions from source with existing archive.
+
+    All source sessions will be (re)generated.
+    Sessions only in existing archive are preserved in the merged index.
+
+    Args:
+        source_sessions: Projects from find_all_sessions() (new/updated)
+        existing_sessions: Projects from find_existing_sessions()
+
+    Returns:
+        merged_projects: Combined list for index generation (source + orphans)
+    """
+    # Build lookup of existing sessions by (project_name, session_stem)
+    existing_lookup = {}
+    for project in existing_sessions:
+        for session in project["sessions"]:
+            # Get session stem (filename without extension for source, dir name for existing)
+            session_stem = (
+                session["path"].stem if session["path"].suffix else session["path"].name
+            )
+            existing_lookup[(project["name"], session_stem)] = session
+
+    # Build merged projects dict
+    merged = {}
+
+    # Add all source sessions (they will be regenerated)
+    for project in source_sessions:
+        project_name = project["name"]
+        if project_name not in merged:
+            merged[project_name] = {
+                "name": project_name,
+                "path": project.get("path"),
+                "sessions": [],
+            }
+
+        for session in project["sessions"]:
+            session_stem = session["path"].stem
+            # Mark this session as "from source" so we know it's not orphan
+            existing_lookup.pop((project_name, session_stem), None)
+            merged[project_name]["sessions"].append(session)
+
+    # Add orphaned sessions (only in existing, not in source)
+    for (project_name, session_stem), session in existing_lookup.items():
+        if project_name not in merged:
+            merged[project_name] = {
+                "name": project_name,
+                "path": None,
+                "sessions": [],
+            }
+        merged[project_name]["sessions"].append(session)
+
+    # Sort sessions within each project by mtime (most recent first)
+    for project in merged.values():
+        project["sessions"].sort(key=lambda s: s["mtime"], reverse=True)
+
+    # Convert to list and sort projects by most recent session
+    result = list(merged.values())
+    result.sort(
+        key=lambda p: p["sessions"][0]["mtime"] if p["sessions"] else 0, reverse=True
+    )
+
+    return result
+
+
 def generate_batch_html(
-    source_folder, output_dir, include_agents=False, progress_callback=None
+    source_folder,
+    output_dir,
+    include_agents=False,
+    progress_callback=None,
+    merge=False,
+    prefix=None,
 ):
     """Generate HTML archive for all sessions in a Claude projects folder.
 
@@ -319,6 +490,8 @@ def generate_batch_html(
         include_agents: Whether to include agent-* session files
         progress_callback: Optional callback(project_name, session_name, current, total)
             called after each session is processed
+        merge: If True, preserve orphan sessions from existing archive in the index
+        prefix: Optional prefix to display for sessions in the index (e.g., machine name)
 
     Returns statistics dict with total_projects, total_sessions, failed_sessions, output_dir.
     """
@@ -326,17 +499,30 @@ def generate_batch_html(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find all sessions
-    projects = find_all_sessions(source_folder, include_agents=include_agents)
+    # Find all sessions from source
+    source_projects = find_all_sessions(source_folder, include_agents=include_agents)
 
-    # Calculate total for progress tracking
-    total_session_count = sum(len(p["sessions"]) for p in projects)
+    # Add prefix to source sessions if specified
+    if prefix:
+        for project in source_projects:
+            for session in project["sessions"]:
+                session["prefix"] = prefix
+
+    # Determine projects for index generation
+    if merge and output_dir.exists():
+        existing_projects = find_existing_sessions(output_dir)
+        projects_for_index = merge_sessions(source_projects, existing_projects)
+    else:
+        projects_for_index = source_projects
+
+    # Calculate total for progress tracking (only source sessions are generated)
+    total_session_count = sum(len(p["sessions"]) for p in source_projects)
     processed_count = 0
     successful_sessions = 0
     failed_sessions = []
 
-    # Process each project
-    for project in projects:
+    # Process each source project (generate HTML for source sessions only)
+    for project in source_projects:
         project_dir = output_dir / project["name"]
         project_dir.mkdir(exist_ok=True)
 
@@ -366,14 +552,17 @@ def generate_batch_html(
                     project["name"], session_name, processed_count, total_session_count
                 )
 
-        # Generate project index
+    # Generate project indexes (using merged projects if applicable)
+    for project in projects_for_index:
+        project_dir = output_dir / project["name"]
+        project_dir.mkdir(exist_ok=True)
         _generate_project_index(project, project_dir)
 
     # Generate master index
-    _generate_master_index(projects, output_dir)
+    _generate_master_index(projects_for_index, output_dir)
 
     return {
-        "total_projects": len(projects),
+        "total_projects": len(projects_for_index),
         "total_sessions": successful_sessions,
         "failed_sessions": failed_sessions,
         "output_dir": output_dir,
@@ -388,14 +577,20 @@ def _generate_project_index(project, output_dir):
     sessions_data = []
     for session in project["sessions"]:
         mod_time = datetime.fromtimestamp(session["mtime"])
-        sessions_data.append(
-            {
-                "name": session["path"].stem,
-                "summary": session["summary"],
-                "date": mod_time.strftime("%Y-%m-%d %H:%M"),
-                "size_kb": session["size"] / 1024,
-            }
+        # Get session name: stem for files, name for directories
+        session_name = (
+            session["path"].stem if session["path"].suffix else session["path"].name
         )
+        session_entry = {
+            "name": session_name,
+            "summary": session["summary"],
+            "date": mod_time.strftime("%Y-%m-%d %H:%M"),
+            "size_kb": session["size"] / 1024,
+        }
+        # Add prefix if present
+        if "prefix" in session:
+            session_entry["prefix"] = session["prefix"]
+        sessions_data.append(session_entry)
 
     html_content = template.render(
         project_name=project["name"],
@@ -1927,7 +2122,21 @@ def web_cmd(
     is_flag=True,
     help="Suppress all output except errors.",
 )
-def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
+@click.option(
+    "-m",
+    "--merge",
+    is_flag=True,
+    help="Merge with existing archive: regenerate source sessions, preserve orphans in index.",
+)
+@click.option(
+    "--prefix",
+    type=str,
+    default=None,
+    help="Prefix for sessions in index (e.g., --prefix=laptop).",
+)
+def all_cmd(
+    source, output, include_agents, dry_run, open_browser, quiet, merge, prefix
+):
     """Convert all local Claude Code sessions to a browsable HTML archive.
 
     Creates a directory structure with:
@@ -1993,6 +2202,8 @@ def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
         output,
         include_agents=include_agents,
         progress_callback=on_progress,
+        merge=merge,
+        prefix=prefix,
     )
 
     # Report any failures

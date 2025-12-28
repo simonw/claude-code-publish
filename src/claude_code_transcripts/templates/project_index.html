@@ -10,7 +10,7 @@
         <div class="index-item">
             <a href="{{ session.name }}/index.html">
                 <div class="index-item-header">
-                    <span class="index-item-number">{{ session.date }}</span>
+                    <span class="index-item-number">{% if session.prefix %}<span style="color: var(--tool-border); font-weight: 600;">[{{ session.prefix }}]</span> {% endif %}{{ session.date }}</span>
                     <span style="color: var(--text-muted);">{{ "%.0f"|format(session.size_kb) }} KB</span>
                 </div>
                 <div class="index-item-content">
