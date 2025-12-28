@@ -739,8 +739,9 @@ function extractUserMessageText(messageEl) {
 function updatePinnedUserMessage() {
     if (!pinnedUserMessage || !transcriptContent || !transcriptPanel) return;
 
-    // Find all user messages currently in the DOM
-    const userMessages = transcriptContent.querySelectorAll('.message.user');
+    // Find all user messages currently in the DOM, excluding continuations
+    const allUserMessages = transcriptContent.querySelectorAll('.message.user');
+    const userMessages = Array.from(allUserMessages).filter(msg => !msg.closest('.continuation'));
     if (userMessages.length === 0) {
         pinnedUserMessage.style.display = 'none';
         currentPinnedMessage = null;
