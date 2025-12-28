@@ -567,3 +567,34 @@ class TestGitBlameAttribution:
             assert "msg-003" in msg_ids  # Second edit
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestGenerateCodeViewHtml:
+    """Tests for generate_code_view_html function."""
+
+    def test_escapes_script_closing_tags_in_json(self, tmp_path):
+        """Test that </script> sequences are escaped to prevent HTML injection."""
+        # Content with dangerous HTML sequences
+        content = 'console.log("</script>"); // end'
+
+        operations = [
+            FileOperation(
+                file_path="/test/path.js",
+                operation_type="write",
+                tool_id="t1",
+                timestamp="2024-01-01T10:00:00Z",
+                page_num=1,
+                msg_id="msg-001",
+                content=content,
+            )
+        ]
+
+        generate_code_view_html(tmp_path, operations)
+
+        html = (tmp_path / "code.html").read_text()
+
+        # The </script> in content should be escaped to <\/script>
+        # so it doesn't prematurely close the script tag
+        assert r"<\/script>" in html
+        # The actual closing </script> tag should still exist (for the real end)
+        assert "</script>" in html

@@ -850,9 +850,13 @@ def generate_code_view_html(
         file_tree = build_file_tree(file_states)
         file_tree_html = render_file_tree_html(file_tree)
 
-        # Convert data to JSON for embedding in script
-        file_data_json = json.dumps(file_data)
-        messages_json = json.dumps(messages_data)
+        # Convert data to JSON for embedding in script tag
+        # Escape </ sequences to prevent premature script tag closing
+        def escape_for_script_tag(s):
+            return s.replace("</", r"<\/")
+
+        file_data_json = escape_for_script_tag(json.dumps(file_data))
+        messages_json = escape_for_script_tag(json.dumps(messages_data))
 
         # Get templates
         code_view_template = get_template("code_view.html")
