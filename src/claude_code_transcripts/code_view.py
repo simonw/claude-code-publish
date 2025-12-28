@@ -70,6 +70,10 @@ class FileOperation:
     new_string: Optional[str] = None
     replace_all: bool = False
 
+    # Original file content from tool result (for Edit operations)
+    # This allows reconstruction without local file access
+    original_content: Optional[str] = None
+
 
 @dataclass
 class FileState:
@@ -152,6 +156,24 @@ def extract_file_operations(
             # Store timestamp -> (page_num, msg_id) mapping
             msg_to_page[timestamp] = (page_num, msg_id)
 
+    # First pass: collect originalFile content from tool results
+    # These are stored in the toolUseResult field of user messages
+    tool_id_to_original = {}
+    for entry in loglines:
+        tool_use_result = entry.get("toolUseResult", {})
+        if tool_use_result and "originalFile" in tool_use_result:
+            # Find the matching tool_use_id from the message content
+            message = entry.get("message", {})
+            content = message.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        tool_use_id = block.get("tool_use_id", "")
+                        if tool_use_id:
+                            tool_id_to_original[tool_use_id] = tool_use_result.get(
+                                "originalFile"
+                            )
+
     for entry in loglines:
         timestamp = entry.get("timestamp", "")
         message = entry.get("message", {})
@@ -199,6 +221,9 @@ def extract_file_operations(
                 replace_all = tool_input.get("replace_all", False)
 
                 if file_path and old_string is not None and new_string is not None:
+                    # Get original file content if available from tool result
+                    original_content = tool_id_to_original.get(tool_id)
+
                     operations.append(
                         FileOperation(
                             file_path=file_path,
@@ -210,6 +235,7 @@ def extract_file_operations(
                             old_string=old_string,
                             new_string=new_string,
                             replace_all=replace_all,
+                            original_content=original_content,
                         )
                     )
 
@@ -543,6 +569,11 @@ def build_file_history_repo(
                         fetched = True
                     except Exception:
                         pass
+
+                # Fallback: use original_content from tool result (for remote sessions)
+                if not fetched and op.original_content:
+                    full_path.write_text(op.original_content)
+                    fetched = True
 
                 # Commit the initial content first (no metadata = pre-session)
                 # This allows git blame to correctly attribute unchanged lines

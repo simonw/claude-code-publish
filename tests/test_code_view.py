@@ -221,6 +221,165 @@ class TestExtractFileOperations:
         operations = extract_file_operations(loglines, conversations)
         assert operations == []
 
+    def test_extracts_original_file_content_for_edit(self):
+        """Test that originalFile from toolUseResult is extracted for Edit operations.
+
+        This enables file reconstruction for remote sessions without local file access.
+        """
+        original_content = "def add(a, b):\n    return a + b\n"
+
+        loglines = [
+            # User prompt
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Edit the file", "role": "user"},
+            },
+            # Assistant makes an Edit
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_edit_001",
+                            "name": "Edit",
+                            "input": {
+                                "file_path": "/project/math.py",
+                                "old_string": "return a + b",
+                                "new_string": "return a + b  # sum",
+                            },
+                        }
+                    ],
+                },
+            },
+            # Tool result with originalFile in toolUseResult
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:10.000Z",
+                "toolUseResult": {"originalFile": original_content},
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_edit_001",
+                            "content": "File edited successfully",
+                            "is_error": False,
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Edit the file",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Edit the file", "role": "user"}',
+                        "2025-12-24T10:00:00.000Z",
+                    ),
+                    (
+                        "assistant",
+                        '{"content": [{"type": "tool_use", "id": "toolu_edit_001", "name": "Edit", "input": {}}], "role": "assistant"}',
+                        "2025-12-24T10:00:05.000Z",
+                    ),
+                    (
+                        "user",
+                        '{"content": [{"type": "tool_result", "tool_use_id": "toolu_edit_001"}], "role": "user"}',
+                        "2025-12-24T10:00:10.000Z",
+                    ),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+
+        # Should have one Edit operation
+        assert len(operations) == 1
+        op = operations[0]
+        assert op.operation_type == "edit"
+        assert op.file_path == "/project/math.py"
+        assert op.old_string == "return a + b"
+        assert op.new_string == "return a + b  # sum"
+        # original_content should be populated from toolUseResult.originalFile
+        assert op.original_content == original_content
+
+    def test_original_file_not_set_for_write(self):
+        """Test that original_content is not set for Write operations (only Edit)."""
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create a file", "role": "user"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/new.py",
+                                "content": "print('hello')\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:10.000Z",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_write_001",
+                            "content": "File written",
+                            "is_error": False,
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-12-24T10:00:00.000Z",
+                    ),
+                    (
+                        "assistant",
+                        '{"content": [], "role": "assistant"}',
+                        "2025-12-24T10:00:05.000Z",
+                    ),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+
+        assert len(operations) == 1
+        op = operations[0]
+        assert op.operation_type == "write"
+        # Write operations don't use original_content
+        assert op.original_content is None
+
 
 class TestBuildFileTree:
     """Tests for the build_file_tree function."""
