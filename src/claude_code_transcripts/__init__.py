@@ -53,482 +53,27 @@ LONG_TEXT_THRESHOLD = (
 )
 
 
-# ============================================================================
-# Code Viewer Data Structures
-# ============================================================================
-
-
-@dataclass
-class FileOperation:
-    """Represents a single Write or Edit operation on a file."""
-
-    file_path: str
-    operation_type: str  # "write" or "edit"
-    tool_id: str  # tool_use.id for linking
-    timestamp: str
-    page_num: int  # which page this operation appears on
-    msg_id: str  # anchor ID in the HTML page
-
-    # For Write operations
-    content: Optional[str] = None
-
-    # For Edit operations
-    old_string: Optional[str] = None
-    new_string: Optional[str] = None
-    replace_all: bool = False
-
-
-@dataclass
-class FileState:
-    """Represents the reconstructed state of a file with blame annotations."""
-
-    file_path: str
-    operations: List[FileOperation] = field(default_factory=list)
-
-    # If we have a git repo, we can reconstruct full content
-    initial_content: Optional[str] = None  # From git or first Write
-    final_content: Optional[str] = None  # Reconstructed content
-
-    # Blame data: list of (line_text, FileOperation or None)
-    # None means the line came from initial_content (pre-session)
-    blame_lines: List[Tuple[str, Optional[FileOperation]]] = field(default_factory=list)
-
-    # For diff-only mode when no repo is available
-    diff_only: bool = False
-
-    # File status: "added" (first op is Write), "modified" (first op is Edit)
-    status: str = "modified"
-
-
-@dataclass
-class CodeViewData:
-    """All data needed to render the code viewer."""
-
-    files: Dict[str, FileState] = field(default_factory=dict)  # file_path -> FileState
-    file_tree: Dict[str, Any] = field(default_factory=dict)  # Nested dict for file tree
-    mode: str = "diff_only"  # "full" or "diff_only"
-    repo_path: Optional[str] = None
-    session_cwd: Optional[str] = None
-
-
-@dataclass
-class BlameRange:
-    """A range of consecutive lines from the same operation."""
-
-    start_line: int  # 1-indexed
-    end_line: int  # 1-indexed, inclusive
-    tool_id: Optional[str]
-    page_num: int
-    msg_id: str
-    operation_type: str  # "write" or "edit"
-    timestamp: str
-
-
-# ============================================================================
-# Code Viewer Functions
-# ============================================================================
-
-
-def extract_file_operations(
-    loglines: List[Dict], conversations: List[Dict]
-) -> List[FileOperation]:
-    """Extract all Write and Edit operations from session loglines.
-
-    Args:
-        loglines: List of parsed logline entries from the session.
-        conversations: List of conversation dicts with page mapping info.
-
-    Returns:
-        List of FileOperation objects sorted by timestamp.
-    """
-    operations = []
-
-    # Build a mapping from message content to page number and message ID
-    # We need to track which page each operation appears on
-    msg_to_page = {}
-    for conv_idx, conv in enumerate(conversations):
-        page_num = (conv_idx // PROMPTS_PER_PAGE) + 1
-        for msg_idx, (log_type, message_json, timestamp) in enumerate(
-            conv.get("messages", [])
-        ):
-            # Generate a unique ID matching the HTML message IDs
-            msg_id = f"msg-{timestamp.replace(':', '-').replace('.', '-')}"
-            # Store timestamp -> (page_num, msg_id) mapping
-            msg_to_page[timestamp] = (page_num, msg_id)
-
-    for entry in loglines:
-        timestamp = entry.get("timestamp", "")
-        message = entry.get("message", {})
-        content = message.get("content", [])
-
-        if not isinstance(content, list):
-            continue
-
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-
-            if block.get("type") != "tool_use":
-                continue
-
-            tool_name = block.get("name", "")
-            tool_id = block.get("id", "")
-            tool_input = block.get("input", {})
-
-            # Get page and message ID from our mapping
-            fallback_msg_id = f"msg-{timestamp.replace(':', '-').replace('.', '-')}"
-            page_num, msg_id = msg_to_page.get(timestamp, (1, fallback_msg_id))
-
-            if tool_name == "Write":
-                file_path = tool_input.get("file_path", "")
-                file_content = tool_input.get("content", "")
-
-                if file_path:
-                    operations.append(
-                        FileOperation(
-                            file_path=file_path,
-                            operation_type="write",
-                            tool_id=tool_id,
-                            timestamp=timestamp,
-                            page_num=page_num,
-                            msg_id=msg_id,
-                            content=file_content,
-                        )
-                    )
-
-            elif tool_name == "Edit":
-                file_path = tool_input.get("file_path", "")
-                old_string = tool_input.get("old_string", "")
-                new_string = tool_input.get("new_string", "")
-                replace_all = tool_input.get("replace_all", False)
-
-                if file_path and old_string is not None and new_string is not None:
-                    operations.append(
-                        FileOperation(
-                            file_path=file_path,
-                            operation_type="edit",
-                            tool_id=tool_id,
-                            timestamp=timestamp,
-                            page_num=page_num,
-                            msg_id=msg_id,
-                            old_string=old_string,
-                            new_string=new_string,
-                            replace_all=replace_all,
-                        )
-                    )
-
-    # Sort by timestamp
-    operations.sort(key=lambda op: op.timestamp)
-    return operations
-
-
-def normalize_file_paths(operations: List[FileOperation]) -> Tuple[str, Dict[str, str]]:
-    """Find common prefix in file paths and create normalized relative paths.
-
-    Args:
-        operations: List of FileOperation objects.
-
-    Returns:
-        Tuple of (common_prefix, path_mapping) where path_mapping maps
-        original absolute paths to normalized relative paths.
-    """
-    if not operations:
-        return "", {}
-
-    # Get all unique file paths
-    file_paths = list(set(op.file_path for op in operations))
-
-    if len(file_paths) == 1:
-        # Single file - use its parent as prefix
-        path = Path(file_paths[0])
-        prefix = str(path.parent)
-        return prefix, {file_paths[0]: path.name}
-
-    # Find common prefix
-    common = os.path.commonpath(file_paths)
-    # Make sure we're at a directory boundary
-    if not os.path.isdir(common):
-        common = os.path.dirname(common)
-
-    # Create mapping
-    path_mapping = {}
-    for fp in file_paths:
-        rel_path = os.path.relpath(fp, common)
-        path_mapping[fp] = rel_path
-
-    return common, path_mapping
-
-
-def find_git_repo_root(start_path: str) -> Optional[Path]:
-    """Walk up from start_path to find a git repository root.
-
-    Args:
-        start_path: Directory path to start searching from.
-
-    Returns:
-        Path to the git repo root, or None if not found.
-    """
-    current = Path(start_path)
-    while current != current.parent:
-        if (current / ".git").exists():
-            return current
-        current = current.parent
-    return None
-
-
-def find_commit_before_timestamp(file_repo: Repo, timestamp: str) -> Optional[Any]:
-    """Find the most recent commit before the given ISO timestamp.
-
-    Args:
-        file_repo: GitPython Repo object.
-        timestamp: ISO format timestamp (e.g., "2025-12-27T16:12:36.904Z").
-
-    Returns:
-        Git commit object, or None if not found.
-    """
-    from datetime import datetime
-
-    # Parse the ISO timestamp
-    try:
-        # Handle various ISO formats
-        ts = timestamp.replace("Z", "+00:00")
-        target_dt = datetime.fromisoformat(ts)
-    except ValueError:
-        return None
-
-    # Search through commits to find one before the target time
-    try:
-        for commit in file_repo.iter_commits():
-            commit_dt = datetime.fromtimestamp(
-                commit.committed_date, tz=target_dt.tzinfo
-            )
-            if commit_dt < target_dt:
-                return commit
-    except Exception:
-        pass
-
-    return None
-
-
-def build_file_history_repo(
-    operations: List[FileOperation],
-) -> Tuple[Repo, Path, Dict[str, str]]:
-    """Create a temp git repo that replays all file operations as commits.
-
-    For Edit operations on files not yet in the temp repo, attempts to fetch
-    initial content from the file's git repo (if any) or from disk.
-
-    Args:
-        operations: List of FileOperation objects in chronological order.
-
-    Returns:
-        Tuple of (repo, temp_dir, path_mapping) where:
-        - repo: GitPython Repo object
-        - temp_dir: Path to the temp directory
-        - path_mapping: Dict mapping original paths to relative paths
-    """
-    temp_dir = Path(tempfile.mkdtemp(prefix="claude-session-"))
-    repo = Repo.init(temp_dir)
-
-    # Configure git user for commits
-    with repo.config_writer() as config:
-        config.set_value("user", "name", "Claude")
-        config.set_value("user", "email", "claude@session")
-
-    # Get path mapping
-    common_prefix, path_mapping = normalize_file_paths(operations)
-
-    # Sort operations by timestamp
-    sorted_ops = sorted(operations, key=lambda o: o.timestamp)
-
-    # Build a map of file path -> earliest operation timestamp
-    # This helps us find the state before the session started
-    earliest_op_by_file: Dict[str, str] = {}
-    for op in sorted_ops:
-        if op.file_path not in earliest_op_by_file:
-            earliest_op_by_file[op.file_path] = op.timestamp
-
-    for op in sorted_ops:
-        rel_path = path_mapping.get(op.file_path, op.file_path)
-        full_path = temp_dir / rel_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if op.operation_type == "write":
-            full_path.write_text(op.content or "")
-        elif op.operation_type == "edit":
-            # If file doesn't exist, try to fetch initial content
-            if not full_path.exists():
-                fetched = False
-
-                # Try to find a git repo for this file
-                file_repo_root = find_git_repo_root(str(Path(op.file_path).parent))
-                if file_repo_root:
-                    try:
-                        file_repo = Repo(file_repo_root)
-                        file_rel_path = os.path.relpath(op.file_path, file_repo_root)
-
-                        # Find commit from before the session started for this file
-                        earliest_ts = earliest_op_by_file.get(
-                            op.file_path, op.timestamp
-                        )
-                        pre_session_commit = find_commit_before_timestamp(
-                            file_repo, earliest_ts
-                        )
-
-                        if pre_session_commit:
-                            # Get file content from the pre-session commit
-                            try:
-                                blob = pre_session_commit.tree / file_rel_path
-                                full_path.write_bytes(blob.data_stream.read())
-                                fetched = True
-                            except (KeyError, TypeError):
-                                pass  # File didn't exist in that commit
-
-                        if not fetched:
-                            # Fallback to HEAD (file might be new)
-                            blob = file_repo.head.commit.tree / file_rel_path
-                            full_path.write_bytes(blob.data_stream.read())
-                            fetched = True
-                    except (KeyError, TypeError, ValueError, InvalidGitRepositoryError):
-                        pass  # File not in git
-
-                # Fallback: read from disk if file exists
-                if not fetched and Path(op.file_path).exists():
-                    try:
-                        full_path.write_text(Path(op.file_path).read_text())
-                        fetched = True
-                    except Exception:
-                        pass
-
-                # Commit the initial content first (no metadata = pre-session)
-                # This allows git blame to correctly attribute unchanged lines
-                if fetched:
-                    repo.index.add([rel_path])
-                    repo.index.commit("{}")  # Empty metadata = pre-session content
-
-            if full_path.exists():
-                content = full_path.read_text()
-                if op.replace_all:
-                    content = content.replace(op.old_string or "", op.new_string or "")
-                else:
-                    content = content.replace(
-                        op.old_string or "", op.new_string or "", 1
-                    )
-                full_path.write_text(content)
-            else:
-                # Can't apply edit - file doesn't exist
-                continue
-
-        # Stage and commit with metadata
-        repo.index.add([rel_path])
-        metadata = json.dumps(
-            {
-                "tool_id": op.tool_id,
-                "page_num": op.page_num,
-                "msg_id": op.msg_id,
-                "timestamp": op.timestamp,
-                "operation_type": op.operation_type,
-                "file_path": op.file_path,
-            }
-        )
-        repo.index.commit(metadata)
-
-    return repo, temp_dir, path_mapping
-
-
-def get_file_blame_ranges(repo: Repo, file_path: str) -> List[BlameRange]:
-    """Get blame data for a file, grouped into ranges of consecutive lines.
-
-    Args:
-        repo: GitPython Repo object.
-        file_path: Relative path to the file within the repo.
-
-    Returns:
-        List of BlameRange objects, each representing consecutive lines
-        from the same operation.
-    """
-    try:
-        blame_data = repo.blame("HEAD", file_path)
-    except Exception:
-        return []
-
-    ranges = []
-    current_line = 1
-
-    for commit, lines in blame_data:
-        if not lines:
-            continue
-
-        # Parse metadata from commit message
-        try:
-            metadata = json.loads(commit.message)
-        except json.JSONDecodeError:
-            metadata = {}
-
-        start_line = current_line
-        end_line = current_line + len(lines) - 1
-
-        ranges.append(
-            BlameRange(
-                start_line=start_line,
-                end_line=end_line,
-                tool_id=metadata.get("tool_id"),
-                page_num=metadata.get("page_num", 1),
-                msg_id=metadata.get("msg_id", ""),
-                operation_type=metadata.get("operation_type", "unknown"),
-                timestamp=metadata.get("timestamp", ""),
-            )
-        )
-
-        current_line = end_line + 1
-
-    return ranges
-
-
-def get_file_content_from_repo(repo: Repo, file_path: str) -> Optional[str]:
-    """Get the final content of a file from the repo.
-
-    Args:
-        repo: GitPython Repo object.
-        file_path: Relative path to the file within the repo.
-
-    Returns:
-        File content as string, or None if file doesn't exist.
-    """
-    try:
-        blob = repo.head.commit.tree / file_path
-        return blob.data_stream.read().decode("utf-8")
-    except (KeyError, TypeError):
-        return None
-
-
-def build_file_tree(file_states: Dict[str, FileState]) -> Dict[str, Any]:
-    """Build a nested dict structure for file tree UI.
-
-    Args:
-        file_states: Dict mapping file paths to FileState objects.
-
-    Returns:
-        Nested dict where keys are path components and leaves are FileState objects.
-    """
-    tree: Dict[str, Any] = {}
-
-    for file_path, file_state in file_states.items():
-        # Normalize path and split into components
-        parts = Path(file_path).parts
-
-        # Navigate/create the nested structure
-        current = tree
-        for i, part in enumerate(parts[:-1]):  # All but the last part (directories)
-            if part not in current:
-                current[part] = {}
-            current = current[part]
-
-        # Add the file (last part)
-        if parts:
-            current[parts[-1]] = file_state
-
-    return tree
+# Import code viewer functionality from separate module
+from claude_code_transcripts.code_view import (
+    FileOperation,
+    FileState,
+    CodeViewData,
+    BlameRange,
+    extract_file_operations,
+    normalize_file_paths,
+    find_git_repo_root,
+    find_commit_before_timestamp,
+    build_file_history_repo,
+    get_file_blame_ranges,
+    get_file_content_from_repo,
+    build_file_tree,
+    reconstruct_file_with_blame,
+    build_file_states,
+    render_file_tree_html,
+    file_state_to_dict,
+    generate_code_view_html,
+    build_msg_to_user_html,
+)
 
 
 def is_url(s: str) -> bool:
@@ -632,399 +177,6 @@ def parse_repo_value(repo: Optional[str]) -> Tuple[Optional[str], Optional[Path]
         return repo, None
 
     return None, None
-
-
-def reconstruct_file_with_blame(
-    initial_content: Optional[str],
-    operations: List[FileOperation],
-) -> Tuple[str, List[Tuple[str, Optional[FileOperation]]]]:
-    """Reconstruct a file's final state with blame attribution for each line.
-
-    Applies all operations in order and tracks which operation wrote each line.
-
-    Args:
-        initial_content: The initial file content (from git), or None if new file.
-        operations: List of FileOperation objects in chronological order.
-
-    Returns:
-        Tuple of (final_content, blame_lines):
-        - final_content: The reconstructed file content as a string
-        - blame_lines: List of (line_text, operation) tuples, where operation
-          is None for lines from initial_content (pre-session)
-    """
-    # Initialize with initial content
-    if initial_content:
-        lines = initial_content.rstrip("\n").split("\n")
-        blame_lines: List[Tuple[str, Optional[FileOperation]]] = [
-            (line, None) for line in lines
-        ]
-    else:
-        blame_lines = []
-
-    # Apply each operation
-    for op in operations:
-        if op.operation_type == "write":
-            # Write replaces all content
-            if op.content:
-                new_lines = op.content.rstrip("\n").split("\n")
-                blame_lines = [(line, op) for line in new_lines]
-
-        elif op.operation_type == "edit":
-            if op.old_string is None or op.new_string is None:
-                continue
-
-            # Reconstruct current content for searching
-            current_content = "\n".join(line for line, _ in blame_lines)
-
-            # Find where old_string occurs
-            pos = current_content.find(op.old_string)
-            if pos == -1:
-                # old_string not found, skip this operation
-                continue
-
-            # Calculate line numbers for the replacement
-            prefix = current_content[:pos]
-            prefix_lines = prefix.count("\n")
-            old_lines_count = op.old_string.count("\n") + 1
-
-            # Build new blame_lines
-            new_blame_lines = []
-
-            # Add lines before the edit (keep their original blame)
-            for i, (line, attr) in enumerate(blame_lines):
-                if i < prefix_lines:
-                    new_blame_lines.append((line, attr))
-
-            # Handle partial first line replacement
-            if prefix_lines < len(blame_lines):
-                first_affected_line = blame_lines[prefix_lines][0]
-                # Check if the prefix ends mid-line
-                last_newline = prefix.rfind("\n")
-                if last_newline == -1:
-                    prefix_in_line = prefix
-                else:
-                    prefix_in_line = prefix[last_newline + 1 :]
-
-                # Build the new content by doing the actual replacement
-                new_content = (
-                    current_content[:pos]
-                    + op.new_string
-                    + current_content[pos + len(op.old_string) :]
-                )
-                new_content_lines = new_content.rstrip("\n").split("\n")
-
-                # All lines from the edit point onward get the new attribution
-                for i, line in enumerate(new_content_lines):
-                    if i < prefix_lines:
-                        continue
-                    new_blame_lines.append((line, op))
-
-            blame_lines = new_blame_lines
-
-    # Build final content
-    final_content = "\n".join(line for line, _ in blame_lines)
-    if final_content:
-        final_content += "\n"
-
-    return final_content, blame_lines
-
-
-def build_file_states(
-    operations: List[FileOperation],
-) -> Dict[str, FileState]:
-    """Build FileState objects from a list of file operations.
-
-    Args:
-        operations: List of FileOperation objects.
-
-    Returns:
-        Dict mapping file paths to FileState objects.
-    """
-    # Group operations by file
-    file_ops: Dict[str, List[FileOperation]] = {}
-    for op in operations:
-        if op.file_path not in file_ops:
-            file_ops[op.file_path] = []
-        file_ops[op.file_path].append(op)
-
-    file_states = {}
-    for file_path, ops in file_ops.items():
-        # Sort by timestamp
-        ops.sort(key=lambda o: o.timestamp)
-
-        # Determine status based on first operation
-        status = "added" if ops[0].operation_type == "write" else "modified"
-
-        file_state = FileState(
-            file_path=file_path,
-            operations=ops,
-            diff_only=True,  # Default to diff-only
-            status=status,
-        )
-
-        # If first operation is a Write (file creation), we can show full content
-        if ops[0].operation_type == "write":
-            final_content, blame_lines = reconstruct_file_with_blame(None, ops)
-            file_state.final_content = final_content
-            file_state.blame_lines = blame_lines
-            file_state.diff_only = False
-
-        file_states[file_path] = file_state
-
-    return file_states
-
-
-def render_file_tree_html(file_tree: Dict[str, Any], prefix: str = "") -> str:
-    """Render file tree as HTML.
-
-    Args:
-        file_tree: Nested dict structure from build_file_tree().
-        prefix: Path prefix for building full paths.
-
-    Returns:
-        HTML string for the file tree.
-    """
-    html_parts = []
-
-    # Sort items: directories first, then files
-    items = sorted(
-        file_tree.items(),
-        key=lambda x: (
-            not isinstance(x[1], dict) or isinstance(x[1], FileState),
-            x[0].lower(),
-        ),
-    )
-
-    for name, value in items:
-        full_path = f"{prefix}/{name}" if prefix else name
-
-        if isinstance(value, FileState):
-            # It's a file - status shown via CSS color
-            status_class = f"status-{value.status}"
-            html_parts.append(
-                f'<li class="tree-file {status_class}" data-path="{html.escape(value.file_path)}">'
-                f'<span class="tree-file-name">{html.escape(name)}</span>'
-                f"</li>"
-            )
-        elif isinstance(value, dict):
-            # It's a directory
-            children_html = render_file_tree_html(value, full_path)
-            html_parts.append(
-                f'<li class="tree-dir open">'
-                f'<span class="tree-toggle"></span>'
-                f'<span class="tree-dir-name">{html.escape(name)}</span>'
-                f'<ul class="tree-children">{children_html}</ul>'
-                f"</li>"
-            )
-
-    return "".join(html_parts)
-
-
-def file_state_to_dict(file_state: FileState) -> Dict[str, Any]:
-    """Convert FileState to a JSON-serializable dict.
-
-    Args:
-        file_state: The FileState object.
-
-    Returns:
-        Dict suitable for JSON serialization.
-    """
-    operations = [
-        {
-            "operation_type": op.operation_type,
-            "tool_id": op.tool_id,
-            "timestamp": op.timestamp,
-            "page_num": op.page_num,
-            "msg_id": op.msg_id,
-            "content": op.content,
-            "old_string": op.old_string,
-            "new_string": op.new_string,
-        }
-        for op in file_state.operations
-    ]
-
-    blame_lines = None
-    if file_state.blame_lines:
-        blame_lines = [
-            [
-                line,
-                (
-                    {
-                        "operation_type": op.operation_type,
-                        "page_num": op.page_num,
-                        "msg_id": op.msg_id,
-                        "timestamp": op.timestamp,
-                    }
-                    if op
-                    else None
-                ),
-            ]
-            for line, op in file_state.blame_lines
-        ]
-
-    return {
-        "file_path": file_state.file_path,
-        "diff_only": file_state.diff_only,
-        "final_content": file_state.final_content,
-        "blame_lines": blame_lines,
-        "operations": operations,
-    }
-
-
-def generate_code_view_html(
-    output_dir: Path,
-    operations: List[FileOperation],
-    transcript_messages: List[str] = None,
-    msg_to_user_text: Dict[str, str] = None,
-) -> None:
-    """Generate the code.html file with three-pane layout.
-
-    Args:
-        output_dir: Output directory.
-        operations: List of FileOperation objects.
-        transcript_messages: List of individual message HTML strings.
-        msg_to_user_text: Mapping from msg_id to user prompt text for tooltips.
-    """
-    if not operations:
-        return
-
-    if transcript_messages is None:
-        transcript_messages = []
-
-    if msg_to_user_text is None:
-        msg_to_user_text = {}
-
-    # Extract message IDs from HTML for chunked rendering
-    # Messages have format: <div class="message ..." id="msg-...">
-    import re
-
-    msg_id_pattern = re.compile(r'id="(msg-[^"]+)"')
-    messages_data = []
-    for msg_html in transcript_messages:
-        match = msg_id_pattern.search(msg_html)
-        msg_id = match.group(1) if match else None
-        messages_data.append({"id": msg_id, "html": msg_html})
-
-    # Build temp git repo with file history
-    repo, temp_dir, path_mapping = build_file_history_repo(operations)
-
-    try:
-        # Build file data for each file
-        file_data = {}
-
-        # Group operations by file
-        ops_by_file: Dict[str, List[FileOperation]] = {}
-        for op in operations:
-            if op.file_path not in ops_by_file:
-                ops_by_file[op.file_path] = []
-            ops_by_file[op.file_path].append(op)
-
-        # Sort each file's operations by timestamp
-        for file_path in ops_by_file:
-            ops_by_file[file_path].sort(key=lambda o: o.timestamp)
-
-        for orig_path, file_ops in ops_by_file.items():
-            rel_path = path_mapping.get(orig_path, orig_path)
-
-            # Get file content
-            content = get_file_content_from_repo(repo, rel_path)
-            if content is None:
-                continue
-
-            # Get blame ranges
-            blame_ranges = get_file_blame_ranges(repo, rel_path)
-
-            # Determine status
-            status = "added" if file_ops[0].operation_type == "write" else "modified"
-
-            # Build file data
-            file_data[orig_path] = {
-                "file_path": orig_path,
-                "rel_path": rel_path,
-                "content": content,
-                "status": status,
-                "blame_ranges": [
-                    {
-                        "start": r.start_line,
-                        "end": r.end_line,
-                        "tool_id": r.tool_id,
-                        "page_num": r.page_num,
-                        "msg_id": r.msg_id,
-                        "operation_type": r.operation_type,
-                        "timestamp": r.timestamp,
-                        "user_text": msg_to_user_text.get(r.msg_id, ""),
-                    }
-                    for r in blame_ranges
-                ],
-            }
-
-        # Build file states for tree (reusing existing structure)
-        file_states = {}
-        for orig_path, data in file_data.items():
-            file_states[orig_path] = FileState(
-                file_path=orig_path,
-                status=data["status"],
-            )
-
-        # Build file tree
-        file_tree = build_file_tree(file_states)
-        file_tree_html = render_file_tree_html(file_tree)
-
-        # Convert data to JSON (escape for embedding in script tags)
-        def escape_json_for_script(data):
-            s = json.dumps(data)
-            s = s.replace("</", "<\\/")
-            s = s.replace("<!--", "<\\!--")
-            return s
-
-        file_data_json = escape_json_for_script(file_data)
-        messages_json = escape_json_for_script(messages_data)
-
-        # Get templates
-        code_view_template = get_template("code_view.html")
-        code_view_js_template = get_template("code_view.js")
-
-        # Render JavaScript with data
-        code_view_js = code_view_js_template.render(
-            file_data_json=file_data_json,
-            messages_json=messages_json,
-        )
-
-        # Render page
-        page_content = code_view_template.render(
-            css=CSS,
-            js=JS,
-            file_tree_html=file_tree_html,
-            code_view_js=code_view_js,
-        )
-
-        # Write file
-        (output_dir / "code.html").write_text(page_content, encoding="utf-8")
-
-    finally:
-        # Clean up temp directory
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-def build_msg_to_user_text(conversations: List[Dict]) -> Dict[str, str]:
-    """Build a mapping from msg_id to the user prompt that preceded it.
-
-    For each message in a conversation, the user_text from that conversation
-    is the prompt that the user sent before the assistant's response.
-
-    Args:
-        conversations: List of conversation dicts with user_text and messages.
-
-    Returns:
-        Dict mapping msg_id to user prompt text.
-    """
-    msg_to_user_text = {}
-    for conv in conversations:
-        user_text = conv.get("user_text", "")
-        for log_type, message_json, timestamp in conv.get("messages", []):
-            msg_id = make_msg_id(timestamp)
-            msg_to_user_text[msg_id] = user_text
-    return msg_to_user_text
 
 
 def extract_text_from_content(content):
@@ -2005,8 +1157,17 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 
 /* Code Viewer Layout */
 .code-viewer { display: flex; height: calc(100vh - 140px); gap: 16px; min-height: 400px; }
-.file-tree-panel { width: 320px; min-width: 240px; overflow-y: auto; overflow-x: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.4; color: var(--text-color); }
-.file-tree-panel h3 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 12px 0; }
+.file-tree-panel { width: 320px; min-width: 240px; overflow-y: auto; overflow-x: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.4; color: var(--text-color); transition: width 0.2s, min-width 0.2s, padding 0.2s; }
+.file-tree-panel .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.file-tree-panel h3 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0; }
+.collapse-btn { background: none; border: none; padding: 4px; cursor: pointer; color: var(--text-muted); border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: background 0.15s, color 0.15s; }
+.collapse-btn:hover { background: rgba(0,0,0,0.05); color: var(--text-color); }
+.collapse-btn svg { transition: transform 0.2s; }
+.file-tree-panel.collapsed { width: 48px !important; min-width: 48px !important; padding: 12px 8px; overflow: hidden; }
+.file-tree-panel.collapsed .panel-header { flex-direction: column; margin-bottom: 0; }
+.file-tree-panel.collapsed h3 { writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); margin-top: 12px; white-space: nowrap; }
+.file-tree-panel.collapsed .collapse-btn svg { transform: rotate(180deg); }
+.file-tree-panel.collapsed .file-tree { display: none; }
 .code-panel { flex: 1; display: flex; flex-direction: column; background: var(--card-bg); border-radius: 8px; overflow: hidden; min-width: 0; }
 #code-header { padding: 12px 16px; background: rgba(0,0,0,0.03); border-bottom: 1px solid rgba(0,0,0,0.1); }
 #current-file-path { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-weight: 600; font-size: 0.9rem; word-break: break-all; }
@@ -2017,7 +1178,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .blame-minimap { width: 10px; background: rgba(0,0,0,0.05); position: relative; flex-shrink: 0; border-left: 1px solid rgba(0,0,0,0.1); }
 .minimap-marker { position: absolute; left: 0; right: 0; cursor: pointer; transition: opacity 0.15s; }
 .minimap-marker:hover { opacity: 0.8; }
-.blame-tooltip { position: fixed; z-index: 1000; max-width: 400px; padding: 8px 12px; background: rgba(30, 30, 30, 0.95); color: #fff; font-size: 0.85rem; line-height: 1.4; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); pointer-events: none; white-space: pre-wrap; word-wrap: break-word; }
+.blame-tooltip { position: fixed; z-index: 1000; pointer-events: none; }
+.blame-tooltip .index-item { margin: 0; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+.blame-tooltip .index-item-content { max-height: 150px; overflow: hidden; }
+.blame-tooltip .index-item-stats { padding: 8px 16px; }
+.blame-tooltip .index-long-text { display: none; }
 
 /* File Tree */
 .file-tree { list-style: none; padding: 0; margin: 0; }
@@ -2056,8 +1221,16 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .cm-active-range { background: rgba(25, 118, 210, 0.2) !important; }
 
 /* Transcript Panel */
-.transcript-panel { width: 460px; min-width: 280px; overflow-y: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; }
-.transcript-panel h3 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 12px 0; }
+.transcript-panel { width: 460px; min-width: 280px; overflow-y: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; position: relative; }
+.transcript-panel h3 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 -16px 0 -16px; padding: 0 16px 12px 16px; position: sticky; top: -16px; background: var(--card-bg); z-index: 11; }
+
+/* Pinned User Message - sits directly below h3 with no gap */
+.pinned-user-message { position: sticky; top: 12px; z-index: 10; margin: 0 -16px 12px -16px; padding: 0 16px 8px 16px; background: var(--card-bg); cursor: pointer; }
+.pinned-user-message::before { content: ''; position: absolute; left: 0; right: 0; bottom: -12px; height: 12px; background: linear-gradient(to bottom, var(--card-bg) 0%, transparent 100%); pointer-events: none; }
+.pinned-user-message-inner { background: linear-gradient(135deg, var(--user-bg) 0%, #bbdefb 100%); border-left: 3px solid var(--user-border); border-radius: 4px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: box-shadow 0.15s, transform 0.15s; }
+.pinned-user-message:hover .pinned-user-message-inner { box-shadow: 0 4px 12px rgba(0,0,0,0.15); transform: translateY(-1px); }
+.pinned-user-message-label { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--user-border); margin-bottom: 4px; }
+.pinned-user-content { font-size: 0.85rem; color: var(--text-color); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Resizable panels */
 .resize-handle { width: 8px; cursor: col-resize; background: transparent; flex-shrink: 0; position: relative; }
@@ -2095,14 +1268,31 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 """
 
 JS = """
+function formatTimestamp(date) {
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = date.toDateString() === yesterday.toDateString();
+    const isThisYear = date.getFullYear() === now.getFullYear();
+
+    const timeStr = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+    if (isToday) {
+        return timeStr;
+    } else if (isYesterday) {
+        return 'Yesterday ' + timeStr;
+    } else if (isThisYear) {
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + timeStr;
+    } else {
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + timeStr;
+    }
+}
 document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
     const timestamp = el.getAttribute('data-timestamp');
     const date = new Date(timestamp);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    if (isToday) { el.textContent = timeStr; }
-    else { el.textContent = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + timeStr; }
+    el.textContent = formatTimestamp(date);
+    el.title = date.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' });
 });
 document.querySelectorAll('pre.json').forEach(function(el) {
     let text = el.textContent;
@@ -2436,12 +1626,12 @@ def generate_html(
 
     # Generate code view if requested
     if has_code_view:
-        msg_to_user_text = build_msg_to_user_text(conversations)
+        msg_to_user_html = build_msg_to_user_html(conversations)
         generate_code_view_html(
             output_dir,
             file_operations,
             transcript_messages=all_messages_html,
-            msg_to_user_text=msg_to_user_text,
+            msg_to_user_html=msg_to_user_html,
         )
         num_files = len(set(op.file_path for op in file_operations))
         print(f"Generated code.html ({num_files} files)")
@@ -2942,12 +2132,12 @@ def generate_html_from_session_data(
 
     # Generate code view if requested
     if has_code_view:
-        msg_to_user_text = build_msg_to_user_text(conversations)
+        msg_to_user_html = build_msg_to_user_html(conversations)
         generate_code_view_html(
             output_dir,
             file_operations,
             transcript_messages=all_messages_html,
-            msg_to_user_text=msg_to_user_text,
+            msg_to_user_html=msg_to_user_html,
         )
         num_files = len(set(op.file_path for op in file_operations))
         click.echo(f"Generated code.html ({num_files} files)")
