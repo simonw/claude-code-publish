@@ -622,6 +622,10 @@ def _parse_jsonl_file(filepath):
                 if obj.get("isCompactSummary"):
                     entry["isCompactSummary"] = True
 
+                # Preserve isMeta if present (skill expansions, not real user prompts)
+                if obj.get("isMeta"):
+                    entry["isMeta"] = True
+
                 # Preserve toolUseResult if present (needed for originalFile content)
                 if "toolUseResult" in obj:
                     entry["toolUseResult"] = obj["toolUseResult"]
@@ -1199,6 +1203,7 @@ def generate_html(
         log_type = entry.get("type")
         timestamp = entry.get("timestamp", "")
         is_compact_summary = entry.get("isCompactSummary", False)
+        is_meta = entry.get("isMeta", False)
         message_data = entry.get("message", {})
         if not message_data:
             continue
@@ -1215,11 +1220,12 @@ def generate_html(
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)
+            # isMeta entries (skill expansions) are continuations, not new prompts
             current_conv = {
                 "user_text": user_text,
                 "timestamp": timestamp,
                 "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary),
+                "is_continuation": bool(is_compact_summary or is_meta),
             }
         elif current_conv:
             current_conv["messages"].append((log_type, message_json, timestamp))
@@ -1706,6 +1712,7 @@ def generate_html_from_session_data(
         log_type = entry.get("type")
         timestamp = entry.get("timestamp", "")
         is_compact_summary = entry.get("isCompactSummary", False)
+        is_meta = entry.get("isMeta", False)
         message_data = entry.get("message", {})
         if not message_data:
             continue
@@ -1722,11 +1729,12 @@ def generate_html_from_session_data(
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)
+            # isMeta entries (skill expansions) are continuations, not new prompts
             current_conv = {
                 "user_text": user_text,
                 "timestamp": timestamp,
                 "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary),
+                "is_continuation": bool(is_compact_summary or is_meta),
             }
         elif current_conv:
             current_conv["messages"].append((log_type, message_json, timestamp))
