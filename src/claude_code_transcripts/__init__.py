@@ -259,16 +259,33 @@ def normalize_file_paths(operations: List[FileOperation]) -> Tuple[str, Dict[str
     return common, path_mapping
 
 
+def find_git_repo_root(start_path: str) -> Optional[Path]:
+    """Walk up from start_path to find a git repository root.
+
+    Args:
+        start_path: Directory path to start searching from.
+
+    Returns:
+        Path to the git repo root, or None if not found.
+    """
+    current = Path(start_path)
+    while current != current.parent:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+    return None
+
+
 def build_file_history_repo(
     operations: List[FileOperation],
-    source_repo_path: Optional[Path] = None,
 ) -> Tuple[Repo, Path, Dict[str, str]]:
     """Create a temp git repo that replays all file operations as commits.
 
+    For Edit operations on files not yet in the temp repo, attempts to fetch
+    initial content from the file's git repo (if any) or from disk.
+
     Args:
         operations: List of FileOperation objects in chronological order.
-        source_repo_path: Optional path to source repo for fetching initial
-            content of files that only have Edit operations.
 
     Returns:
         Tuple of (repo, temp_dir, path_mapping) where:
@@ -287,14 +304,6 @@ def build_file_history_repo(
     # Get path mapping
     common_prefix, path_mapping = normalize_file_paths(operations)
 
-    # Open source repo if provided
-    source_repo = None
-    if source_repo_path:
-        try:
-            source_repo = Repo(source_repo_path)
-        except InvalidGitRepositoryError:
-            pass
-
     # Sort operations by timestamp
     sorted_ops = sorted(operations, key=lambda o: o.timestamp)
 
@@ -306,14 +315,28 @@ def build_file_history_repo(
         if op.operation_type == "write":
             full_path.write_text(op.content or "")
         elif op.operation_type == "edit":
-            # If file doesn't exist, try to fetch from source repo
-            if not full_path.exists() and source_repo:
-                try:
-                    # Try to get file content from source repo HEAD
-                    blob = source_repo.head.commit.tree / rel_path
-                    full_path.write_bytes(blob.data_stream.read())
-                except (KeyError, TypeError):
-                    pass  # File not in source repo
+            # If file doesn't exist, try to fetch initial content
+            if not full_path.exists():
+                fetched = False
+
+                # Try to find a git repo for this file and fetch from HEAD
+                file_repo_root = find_git_repo_root(str(Path(op.file_path).parent))
+                if file_repo_root:
+                    try:
+                        file_repo = Repo(file_repo_root)
+                        file_rel_path = os.path.relpath(op.file_path, file_repo_root)
+                        blob = file_repo.head.commit.tree / file_rel_path
+                        full_path.write_bytes(blob.data_stream.read())
+                        fetched = True
+                    except (KeyError, TypeError, ValueError, InvalidGitRepositoryError):
+                        pass  # File not in git
+
+                # Fallback: read from disk if file exists
+                if not fetched and Path(op.file_path).exists():
+                    try:
+                        full_path.write_text(Path(op.file_path).read_text())
+                    except Exception:
+                        pass
 
             if full_path.exists():
                 content = full_path.read_text()
@@ -784,7 +807,6 @@ def generate_code_view_html(
     output_dir: Path,
     operations: List[FileOperation],
     transcript_html: str = "",
-    source_repo_path: Optional[Path] = None,
 ) -> None:
     """Generate the code.html file with three-pane layout.
 
@@ -792,13 +814,12 @@ def generate_code_view_html(
         output_dir: Output directory.
         operations: List of FileOperation objects.
         transcript_html: Full transcript HTML to show in the right pane.
-        source_repo_path: Optional path to source repo for Edit-only files.
     """
     if not operations:
         return
 
     # Build temp git repo with file history
-    repo, temp_dir, path_mapping = build_file_history_repo(operations, source_repo_path)
+    repo, temp_dir, path_mapping = build_file_history_repo(operations)
 
     try:
         # Build file data for each file
@@ -2299,7 +2320,6 @@ def generate_html(
             output_dir,
             file_operations,
             transcript_html="".join(all_messages_html),
-            source_repo_path=Path(repo_path) if repo_path else None,
         )
         num_files = len(set(op.file_path for op in file_operations))
         print(f"Generated code.html ({num_files} files)")
@@ -2804,7 +2824,6 @@ def generate_html_from_session_data(
             output_dir,
             file_operations,
             transcript_html="".join(all_messages_html),
-            source_repo_path=Path(repo_path) if repo_path else None,
         )
         num_files = len(set(op.file_path for op in file_operations))
         click.echo(f"Generated code.html ({num_files} files)")
