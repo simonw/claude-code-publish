@@ -37,8 +37,9 @@
             <div class="transcript-panel" id="transcript-panel">
                 <h3>Transcript</h3>
                 <div id="transcript-content">
-                    {{ transcript_html|safe }}
+                    <!-- Messages rendered dynamically via JS for performance -->
                 </div>
+                <div id="transcript-sentinel"></div>
             </div>
         </div>
 

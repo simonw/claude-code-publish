@@ -12,6 +12,19 @@ import {markdown} from 'https://esm.sh/@codemirror/lang-markdown@6';
 // File data embedded in page
 const fileData = {{ file_data_json|safe }};
 
+// Transcript messages data for chunked rendering
+const messagesData = {{ messages_json|safe }};
+const CHUNK_SIZE = 50;
+let renderedCount = 0;
+const msgIdToIndex = new Map();
+
+// Build ID-to-index map for fast lookup
+messagesData.forEach((msg, index) => {
+    if (msg.id) {
+        msgIdToIndex.set(msg.id, index);
+    }
+});
+
 // Current state
 let currentEditor = null;
 let currentFilePath = null;
@@ -173,9 +186,38 @@ function highlightRange(rangeIndex, blameRanges, view) {
     });
 }
 
+// Render a chunk of messages to the transcript panel
+function renderMessagesUpTo(targetIndex) {
+    const transcriptContent = document.getElementById('transcript-content');
+
+    while (renderedCount <= targetIndex && renderedCount < messagesData.length) {
+        const msg = messagesData[renderedCount];
+        const div = document.createElement('div');
+        div.innerHTML = msg.html;
+        // Append all children (the message div itself)
+        while (div.firstChild) {
+            transcriptContent.appendChild(div.firstChild);
+        }
+        renderedCount++;
+    }
+}
+
+// Render the next chunk of messages
+function renderNextChunk() {
+    const targetIndex = Math.min(renderedCount + CHUNK_SIZE - 1, messagesData.length - 1);
+    renderMessagesUpTo(targetIndex);
+}
+
 // Scroll to a message in the transcript by msg_id
 function scrollToMessage(msgId) {
     const transcriptContent = document.getElementById('transcript-content');
+
+    // Ensure the message is rendered first
+    const msgIndex = msgIdToIndex.get(msgId);
+    if (msgIndex !== undefined && msgIndex >= renderedCount) {
+        renderMessagesUpTo(msgIndex);
+    }
+
     const message = transcriptContent.querySelector(`#${msgId}`);
     if (message) {
         // Remove previous highlight
@@ -320,3 +362,21 @@ function initResize() {
 }
 
 initResize();
+
+// Chunked transcript rendering
+// Render initial chunk of messages
+renderNextChunk();
+
+// Set up IntersectionObserver to load more messages as user scrolls
+const sentinel = document.getElementById('transcript-sentinel');
+if (sentinel) {
+    const observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && renderedCount < messagesData.length) {
+            renderNextChunk();
+        }
+    }, {
+        root: document.getElementById('transcript-panel'),
+        rootMargin: '200px',  // Start loading before sentinel is visible
+    });
+    observer.observe(sentinel);
+}

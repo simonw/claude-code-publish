@@ -806,17 +806,31 @@ def file_state_to_dict(file_state: FileState) -> Dict[str, Any]:
 def generate_code_view_html(
     output_dir: Path,
     operations: List[FileOperation],
-    transcript_html: str = "",
+    transcript_messages: List[str] = None,
 ) -> None:
     """Generate the code.html file with three-pane layout.
 
     Args:
         output_dir: Output directory.
         operations: List of FileOperation objects.
-        transcript_html: Full transcript HTML to show in the right pane.
+        transcript_messages: List of individual message HTML strings.
     """
     if not operations:
         return
+
+    if transcript_messages is None:
+        transcript_messages = []
+
+    # Extract message IDs from HTML for chunked rendering
+    # Messages have format: <div class="message ..." id="msg-...">
+    import re
+
+    msg_id_pattern = re.compile(r'id="(msg-[^"]+)"')
+    messages_data = []
+    for msg_html in transcript_messages:
+        match = msg_id_pattern.search(msg_html)
+        msg_id = match.group(1) if match else None
+        messages_data.append({"id": msg_id, "html": msg_html})
 
     # Build temp git repo with file history
     repo, temp_dir, path_mapping = build_file_history_repo(operations)
@@ -882,10 +896,15 @@ def generate_code_view_html(
         file_tree = build_file_tree(file_states)
         file_tree_html = render_file_tree_html(file_tree)
 
-        # Convert data to JSON
-        file_data_json = json.dumps(file_data)
-        file_data_json = file_data_json.replace("</", "<\\/")
-        file_data_json = file_data_json.replace("<!--", "<\\!--")
+        # Convert data to JSON (escape for embedding in script tags)
+        def escape_json_for_script(data):
+            s = json.dumps(data)
+            s = s.replace("</", "<\\/")
+            s = s.replace("<!--", "<\\!--")
+            return s
+
+        file_data_json = escape_json_for_script(file_data)
+        messages_json = escape_json_for_script(messages_data)
 
         # Get templates
         code_view_template = get_template("code_view.html")
@@ -894,6 +913,7 @@ def generate_code_view_html(
         # Render JavaScript with data
         code_view_js = code_view_js_template.render(
             file_data_json=file_data_json,
+            messages_json=messages_json,
         )
 
         # Render page
@@ -902,7 +922,6 @@ def generate_code_view_html(
             js=JS,
             file_tree_html=file_tree_html,
             code_view_js=code_view_js,
-            transcript_html=transcript_html,
         )
 
         # Write file
@@ -2319,7 +2338,7 @@ def generate_html(
         generate_code_view_html(
             output_dir,
             file_operations,
-            transcript_html="".join(all_messages_html),
+            transcript_messages=all_messages_html,
         )
         num_files = len(set(op.file_path for op in file_operations))
         print(f"Generated code.html ({num_files} files)")
@@ -2823,7 +2842,7 @@ def generate_html_from_session_data(
         generate_code_view_html(
             output_dir,
             file_operations,
-            transcript_html="".join(all_messages_html),
+            transcript_messages=all_messages_html,
         )
         num_files = len(set(op.file_path for op in file_operations))
         click.echo(f"Generated code.html ({num_files} files)")
