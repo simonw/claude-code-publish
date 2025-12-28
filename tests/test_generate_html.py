@@ -1041,6 +1041,36 @@ class TestParseSessionFile:
         assert "hello world" in index_html.lower()
         assert index_html == snapshot_html
 
+    def test_jsonl_preserves_tool_use_result(self, tmp_path):
+        """Test that toolUseResult field is preserved in parsed entries.
+
+        This is needed for originalFile content used in remote session code reconstruction.
+        """
+        # Create a JSONL file with toolUseResult
+        jsonl_content = """{"type":"user","timestamp":"2025-01-01T10:00:00Z","message":{"role":"user","content":"Edit the file"}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_001","name":"Edit","input":{"file_path":"/test.py","old_string":"old","new_string":"new"}}]}}
+{"type":"user","timestamp":"2025-01-01T10:00:10Z","toolUseResult":{"originalFile":"original content here","filePath":"/test.py"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_001","content":"File edited"}]}}"""
+
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(jsonl_content)
+
+        result = parse_session_file(jsonl_file)
+
+        # Find the tool result entry (last user message)
+        tool_result_entry = [
+            e
+            for e in result["loglines"]
+            if e["type"] == "user" and "tool_result" in str(e)
+        ][-1]
+
+        # toolUseResult should be preserved
+        assert "toolUseResult" in tool_result_entry
+        assert (
+            tool_result_entry["toolUseResult"]["originalFile"]
+            == "original content here"
+        )
+        assert tool_result_entry["toolUseResult"]["filePath"] == "/test.py"
+
 
 class TestGetSessionSummary:
     """Tests for get_session_summary which extracts summary from session files."""
