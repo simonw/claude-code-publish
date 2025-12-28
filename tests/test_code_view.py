@@ -235,14 +235,12 @@ class TestBuildFileTree:
 
         tree = build_file_tree(file_states)
 
-        # Check structure - should have /src and /tests at root level
-        assert "/" in tree
-        root = tree["/"]
-        assert "src" in root
-        assert "tests" in root
-        assert "main.py" in root["src"]
-        assert "utils.py" in root["src"]
-        assert "test_main.py" in root["tests"]
+        # Check structure - common "/" prefix stripped, src and tests at root
+        assert "src" in tree
+        assert "tests" in tree
+        assert "main.py" in tree["src"]
+        assert "utils.py" in tree["src"]
+        assert "test_main.py" in tree["tests"]
 
     def test_empty_file_states(self):
         """Test building tree from empty file states."""
@@ -254,11 +252,9 @@ class TestBuildFileTree:
         file_states = {"/path/to/file.py": FileState(file_path="/path/to/file.py")}
         tree = build_file_tree(file_states)
 
-        assert "/" in tree
-        current = tree["/"]
-        assert "path" in current
-        assert "to" in current["path"]
-        assert "file.py" in current["path"]["to"]
+        # Single file: all parent directories are common prefix, only filename remains
+        assert "file.py" in tree
+        assert isinstance(tree["file.py"], FileState)
 
     def test_file_state_is_leaf(self):
         """Test that FileState objects are the leaves of the tree."""
@@ -267,10 +263,62 @@ class TestBuildFileTree:
 
         tree = build_file_tree(file_states)
 
-        # Navigate to the leaf
-        leaf = tree["/"]["src"]["main.py"]
+        # Single file: common prefix stripped, just the filename at root
+        leaf = tree["main.py"]
         assert isinstance(leaf, FileState)
         assert leaf.file_path == "/src/main.py"
+
+    def test_strips_common_prefix(self):
+        """Test that common directory prefixes are stripped from the tree."""
+        file_states = {
+            "/Users/alice/projects/myapp/src/main.py": FileState(
+                file_path="/Users/alice/projects/myapp/src/main.py"
+            ),
+            "/Users/alice/projects/myapp/src/utils.py": FileState(
+                file_path="/Users/alice/projects/myapp/src/utils.py"
+            ),
+            "/Users/alice/projects/myapp/tests/test_main.py": FileState(
+                file_path="/Users/alice/projects/myapp/tests/test_main.py"
+            ),
+        }
+
+        tree = build_file_tree(file_states)
+
+        # Common prefix /Users/alice/projects/myapp should be stripped
+        # Tree should start with src and tests at the root
+        assert "src" in tree
+        assert "tests" in tree
+        assert "Users" not in tree
+        assert "main.py" in tree["src"]
+        assert "utils.py" in tree["src"]
+        assert "test_main.py" in tree["tests"]
+
+    def test_strips_common_prefix_single_common_dir(self):
+        """Test stripping when all files share exactly one common parent."""
+        file_states = {
+            "/src/foo.py": FileState(file_path="/src/foo.py"),
+            "/src/bar.py": FileState(file_path="/src/bar.py"),
+        }
+
+        tree = build_file_tree(file_states)
+
+        # /src is common, so tree should just have the files
+        assert "foo.py" in tree
+        assert "bar.py" in tree
+        assert "src" not in tree
+
+    def test_no_common_prefix_preserved(self):
+        """Test that paths with no common prefix are preserved."""
+        file_states = {
+            "/src/main.py": FileState(file_path="/src/main.py"),
+            "/lib/utils.py": FileState(file_path="/lib/utils.py"),
+        }
+
+        tree = build_file_tree(file_states)
+
+        # Only "/" is common, so src and lib should be at root
+        assert "src" in tree
+        assert "lib" in tree
 
 
 class TestCodeViewDataDataclass:

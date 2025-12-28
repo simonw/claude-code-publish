@@ -353,9 +353,11 @@ function createEditor(container, content, blameRanges, filePath) {
     const { colorMap, msgNumMap } = buildRangeMaps(blameRanges);
     const rangeDecorations = createRangeDecorations(blameRanges, doc, colorMap, msgNumMap);
 
-    // Static decorations plugin
-    const rangeDecorationsPlugin = ViewPlugin.define(() => ({}), {
-        decorations: () => rangeDecorations
+    // Static decorations as a StateField (more reliable than ViewPlugin for static decorations)
+    const rangeDecorationsField = StateField.define({
+        create() { return rangeDecorations; },
+        update(decorations) { return decorations; },
+        provide: f => EditorView.decorations.from(f)
     });
 
     // Click handler plugin
@@ -414,7 +416,7 @@ function createEditor(container, content, blameRanges, filePath) {
         EditorView.lineWrapping,
         syntaxHighlighting(defaultHighlightStyle),
         getLanguageExtension(filePath),
-        rangeDecorationsPlugin,
+        rangeDecorationsField,
         activeRangeField,
         clickHandler,
     ];

@@ -577,27 +577,10 @@ def build_file_history_repo(
         )
         repo.index.commit(metadata)
 
-    # Final sync: for files where our reconstruction diverged from HEAD,
-    # replace with HEAD's content to ensure correct final state
-    if actual_repo and actual_repo_root:
-        for orig_path, rel_path in path_mapping.items():
-            full_path = temp_dir / rel_path
-            if not full_path.exists():
-                continue
-
-            try:
-                file_rel_path = os.path.relpath(orig_path, actual_repo_root)
-                blob = actual_repo.head.commit.tree / file_rel_path
-                head_content = blob.data_stream.read().decode("utf-8")
-                our_content = full_path.read_text()
-
-                # If content differs, use HEAD's content
-                if our_content != head_content:
-                    full_path.write_text(head_content)
-                    repo.index.add([rel_path])
-                    repo.index.commit("{}")  # Final sync commit
-            except (KeyError, TypeError, UnicodeDecodeError):
-                pass  # File not in HEAD or not text
+    # Note: We intentionally skip final sync here to preserve blame attribution.
+    # The displayed content may not exactly match HEAD, but blame tracking
+    # of which operations modified which lines is more important for the
+    # code viewer's purpose.
 
     return repo, temp_dir, path_mapping
 
@@ -671,17 +654,44 @@ def get_file_content_from_repo(repo: Repo, file_path: str) -> Optional[str]:
 def build_file_tree(file_states: Dict[str, FileState]) -> Dict[str, Any]:
     """Build a nested dict structure for file tree UI.
 
+    Common directory prefixes shared by all files are stripped to keep the
+    tree compact.
+
     Args:
         file_states: Dict mapping file paths to FileState objects.
 
     Returns:
         Nested dict where keys are path components and leaves are FileState objects.
     """
+    if not file_states:
+        return {}
+
+    # Split all paths into parts
+    all_parts = [Path(fp).parts for fp in file_states.keys()]
+
+    # Find the common prefix (directory components shared by all files)
+    # We want to strip directories, not filename components
+    common_prefix_len = 0
+    if all_parts:
+        # Find minimum path depth (excluding filename)
+        min_dir_depth = min(len(parts) - 1 for parts in all_parts)
+
+        for i in range(min_dir_depth):
+            # Check if all paths have the same component at position i
+            first_part = all_parts[0][i]
+            if all(parts[i] == first_part for parts in all_parts):
+                common_prefix_len = i + 1
+            else:
+                break
+
     tree: Dict[str, Any] = {}
 
     for file_path, file_state in file_states.items():
         # Normalize path and split into components
         parts = Path(file_path).parts
+
+        # Strip common prefix
+        parts = parts[common_prefix_len:]
 
         # Navigate/create the nested structure
         current = tree
