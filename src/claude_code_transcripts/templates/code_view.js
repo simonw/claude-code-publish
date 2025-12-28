@@ -65,9 +65,17 @@ function getLanguageExtension(filePath) {
 function createRangeDecorations(blameRanges, doc) {
     const decorations = [];
 
+    // Track color index only for ranges that have operations (not pre-existing)
+    let colorIndex = 0;
+
     blameRanges.forEach((range, index) => {
-        const colorIndex = index % rangeColors.length;
-        const color = rangeColors[colorIndex];
+        // Skip pre-existing content (no msg_id means it predates the session)
+        if (!range.msg_id) {
+            return;
+        }
+
+        const color = rangeColors[colorIndex % rangeColors.length];
+        colorIndex++;
 
         for (let line = range.start; line <= range.end; line++) {
             if (line <= doc.lines) {
@@ -77,7 +85,7 @@ function createRangeDecorations(blameRanges, doc) {
                         attributes: {
                             style: `background-color: ${color}`,
                             'data-range-index': index.toString(),
-                            'data-msg-id': range.msg_id || '',
+                            'data-msg-id': range.msg_id,
                         }
                     }).range(lineStart)
                 );
