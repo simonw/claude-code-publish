@@ -16,6 +16,8 @@ from typing import Optional, List, Tuple, Dict, Any
 
 import click
 from click_default_group import DefaultGroup
+from git import Repo
+from git.exc import InvalidGitRepositoryError
 import httpx
 from jinja2 import Environment, PackageLoader
 import markdown
@@ -94,6 +96,9 @@ class FileState:
     # For diff-only mode when no repo is available
     diff_only: bool = False
 
+    # File status: "added" (first op is Write), "modified" (first op is Edit)
+    status: str = "modified"
+
 
 @dataclass
 class CodeViewData:
@@ -104,6 +109,19 @@ class CodeViewData:
     mode: str = "diff_only"  # "full" or "diff_only"
     repo_path: Optional[str] = None
     session_cwd: Optional[str] = None
+
+
+@dataclass
+class BlameRange:
+    """A range of consecutive lines from the same operation."""
+
+    start_line: int  # 1-indexed
+    end_line: int  # 1-indexed, inclusive
+    tool_id: Optional[str]
+    page_num: int
+    msg_id: str
+    operation_type: str  # "write" or "edit"
+    timestamp: str
 
 
 # ============================================================================
@@ -133,8 +151,8 @@ def extract_file_operations(
         for msg_idx, (log_type, message_json, timestamp) in enumerate(
             conv.get("messages", [])
         ):
-            # Generate a unique ID for this message
-            msg_id = f"msg-{conv_idx}-{msg_idx}"
+            # Generate a unique ID matching the HTML message IDs
+            msg_id = f"msg-{timestamp.replace(':', '-').replace('.', '-')}"
             # Store timestamp -> (page_num, msg_id) mapping
             msg_to_page[timestamp] = (page_num, msg_id)
 
@@ -158,7 +176,8 @@ def extract_file_operations(
             tool_input = block.get("input", {})
 
             # Get page and message ID from our mapping
-            page_num, msg_id = msg_to_page.get(timestamp, (1, "msg-0-0"))
+            fallback_msg_id = f"msg-{timestamp.replace(':', '-').replace('.', '-')}"
+            page_num, msg_id = msg_to_page.get(timestamp, (1, fallback_msg_id))
 
             if tool_name == "Write":
                 file_path = tool_input.get("file_path", "")
@@ -201,6 +220,195 @@ def extract_file_operations(
     # Sort by timestamp
     operations.sort(key=lambda op: op.timestamp)
     return operations
+
+
+def normalize_file_paths(operations: List[FileOperation]) -> Tuple[str, Dict[str, str]]:
+    """Find common prefix in file paths and create normalized relative paths.
+
+    Args:
+        operations: List of FileOperation objects.
+
+    Returns:
+        Tuple of (common_prefix, path_mapping) where path_mapping maps
+        original absolute paths to normalized relative paths.
+    """
+    if not operations:
+        return "", {}
+
+    # Get all unique file paths
+    file_paths = list(set(op.file_path for op in operations))
+
+    if len(file_paths) == 1:
+        # Single file - use its parent as prefix
+        path = Path(file_paths[0])
+        prefix = str(path.parent)
+        return prefix, {file_paths[0]: path.name}
+
+    # Find common prefix
+    common = os.path.commonpath(file_paths)
+    # Make sure we're at a directory boundary
+    if not os.path.isdir(common):
+        common = os.path.dirname(common)
+
+    # Create mapping
+    path_mapping = {}
+    for fp in file_paths:
+        rel_path = os.path.relpath(fp, common)
+        path_mapping[fp] = rel_path
+
+    return common, path_mapping
+
+
+def build_file_history_repo(
+    operations: List[FileOperation],
+    source_repo_path: Optional[Path] = None,
+) -> Tuple[Repo, Path, Dict[str, str]]:
+    """Create a temp git repo that replays all file operations as commits.
+
+    Args:
+        operations: List of FileOperation objects in chronological order.
+        source_repo_path: Optional path to source repo for fetching initial
+            content of files that only have Edit operations.
+
+    Returns:
+        Tuple of (repo, temp_dir, path_mapping) where:
+        - repo: GitPython Repo object
+        - temp_dir: Path to the temp directory
+        - path_mapping: Dict mapping original paths to relative paths
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="claude-session-"))
+    repo = Repo.init(temp_dir)
+
+    # Configure git user for commits
+    with repo.config_writer() as config:
+        config.set_value("user", "name", "Claude")
+        config.set_value("user", "email", "claude@session")
+
+    # Get path mapping
+    common_prefix, path_mapping = normalize_file_paths(operations)
+
+    # Open source repo if provided
+    source_repo = None
+    if source_repo_path:
+        try:
+            source_repo = Repo(source_repo_path)
+        except InvalidGitRepositoryError:
+            pass
+
+    # Sort operations by timestamp
+    sorted_ops = sorted(operations, key=lambda o: o.timestamp)
+
+    for op in sorted_ops:
+        rel_path = path_mapping.get(op.file_path, op.file_path)
+        full_path = temp_dir / rel_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if op.operation_type == "write":
+            full_path.write_text(op.content or "")
+        elif op.operation_type == "edit":
+            # If file doesn't exist, try to fetch from source repo
+            if not full_path.exists() and source_repo:
+                try:
+                    # Try to get file content from source repo HEAD
+                    blob = source_repo.head.commit.tree / rel_path
+                    full_path.write_bytes(blob.data_stream.read())
+                except (KeyError, TypeError):
+                    pass  # File not in source repo
+
+            if full_path.exists():
+                content = full_path.read_text()
+                if op.replace_all:
+                    content = content.replace(op.old_string or "", op.new_string or "")
+                else:
+                    content = content.replace(
+                        op.old_string or "", op.new_string or "", 1
+                    )
+                full_path.write_text(content)
+            else:
+                # Can't apply edit - file doesn't exist
+                continue
+
+        # Stage and commit with metadata
+        repo.index.add([rel_path])
+        metadata = json.dumps(
+            {
+                "tool_id": op.tool_id,
+                "page_num": op.page_num,
+                "msg_id": op.msg_id,
+                "timestamp": op.timestamp,
+                "operation_type": op.operation_type,
+                "file_path": op.file_path,
+            }
+        )
+        repo.index.commit(metadata)
+
+    return repo, temp_dir, path_mapping
+
+
+def get_file_blame_ranges(repo: Repo, file_path: str) -> List[BlameRange]:
+    """Get blame data for a file, grouped into ranges of consecutive lines.
+
+    Args:
+        repo: GitPython Repo object.
+        file_path: Relative path to the file within the repo.
+
+    Returns:
+        List of BlameRange objects, each representing consecutive lines
+        from the same operation.
+    """
+    try:
+        blame_data = repo.blame("HEAD", file_path)
+    except Exception:
+        return []
+
+    ranges = []
+    current_line = 1
+
+    for commit, lines in blame_data:
+        if not lines:
+            continue
+
+        # Parse metadata from commit message
+        try:
+            metadata = json.loads(commit.message)
+        except json.JSONDecodeError:
+            metadata = {}
+
+        start_line = current_line
+        end_line = current_line + len(lines) - 1
+
+        ranges.append(
+            BlameRange(
+                start_line=start_line,
+                end_line=end_line,
+                tool_id=metadata.get("tool_id"),
+                page_num=metadata.get("page_num", 1),
+                msg_id=metadata.get("msg_id", ""),
+                operation_type=metadata.get("operation_type", "unknown"),
+                timestamp=metadata.get("timestamp", ""),
+            )
+        )
+
+        current_line = end_line + 1
+
+    return ranges
+
+
+def get_file_content_from_repo(repo: Repo, file_path: str) -> Optional[str]:
+    """Get the final content of a file from the repo.
+
+    Args:
+        repo: GitPython Repo object.
+        file_path: Relative path to the file within the repo.
+
+    Returns:
+        File content as string, or None if file doesn't exist.
+    """
+    try:
+        blob = repo.head.commit.tree / file_path
+        return blob.data_stream.read().decode("utf-8")
+    except (KeyError, TypeError):
+        return None
 
 
 def build_file_tree(file_states: Dict[str, FileState]) -> Dict[str, Any]:
@@ -453,10 +661,14 @@ def build_file_states(
         # Sort by timestamp
         ops.sort(key=lambda o: o.timestamp)
 
+        # Determine status based on first operation
+        status = "added" if ops[0].operation_type == "write" else "modified"
+
         file_state = FileState(
             file_path=file_path,
             operations=ops,
             diff_only=True,  # Default to diff-only
+            status=status,
         )
 
         # If first operation is a Write (file creation), we can show full content
@@ -496,10 +708,10 @@ def render_file_tree_html(file_tree: Dict[str, Any], prefix: str = "") -> str:
         full_path = f"{prefix}/{name}" if prefix else name
 
         if isinstance(value, FileState):
-            # It's a file
+            # It's a file - status shown via CSS color
+            status_class = f"status-{value.status}"
             html_parts.append(
-                f'<li class="tree-file" data-path="{html.escape(value.file_path)}">'
-                f'<span class="tree-file-icon">📄</span>'
+                f'<li class="tree-file {status_class}" data-path="{html.escape(value.file_path)}">'
                 f'<span class="tree-file-name">{html.escape(name)}</span>'
                 f"</li>"
             )
@@ -508,7 +720,7 @@ def render_file_tree_html(file_tree: Dict[str, Any], prefix: str = "") -> str:
             children_html = render_file_tree_html(value, full_path)
             html_parts.append(
                 f'<li class="tree-dir open">'
-                f'<span class="tree-toggle">▶</span>'
+                f'<span class="tree-toggle"></span>'
                 f'<span class="tree-dir-name">{html.escape(name)}</span>'
                 f'<ul class="tree-children">{children_html}</ul>'
                 f"</li>"
@@ -570,48 +782,114 @@ def file_state_to_dict(file_state: FileState) -> Dict[str, Any]:
 
 def generate_code_view_html(
     output_dir: Path,
-    file_states: Dict[str, FileState],
+    operations: List[FileOperation],
+    transcript_html: str = "",
+    source_repo_path: Optional[Path] = None,
 ) -> None:
-    """Generate the code.html file.
+    """Generate the code.html file with three-pane layout.
 
     Args:
         output_dir: Output directory.
-        file_states: Dict of file paths to FileState objects.
+        operations: List of FileOperation objects.
+        transcript_html: Full transcript HTML to show in the right pane.
+        source_repo_path: Optional path to source repo for Edit-only files.
     """
-    # Build file tree
-    file_tree = build_file_tree(file_states)
+    if not operations:
+        return
 
-    # Render file tree HTML
-    file_tree_html = render_file_tree_html(file_tree)
+    # Build temp git repo with file history
+    repo, temp_dir, path_mapping = build_file_history_repo(operations, source_repo_path)
 
-    # Convert file states to JSON for JavaScript
-    # Escape sequences that would break HTML parsing when embedded in <script>
-    file_data = {path: file_state_to_dict(fs) for path, fs in file_states.items()}
-    file_data_json = json.dumps(file_data)
-    # Escape </ to prevent </script> from closing the script tag prematurely
-    file_data_json = file_data_json.replace("</", "<\\/")
-    # Escape <!-- to prevent HTML comment injection
-    file_data_json = file_data_json.replace("<!--", "<\\!--")
+    try:
+        # Build file data for each file
+        file_data = {}
 
-    # Get templates
-    code_view_template = get_template("code_view.html")
-    code_view_js_template = get_template("code_view.js")
+        # Group operations by file
+        ops_by_file: Dict[str, List[FileOperation]] = {}
+        for op in operations:
+            if op.file_path not in ops_by_file:
+                ops_by_file[op.file_path] = []
+            ops_by_file[op.file_path].append(op)
 
-    # Render JavaScript with data
-    code_view_js = code_view_js_template.render(
-        file_data_json=file_data_json,
-    )
+        # Sort each file's operations by timestamp
+        for file_path in ops_by_file:
+            ops_by_file[file_path].sort(key=lambda o: o.timestamp)
 
-    # Render page
-    page_content = code_view_template.render(
-        css=CSS,
-        js=JS,
-        file_tree_html=file_tree_html,
-        code_view_js=code_view_js,
-    )
+        for orig_path, file_ops in ops_by_file.items():
+            rel_path = path_mapping.get(orig_path, orig_path)
 
-    # Write file
-    (output_dir / "code.html").write_text(page_content, encoding="utf-8")
+            # Get file content
+            content = get_file_content_from_repo(repo, rel_path)
+            if content is None:
+                continue
+
+            # Get blame ranges
+            blame_ranges = get_file_blame_ranges(repo, rel_path)
+
+            # Determine status
+            status = "added" if file_ops[0].operation_type == "write" else "modified"
+
+            # Build file data
+            file_data[orig_path] = {
+                "file_path": orig_path,
+                "rel_path": rel_path,
+                "content": content,
+                "status": status,
+                "blame_ranges": [
+                    {
+                        "start": r.start_line,
+                        "end": r.end_line,
+                        "tool_id": r.tool_id,
+                        "page_num": r.page_num,
+                        "msg_id": r.msg_id,
+                        "operation_type": r.operation_type,
+                        "timestamp": r.timestamp,
+                    }
+                    for r in blame_ranges
+                ],
+            }
+
+        # Build file states for tree (reusing existing structure)
+        file_states = {}
+        for orig_path, data in file_data.items():
+            file_states[orig_path] = FileState(
+                file_path=orig_path,
+                status=data["status"],
+            )
+
+        # Build file tree
+        file_tree = build_file_tree(file_states)
+        file_tree_html = render_file_tree_html(file_tree)
+
+        # Convert data to JSON
+        file_data_json = json.dumps(file_data)
+        file_data_json = file_data_json.replace("</", "<\\/")
+        file_data_json = file_data_json.replace("<!--", "<\\!--")
+
+        # Get templates
+        code_view_template = get_template("code_view.html")
+        code_view_js_template = get_template("code_view.js")
+
+        # Render JavaScript with data
+        code_view_js = code_view_js_template.render(
+            file_data_json=file_data_json,
+        )
+
+        # Render page
+        page_content = code_view_template.render(
+            css=CSS,
+            js=JS,
+            file_tree_html=file_tree_html,
+            code_view_js=code_view_js,
+            transcript_html=transcript_html,
+        )
+
+        # Write file
+        (output_dir / "code.html").write_text(page_content, encoding="utf-8")
+
+    finally:
+        # Clean up temp directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def extract_text_from_content(content):
@@ -1447,9 +1725,10 @@ CSS = """
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
 .container { max-width: 800px; margin: 0 auto; }
+.transcript-wrapper { max-width: 800px; margin: 0 auto; }
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
-.header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
-.header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
+.header-row { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 0; margin-bottom: 24px; }
+.header-row h1 { border-bottom: none; padding-bottom: 8px; margin-bottom: 0; flex: 1; min-width: 200px; }
 .message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
 .message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
@@ -1581,37 +1860,44 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 @media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 
 /* Tab Bar */
-.tab-bar { display: flex; gap: 4px; }
-.tab { padding: 6px 16px; text-decoration: none; color: var(--text-muted); border-radius: 6px 6px 0 0; background: rgba(0,0,0,0.03); }
-.tab:hover { color: var(--text-color); background: rgba(0,0,0,0.06); }
-.tab.active { color: var(--user-border); background: var(--card-bg); font-weight: 600; }
-.header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+.tab-bar { display: flex; gap: 0; margin-bottom: -2px; }
+.tab { padding: 8px 20px; text-decoration: none; color: var(--text-muted); border-radius: 6px 6px 0 0; background: transparent; border: 2px solid transparent; border-bottom: none; transition: color 0.15s ease; }
+.tab:hover { color: var(--text-color); }
+.tab.active { color: var(--user-border); background: var(--bg-color); font-weight: 600; border-color: var(--user-border); border-bottom: 2px solid var(--bg-color); }
+
+/* Full-width container when tabs are present */
+.container:has(.header-row) { max-width: none; }
 
 /* Code Viewer Layout */
 .code-viewer { display: flex; height: calc(100vh - 140px); gap: 16px; min-height: 400px; }
-.file-tree-panel { width: 280px; min-width: 200px; overflow-y: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; }
-.file-tree-panel h3 { margin: 0 0 8px 0; font-size: 1rem; }
-.mode-badge { display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; margin-bottom: 12px; }
-.mode-badge.full-mode { background: #e8f5e9; color: #2e7d32; }
-.mode-badge.diff-mode { background: #fff3e0; color: #e65100; }
+.file-tree-panel { width: 320px; min-width: 240px; overflow-y: auto; overflow-x: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.4; color: var(--text-color); }
+.file-tree-panel h3 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 12px 0; }
 .code-panel { flex: 1; display: flex; flex-direction: column; background: var(--card-bg); border-radius: 8px; overflow: hidden; min-width: 0; }
 #code-header { padding: 12px 16px; background: rgba(0,0,0,0.03); border-bottom: 1px solid rgba(0,0,0,0.1); }
-#current-file-path { font-family: monospace; font-weight: 600; font-size: 0.9rem; word-break: break-all; }
+#current-file-path { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-weight: 600; font-size: 0.9rem; word-break: break-all; }
 #code-content { flex: 1; overflow: auto; }
 .no-file-selected { padding: 32px; text-align: center; color: var(--text-muted); }
 
 /* File Tree */
-.file-tree { list-style: none; padding: 0; margin: 0; font-size: 0.85rem; }
-.file-tree ul { list-style: none; padding-left: 16px; margin: 0; }
-.tree-dir, .tree-file { padding: 4px 8px; cursor: pointer; border-radius: 4px; }
-.tree-toggle { display: inline-block; width: 16px; transition: transform 0.2s; font-size: 0.7rem; }
-.tree-dir.open > .tree-toggle { transform: rotate(90deg); }
-.tree-children { display: none; }
+.file-tree { list-style: none; padding: 0; margin: 0; }
+.file-tree ul { list-style: none; padding-left: 16px; margin: 0; position: relative; }
+.file-tree ul::before { content: ''; position: absolute; left: 6px; top: 0; bottom: 8px; width: 1px; background: rgba(0,0,0,0.15); }
+.tree-dir { padding: 4px 0; }
+.tree-toggle { display: inline-block; width: 16px; height: 16px; margin-right: 4px; position: relative; cursor: pointer; }
+.tree-toggle::before { content: ''; position: absolute; left: 5px; top: 5px; border: 4px solid transparent; border-left: 5px solid var(--text-muted); transition: transform 0.15s ease; }
+.tree-dir.open > .tree-toggle::before { transform: rotate(90deg); left: 3px; top: 6px; }
+.tree-dir-name { color: var(--text-color); font-weight: 500; }
+.tree-children { display: none; margin-top: 2px; }
 .tree-dir.open > .tree-children { display: block; }
+.tree-file { display: flex; align-items: center; padding: 3px 8px; margin: 1px 0; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.tree-file::before { content: ''; width: 5px; height: 5px; border-radius: 50%; margin-right: 10px; flex-shrink: 0; }
 .tree-file:hover { background: rgba(0,0,0,0.05); }
 .tree-file.selected { background: var(--user-bg); }
-.tree-file-icon { margin-right: 6px; }
-.tree-dir-name { font-weight: 500; }
+.tree-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tree-file.status-added::before { background: #2e7d32; }
+.tree-file.status-added .tree-file-name { color: #2e7d32; }
+.tree-file.status-modified::before { background: #e65100; }
+.tree-file.status-modified .tree-file-name { color: #e65100; }
 
 /* Blame Gutter */
 .cm-blame-gutter { width: 28px; background: rgba(0,0,0,0.02); }
@@ -1624,6 +1910,21 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .cm-editor { height: 100%; font-size: 0.85rem; }
 .cm-scroller { overflow: auto; }
 .cm-content { font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; }
+.cm-line[data-range-index] { cursor: pointer; }
+.cm-line:focus { outline: none; }
+.cm-active-range { background: rgba(25, 118, 210, 0.2) !important; }
+
+/* Transcript Panel */
+.transcript-panel { width: 460px; min-width: 280px; overflow-y: auto; background: var(--card-bg); border-radius: 8px; padding: 16px; flex-shrink: 0; }
+.transcript-panel h3 { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 12px 0; }
+
+/* Resizable panels */
+.resize-handle { width: 8px; cursor: col-resize; background: transparent; flex-shrink: 0; position: relative; }
+.resize-handle:hover, .resize-handle.dragging { background: rgba(25, 118, 210, 0.2); }
+.resize-handle::after { content: ''; position: absolute; left: 3px; top: 50%; transform: translateY(-50%); width: 2px; height: 40px; background: rgba(0,0,0,0.15); border-radius: 1px; }
+
+/* Highlighted message in transcript */
+.message.highlighted { box-shadow: 0 0 0 3px var(--user-border); }
 
 /* Diff-only View */
 .diff-only-view { padding: 16px; }
@@ -1645,8 +1946,10 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 
 @media (max-width: 768px) {
     .code-viewer { flex-direction: column; height: auto; }
-    .file-tree-panel { width: 100%; max-height: 200px; }
+    .file-tree-panel { width: 100% !important; max-height: 200px; }
     .code-panel { min-height: 400px; }
+    .transcript-panel { width: 100% !important; max-height: 300px; }
+    .resize-handle { display: none; }
 }
 """
 
@@ -1855,6 +2158,9 @@ def generate_html(
         file_operations = extract_file_operations(loglines, conversations)
         has_code_view = len(file_operations) > 0
 
+    # Collect all messages HTML for the code view transcript pane
+    all_messages_html = []
+
     for page_num in range(1, total_pages + 1):
         start_idx = (page_num - 1) * PROMPTS_PER_PAGE
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
@@ -1897,6 +2203,9 @@ def generate_html(
             page_content, encoding="utf-8"
         )
         print(f"Generated page-{page_num:03d}.html")
+
+        # Collect all messages for code view transcript pane
+        all_messages_html.extend(messages_html)
 
     # Calculate overall stats and collect all commits for timeline
     total_tool_counts = {}
@@ -1986,9 +2295,14 @@ def generate_html(
 
     # Generate code view if requested
     if has_code_view:
-        file_states = build_file_states(file_operations)
-        generate_code_view_html(output_dir, file_states)
-        print(f"Generated code.html ({len(file_states)} files)")
+        generate_code_view_html(
+            output_dir,
+            file_operations,
+            transcript_html="".join(all_messages_html),
+            source_repo_path=Path(repo_path) if repo_path else None,
+        )
+        num_files = len(set(op.file_path for op in file_operations))
+        print(f"Generated code.html ({num_files} files)")
 
 
 @click.group(cls=DefaultGroup, default="local", default_if_no_args=True)
@@ -2350,6 +2664,9 @@ def generate_html_from_session_data(
         file_operations = extract_file_operations(loglines, conversations)
         has_code_view = len(file_operations) > 0
 
+    # Collect all messages HTML for the code view transcript pane
+    all_messages_html = []
+
     for page_num in range(1, total_pages + 1):
         start_idx = (page_num - 1) * PROMPTS_PER_PAGE
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
@@ -2391,6 +2708,9 @@ def generate_html_from_session_data(
             page_content, encoding="utf-8"
         )
         click.echo(f"Generated page-{page_num:03d}.html")
+
+        # Collect all messages for code view transcript pane
+        all_messages_html.extend(messages_html)
 
     # Calculate overall stats and collect all commits for timeline
     total_tool_counts = {}
@@ -2480,9 +2800,14 @@ def generate_html_from_session_data(
 
     # Generate code view if requested
     if has_code_view:
-        file_states = build_file_states(file_operations)
-        generate_code_view_html(output_dir, file_states)
-        click.echo(f"Generated code.html ({len(file_states)} files)")
+        generate_code_view_html(
+            output_dir,
+            file_operations,
+            transcript_html="".join(all_messages_html),
+            source_repo_path=Path(repo_path) if repo_path else None,
+        )
+        num_files = len(set(op.file_path for op in file_operations))
+        click.echo(f"Generated code.html ({num_files} files)")
 
 
 @cli.command("web")

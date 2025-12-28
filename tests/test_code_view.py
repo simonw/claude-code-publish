@@ -441,8 +441,7 @@ class TestGenerateCodeViewHtml:
         # Content with dangerous HTML sequences
         content = 'console.log("</script>"); // <!-- comment'
 
-        fs = FileState("/test/path.js")
-        fs.operations = [
+        operations = [
             FileOperation(
                 file_path="/test/path.js",
                 operation_type="write",
@@ -453,13 +452,8 @@ class TestGenerateCodeViewHtml:
                 content=content,
             )
         ]
-        fs.final_content = content
-        fs.blame_lines = [(content, fs.operations[0])]
-        fs.diff_only = False
 
-        file_states = {"/test/path.js": fs}
-
-        generate_code_view_html(tmp_path, file_states)
+        generate_code_view_html(tmp_path, operations)
 
         html = (tmp_path / "code.html").read_text()
 

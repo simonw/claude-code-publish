@@ -11,15 +11,17 @@
             </nav>
         </div>
 
-        <div class="code-viewer">
-            <div class="file-tree-panel">
+        <div class="code-viewer three-pane">
+            <div class="file-tree-panel" id="file-tree-panel">
                 <h3>Files Modified</h3>
                 <ul class="file-tree" id="file-tree">
                     {{ file_tree_html|safe }}
                 </ul>
             </div>
 
-            <div class="code-panel">
+            <div class="resize-handle" id="resize-left"></div>
+
+            <div class="code-panel" id="code-panel">
                 <div id="code-header">
                     <span id="current-file-path">Select a file</span>
                 </div>
@@ -27,6 +29,15 @@
                     <div class="no-file-selected">
                         <p>Select a file from the tree to view its contents</p>
                     </div>
+                </div>
+            </div>
+
+            <div class="resize-handle" id="resize-right"></div>
+
+            <div class="transcript-panel" id="transcript-panel">
+                <h3>Transcript</h3>
+                <div id="transcript-content">
+                    {{ transcript_html|safe }}
                 </div>
             </div>
         </div>
