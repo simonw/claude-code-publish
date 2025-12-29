@@ -1417,8 +1417,8 @@ def _create_single_gist(files, public=False, description=None):
 def _add_files_to_gist(gist_id, files):
     """Add files to an existing gist.
 
-    Adds files one at a time to avoid command line length limits and
-    issues with gh gist edit --add when multiple files are specified.
+    Adds files one at a time with retries to handle GitHub API conflicts
+    (HTTP 409) that occur with rapid successive updates.
 
     Args:
         gist_id: The gist ID to add files to.
@@ -1427,18 +1427,36 @@ def _add_files_to_gist(gist_id, files):
     Raises:
         click.ClickException on failure.
     """
-    for f in files:
+    import time
+
+    for i, f in enumerate(files):
         cmd = ["gh", "gist", "edit", gist_id, "--add", str(f)]
-        try:
-            subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.strip() if e.stderr else str(e)
-            raise click.ClickException(f"Failed to add {f.name} to gist: {error_msg}")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                break  # Success, move to next file
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr.strip() if e.stderr else str(e)
+                if "409" in error_msg and attempt < max_retries - 1:
+                    # HTTP 409 conflict - wait and retry
+                    wait_time = (attempt + 1) * 2  # 2s, 4s, 6s
+                    click.echo(
+                        f"    Conflict adding {f.name}, retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                else:
+                    raise click.ClickException(
+                        f"Failed to add {f.name} to gist: {error_msg}"
+                    )
+        # Small delay between files to avoid rate limiting
+        if i < len(files) - 1:
+            time.sleep(0.5)
 
 
 def create_gist(output_dir, public=False, description=None):
