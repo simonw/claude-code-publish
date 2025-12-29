@@ -451,7 +451,7 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
     var gistInfoLoaded = false;
 
     // Check if we're using page-data JSON files (large session mode)
-    var usePageDataJson = !!(window.DATA_GIST_ID || window.DATA_GIST_IDS);
+    var usePageDataJson = !!window.DATA_GIST_ID;
 
     if (isGistPreview) {
         // Extract gist ID from URL query string like ?78a436a8a9e7a2e603738b8193b95410/index.html
@@ -483,27 +483,17 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         return pageFile;
     }
 
-    function getPageDataFetchUrls(pageNum) {
-        // Get URLs to try for page-data-XXX.json
+    function getPageDataFetchUrl(pageNum) {
+        // Get URL for page-data-XXX.json
         var paddedNum = String(pageNum).padStart(3, '0');
         var filename = 'page-data-' + paddedNum + '.json';
 
         if (!isGistPreview) {
-            return [filename];
+            return filename;
         }
 
-        var gistIds = [];
-        if (window.DATA_GIST_IDS && window.DATA_GIST_IDS.length > 0) {
-            gistIds = window.DATA_GIST_IDS;
-        } else if (window.DATA_GIST_ID) {
-            gistIds = [window.DATA_GIST_ID];
-        } else if (gistId) {
-            gistIds = [gistId];
-        }
-
-        return gistIds.map(function(id) {
-            return 'https://gist.githubusercontent.com/raw/' + id + '/' + filename;
-        });
+        var dataGistId = window.DATA_GIST_ID || gistId;
+        return 'https://gist.githubusercontent.com/raw/' + dataGistId + '/' + filename;
     }
 
     function getPageLinkUrl(pageFile) {
@@ -626,27 +616,14 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         return resultsFromPage;
     }
 
-    async function tryFetchFromUrls(urls) {
-        for (var i = 0; i < urls.length; i++) {
-            try {
-                var response = await fetch(urls[i]);
-                if (response.ok) {
-                    return response;
-                }
-            } catch (e) {
-                // Try next URL
-            }
-        }
-        throw new Error('Failed to fetch from any URL');
-    }
-
     async function fetchPageContent(pageNum) {
         var pageFile = 'page-' + String(pageNum).padStart(3, '0') + '.html';
 
         if (usePageDataJson && isGistPreview) {
             // Fetch from page-data-XXX.json (large session mode on gist)
-            var urls = getPageDataFetchUrls(pageNum);
-            var response = await tryFetchFromUrls(urls);
+            var url = getPageDataFetchUrl(pageNum);
+            var response = await fetch(url);
+            if (!response.ok) throw new Error('Failed to fetch');
             var html = await response.json(); // JSON contains HTML string
             return { pageFile: pageFile, html: html };
         } else {

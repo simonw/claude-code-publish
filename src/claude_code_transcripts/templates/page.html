@@ -17,9 +17,9 @@
         <script>
         // Load page content from page-data-NNN.json on gistpreview
         (function() {
-            function getGistDataUrls(pageNum) {
+            function getGistDataUrl(pageNum) {
                 // Check if we're on gistpreview.github.io
-                if (window.location.hostname !== 'gistpreview.github.io') return [];
+                if (window.location.hostname !== 'gistpreview.github.io') return null;
 
                 // Get gist ID from URL query string
                 var query = window.location.search.substring(1);
@@ -30,45 +30,22 @@
                 var paddedNum = String(pageNum).padStart(3, '0');
                 var filename = '/page-data-' + paddedNum + '.json';
 
-                // Build list of gist IDs to try
-                var gistIds = [];
-                if (window.DATA_GIST_IDS && window.DATA_GIST_IDS.length > 0) {
-                    // Multiple data gists - try each one
-                    gistIds = window.DATA_GIST_IDS;
-                } else if (window.DATA_GIST_ID) {
-                    // Single data gist
-                    gistIds = [window.DATA_GIST_ID];
-                } else {
-                    // No separate data gist, use main gist
-                    gistIds = [mainGistId];
-                }
-
-                return gistIds.map(function(gistId) {
-                    return 'https://gist.githubusercontent.com/raw/' + gistId + filename;
-                });
-            }
-
-            async function tryFetchFromUrls(urls) {
-                for (var i = 0; i < urls.length; i++) {
-                    try {
-                        var response = await fetch(urls[i]);
-                        if (response.ok) {
-                            return await response.json();
-                        }
-                    } catch (e) {
-                        // Try next URL
-                    }
-                }
-                throw new Error('Failed to load from any gist');
+                // Use DATA_GIST_ID if available, otherwise use main gist
+                var dataGistId = window.DATA_GIST_ID || mainGistId;
+                return 'https://gist.githubusercontent.com/raw/' + dataGistId + filename;
             }
 
             var pageNum = window.PAGE_NUM;
-            var dataUrls = getGistDataUrls(pageNum);
-            if (dataUrls.length > 0) {
+            var dataUrl = getGistDataUrl(pageNum);
+            if (dataUrl) {
                 // We're on gistpreview - fetch page data
                 var container = document.getElementById('page-messages');
 
-                tryFetchFromUrls(dataUrls)
+                fetch(dataUrl)
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('Failed to fetch');
+                        return response.json();
+                    })
                     .then(function(html) {
                         // The JSON file contains the HTML string directly
                         container.innerHTML = html;

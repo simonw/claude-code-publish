@@ -1135,7 +1135,7 @@ GIST_PREVIEW_JS = r"""
 """
 
 
-def inject_gist_preview_js(output_dir, data_gist_id=None, data_gist_ids=None):
+def inject_gist_preview_js(output_dir, data_gist_id=None):
     """Inject gist preview JavaScript into all HTML files in the output directory.
 
     Also removes inline CODE_DATA from code.html since gist version fetches it separately.
@@ -1144,8 +1144,6 @@ def inject_gist_preview_js(output_dir, data_gist_id=None, data_gist_ids=None):
         output_dir: Path to the output directory containing HTML files.
         data_gist_id: Optional gist ID for a separate data gist. If provided,
             code.html will fetch data from this gist instead of the main gist.
-        data_gist_ids: Optional list of all data gist IDs (for batched uploads).
-            If provided, pages can try multiple gists to find their data file.
     """
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
@@ -1170,19 +1168,12 @@ def inject_gist_preview_js(output_dir, data_gist_id=None, data_gist_ids=None):
                 )
                 content = content.replace("<head>", f"<head>\n{data_gist_script}")
 
-        # For index.html, inject data gist IDs for search to use
-        if html_file.name == "index.html":
-            if data_gist_ids and len(data_gist_ids) > 1:
-                gist_ids_json = json.dumps(data_gist_ids)
-                data_gists_script = (
-                    f"<script>window.DATA_GIST_IDS = {gist_ids_json};</script>\n"
-                )
-                content = content.replace("<head>", f"<head>\n{data_gists_script}")
-            elif data_gist_id:
-                data_gist_script = (
-                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
-                )
-                content = content.replace("<head>", f"<head>\n{data_gist_script}")
+        # For index.html, inject data gist ID for search to use
+        if html_file.name == "index.html" and data_gist_id:
+            data_gist_script = (
+                f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
+            )
+            content = content.replace("<head>", f"<head>\n{data_gist_script}")
 
         # For page-*.html, strip inline content if corresponding JSON exists
         if html_file.name.startswith("page-") and html_file.name.endswith(".html"):
@@ -1202,15 +1193,7 @@ def inject_gist_preview_js(output_dir, data_gist_id=None, data_gist_ids=None):
                     flags=re.DOTALL,
                 )
 
-                if data_gist_ids and len(data_gist_ids) > 1:
-                    # Inject list of data gist IDs for multi-gist fetching
-                    gist_ids_json = json.dumps(data_gist_ids)
-                    data_gists_script = (
-                        f"<script>window.DATA_GIST_IDS = {gist_ids_json};</script>\n"
-                    )
-                    content = content.replace("<head>", f"<head>\n{data_gists_script}")
-                elif data_gist_id:
-                    # Single data gist
+                if data_gist_id:
                     data_gist_script = (
                         f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
                     )
@@ -1280,12 +1263,13 @@ def _batch_files_for_gist(files):
     return batches
 
 
-def _create_single_gist(files, public=False):
+def _create_single_gist(files, public=False, description=None):
     """Create a single gist from the given files.
 
     Args:
         files: List of file paths to include in the gist.
         public: Whether to create a public gist.
+        description: Optional description for the gist.
 
     Returns:
         Tuple of (gist_id, gist_url).
@@ -1297,6 +1281,8 @@ def _create_single_gist(files, public=False):
     cmd.extend(str(f) for f in files)
     if public:
         cmd.append("--public")
+    if description:
+        cmd.extend(["--desc", description])
 
     try:
         result = subprocess.run(
@@ -1319,7 +1305,33 @@ def _create_single_gist(files, public=False):
         )
 
 
-def create_gist(output_dir, public=False):
+def _add_files_to_gist(gist_id, files):
+    """Add files to an existing gist.
+
+    Args:
+        gist_id: The gist ID to add files to.
+        files: List of file paths to add.
+
+    Raises:
+        click.ClickException on failure.
+    """
+    cmd = ["gh", "gist", "edit", gist_id]
+    for f in files:
+        cmd.extend(["--add", str(f)])
+
+    try:
+        subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr.strip() if e.stderr else str(e)
+        raise click.ClickException(f"Failed to add files to gist: {error_msg}")
+
+
+def create_gist(output_dir, public=False, description=None):
     """Create a GitHub gist from the HTML files in output_dir.
 
     Uses a two-gist strategy when data files exceed the size threshold:
@@ -1330,6 +1342,11 @@ def create_gist(output_dir, public=False):
     For small files (single-gist strategy):
     1. Injects gist preview JS into HTML files
     2. Creates a single gist with all files
+
+    Args:
+        output_dir: Directory containing the HTML files to upload.
+        public: Whether to create a public gist.
+        description: Optional description for the gist.
 
     Returns (gist_id, gist_url) tuple.
     Raises click.ClickException on failure.
@@ -1364,47 +1381,38 @@ def create_gist(output_dir, public=False):
         # Batch data files to avoid GitHub API limits
         data_batches = _batch_files_for_gist(data_files)
 
-        if len(data_batches) == 1:
-            # Single data gist
-            data_gist_id, _ = _create_single_gist(data_batches[0], public=public)
-            data_gist_ids = [data_gist_id]
-        else:
-            # Multiple data gists needed - upload each batch
-            click.echo(
-                f"Data files too large for single gist, creating {len(data_batches)} data gists..."
-            )
-            data_gist_ids = []
-            for i, batch in enumerate(data_batches):
-                batch_id, _ = _create_single_gist(batch, public=public)
-                data_gist_ids.append(batch_id)
+        # Create data gist with first batch, then add remaining batches to same gist
+        data_desc = f"{description} (data)" if description else None
+        data_gist_id, _ = _create_single_gist(
+            data_batches[0], public=public, description=data_desc
+        )
+
+        if len(data_batches) > 1:
+            click.echo(f"Adding {len(data_batches) - 1} more batches to data gist...")
+            for i, batch in enumerate(data_batches[1:], 2):
+                _add_files_to_gist(data_gist_id, batch)
                 click.echo(
-                    f"  Created data gist {i + 1}/{len(data_batches)}: {batch_id}"
+                    f"  Added batch {i}/{len(data_batches)} to gist {data_gist_id}"
                 )
 
-        # Inject data gist ID(s) and gist preview JS into HTML files
-        # For multiple gists, JS will try each one until it finds the file
-        inject_gist_preview_js(
-            output_dir, data_gist_id=data_gist_ids[0], data_gist_ids=data_gist_ids
-        )
+        # Inject data gist ID and gist preview JS into HTML files
+        inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
 
         # Create main gist (excluding data files) - also may need batching
         main_batches = _batch_files_for_gist(main_files)
-        if len(main_batches) == 1:
-            return _create_single_gist(main_batches[0], public=public)
-        else:
-            # Multiple main gists needed - upload first batch as main, others as additional
-            click.echo(
-                f"HTML files too large for single gist, creating {len(main_batches)} gists..."
-            )
-            main_gist_id, main_gist_url = _create_single_gist(
-                main_batches[0], public=public
-            )
+        main_gist_id, main_gist_url = _create_single_gist(
+            main_batches[0], public=public, description=description
+        )
+
+        if len(main_batches) > 1:
+            click.echo(f"Adding {len(main_batches) - 1} more batches to main gist...")
             for i, batch in enumerate(main_batches[1:], 2):
-                batch_id, _ = _create_single_gist(batch, public=public)
+                _add_files_to_gist(main_gist_id, batch)
                 click.echo(
-                    f"  Created additional gist {i}/{len(main_batches)}: {batch_id}"
+                    f"  Added batch {i}/{len(main_batches)} to gist {main_gist_id}"
                 )
-            return main_gist_id, main_gist_url
+
+        return main_gist_id, main_gist_url
     else:
         # Single gist strategy: inject gist preview JS first
         inject_gist_preview_js(output_dir)
@@ -1416,25 +1424,25 @@ def create_gist(output_dir, public=False):
 
         if total_size <= GIST_SIZE_THRESHOLD:
             # Small enough for single gist without batching
-            return _create_single_gist(all_files, public=public)
+            return _create_single_gist(
+                all_files, public=public, description=description
+            )
 
         # Need batching for large total size
         all_batches = _batch_files_for_gist(all_files)
-        if len(all_batches) == 1:
-            return _create_single_gist(all_batches[0], public=public)
-        else:
-            click.echo(
-                f"Files too large for single gist, creating {len(all_batches)} gists..."
-            )
-            main_gist_id, main_gist_url = _create_single_gist(
-                all_batches[0], public=public
-            )
+        main_gist_id, main_gist_url = _create_single_gist(
+            all_batches[0], public=public, description=description
+        )
+
+        if len(all_batches) > 1:
+            click.echo(f"Adding {len(all_batches) - 1} more batches to gist...")
             for i, batch in enumerate(all_batches[1:], 2):
-                batch_id, _ = _create_single_gist(batch, public=public)
+                _add_files_to_gist(main_gist_id, batch)
                 click.echo(
-                    f"  Created additional gist {i}/{len(all_batches)}: {batch_id}"
+                    f"  Added batch {i}/{len(all_batches)} to gist {main_gist_id}"
                 )
-            return main_gist_id, main_gist_url
+
+        return main_gist_id, main_gist_url
 
 
 def generate_pagination_html(current_page, total_pages):
@@ -1832,7 +1840,8 @@ def local_cmd(
     if gist:
         # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_desc = f"claude-code-transcripts local {session_file.stem}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -1956,7 +1965,13 @@ def json_cmd(
     if gist:
         # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        # Use filename/URL for description
+        if is_url(original_input):
+            input_name = Path(original_input.split("?")[0]).name or "session"
+        else:
+            input_name = Path(original_input).stem
+        gist_desc = f"claude-code-transcripts json {input_name}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -2400,7 +2415,8 @@ def web_cmd(
     if gist:
         # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_desc = f"claude-code-transcripts web {session_id}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
