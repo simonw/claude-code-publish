@@ -1145,8 +1145,9 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
         # Build base HTML with user prompt
         user_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div></div>"""
 
-        # Track the most recent assistant text for context
+        # Track the most recent assistant text and thinking for context
         last_assistant_text = ""
+        last_thinking_text = ""
 
         for log_type, message_json, timestamp in all_messages:
             msg_id = make_msg_id(timestamp)
@@ -1177,8 +1178,6 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
                     last_assistant_text = "\n".join(text_parts)
                 if thinking_parts:
                     last_thinking_text = "\n".join(thinking_parts)
-                else:
-                    last_thinking_text = ""
 
                 # For messages with tool_use, build tooltip with assistant context
                 if has_tool_use and (last_assistant_text or last_thinking_text):
