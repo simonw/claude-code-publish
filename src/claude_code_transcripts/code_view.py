@@ -693,8 +693,10 @@ def build_file_history_repo(
     """
     repo, temp_dir = _init_temp_repo()
 
-    # Get path mapping
-    common_prefix, path_mapping = normalize_file_paths(operations)
+    # Get path mapping - exclude delete operations since they don't contribute files
+    # and may have relative paths that would break os.path.commonpath()
+    non_delete_ops = [op for op in operations if op.operation_type != OP_DELETE]
+    common_prefix, path_mapping = normalize_file_paths(non_delete_ops)
 
     # Sort operations by timestamp
     sorted_ops = sorted(operations, key=lambda o: o.timestamp)
@@ -718,9 +720,14 @@ def build_file_history_repo(
     )
 
     for op in sorted_ops:
-        rel_path = path_mapping.get(op.file_path, op.file_path)
-        full_path = temp_dir / rel_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
+        # Delete operations aren't in path_mapping - handle them specially
+        if op.operation_type == OP_DELETE:
+            rel_path = None  # Will find matching files below
+            full_path = None
+        else:
+            rel_path = path_mapping.get(op.file_path, op.file_path)
+            full_path = temp_dir / rel_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
 
         # For edit operations, try to sync from commits when our reconstruction diverges
         if op.operation_type == OP_EDIT and actual_repo and actual_repo_root:
@@ -793,45 +800,43 @@ def build_file_history_repo(
             # Delete operation - remove file or directory contents
             # op.replace_all is True for recursive deletes (rm -r)
             is_recursive = op.replace_all
+            delete_path = op.file_path
+
+            # Find files to delete by matching original paths against path_mapping
+            # Delete paths may be absolute or relative, and may not be in the mapping
+            files_to_remove = []
 
             if is_recursive:
-                # Delete all files under this directory path
-                dir_prefix = rel_path.rstrip("/") + "/"
-                files_to_remove = []
-                for root, dirs, files in os.walk(temp_dir):
-                    for f in files:
-                        file_path_abs = Path(root) / f
-                        file_rel = str(file_path_abs.relative_to(temp_dir))
-                        if file_rel.startswith(dir_prefix) or file_rel == rel_path:
-                            files_to_remove.append((file_path_abs, file_rel))
-
-                if files_to_remove:
-                    for file_path_abs, file_rel in files_to_remove:
-                        file_path_abs.unlink()
-                        try:
-                            repo.index.remove([file_rel])
-                        except Exception:
-                            pass  # File might not be tracked
-                else:
-                    # No files found, nothing to delete
-                    continue
+                # Delete all files whose original path starts with delete_path
+                delete_prefix = delete_path.rstrip("/") + "/"
+                for orig_path, mapped_rel_path in path_mapping.items():
+                    # Check if original path starts with delete prefix or equals delete path
+                    if orig_path.startswith(delete_prefix) or orig_path == delete_path:
+                        file_abs = temp_dir / mapped_rel_path
+                        if file_abs.exists():
+                            files_to_remove.append((file_abs, mapped_rel_path))
             else:
-                # Single file delete
-                if full_path.exists():
-                    full_path.unlink()
+                # Single file delete - find by exact original path match
+                if delete_path in path_mapping:
+                    mapped_rel_path = path_mapping[delete_path]
+                    file_abs = temp_dir / mapped_rel_path
+                    if file_abs.exists():
+                        files_to_remove.append((file_abs, mapped_rel_path))
+
+            if files_to_remove:
+                for file_abs, file_rel in files_to_remove:
+                    file_abs.unlink()
                     try:
-                        repo.index.remove([rel_path])
+                        repo.index.remove([file_rel])
                     except Exception:
                         pass  # File might not be tracked
-                else:
-                    # File doesn't exist, nothing to delete
-                    continue
 
-            # Commit the deletion (no metadata needed, file won't appear in final state)
-            try:
-                repo.index.commit("{}")  # Delete commit
-            except Exception:
-                pass  # Nothing to commit if no files were tracked
+                # Commit the deletion
+                try:
+                    repo.index.commit("{}")  # Delete commit
+                except Exception:
+                    pass  # Nothing to commit if no files were tracked
+
             continue  # Skip the normal commit below
 
         # Stage and commit with metadata
