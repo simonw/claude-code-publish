@@ -131,6 +131,24 @@ class TestRenderFunctions:
         assert render_markdown_text("") == ""
         assert render_markdown_text(None) == ""
 
+    def test_render_markdown_escapes_style_tags(self):
+        """Test that <style> tags in markdown content are escaped."""
+        # This prevents CSS in transcript content from affecting page styles
+        text = "Here is some CSS:\n<style>:root { --bg: red; }</style>"
+        result = render_markdown_text(text)
+        assert "<style>" not in result
+        assert "&lt;style&gt;" in result
+        assert "&lt;/style&gt;" in result
+
+    def test_render_markdown_escapes_script_tags(self):
+        """Test that <script> tags in markdown content are escaped."""
+        # This prevents JS in transcript content from executing
+        text = "Here is some code:\n<script>alert('xss')</script>"
+        result = render_markdown_text(text)
+        assert "<script>" not in result
+        assert "&lt;script&gt;" in result
+        assert "&lt;/script&gt;" in result
+
     def test_format_json(self, snapshot_html):
         """Test JSON formatting."""
         result = format_json({"key": "value", "number": 42, "nested": {"a": 1}})

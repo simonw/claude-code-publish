@@ -777,7 +777,14 @@ def format_json(obj):
 def render_markdown_text(text):
     if not text:
         return ""
-    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+    html = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    # Escape <style> and <script> tags that could affect the page
+    # These can appear in transcript content when showing code examples
+    html = html.replace("<style>", "&lt;style&gt;")
+    html = html.replace("</style>", "&lt;/style&gt;")
+    html = html.replace("<script>", "&lt;script&gt;")
+    html = html.replace("</script>", "&lt;/script&gt;")
+    return html
 
 
 def is_json_like(text):
