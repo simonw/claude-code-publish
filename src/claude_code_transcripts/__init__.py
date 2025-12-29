@@ -539,10 +539,30 @@ def get_access_token_from_keychain():
         return None
 
 
+def get_access_token_from_credentials_file():
+    """Get access token from ~/.claude/.credentials.json (Linux/Windows).
+
+    On Linux and Windows, Claude Code stores credentials in a JSON file
+    instead of using the system keyring.
+    Returns the access token or None if not found.
+    """
+    creds_path = Path.home() / ".claude" / ".credentials.json"
+    if not creds_path.exists():
+        return None
+
+    try:
+        with open(creds_path) as f:
+            creds = json.load(f)
+        return creds.get("claudeAiOauth", {}).get("accessToken")
+    except (json.JSONDecodeError, IOError, KeyError):
+        return None
+
+
 def get_access_token_from_system_keyring():
     """Get access token from system keyring (works on Linux, Windows, macOS).
 
     Uses the keyring library to access system credential storage.
+    This is a fallback for systems that might use keyring storage.
     Returns the access token or None if not found.
     """
     try:
@@ -1562,7 +1582,11 @@ def resolve_credentials(token, org_uuid):
         # Try macOS keychain first
         token = get_access_token_from_keychain()
 
-        # If not on macOS or keychain failed, try system keyring
+        # Try credentials file (Linux/Windows)
+        if token is None:
+            token = get_access_token_from_credentials_file()
+
+        # Try system keyring as last resort
         if token is None:
             token = get_access_token_from_system_keyring()
 
