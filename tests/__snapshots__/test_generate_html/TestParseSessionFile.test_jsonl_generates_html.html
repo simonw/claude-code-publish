@@ -213,6 +213,12 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .tooltip-assistant p { margin: 4px 0; font-size: 0.9rem; }
 .blame-tooltip .tooltip-assistant { max-height: 200px; overflow: hidden; }
 .blame-tooltip .thinking { max-height: 200px; overflow: hidden; margin: 8px 16px 12px 16px; }
+.truncated-indicator { font-weight: normal; font-style: italic; color: var(--text-muted); text-transform: none; }
+.context-thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.context-thinking-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 4px; }
+.context-thinking p { margin: 4px 0; font-size: 0.85rem; color: var(--thinking-text); }
+.context-text { margin: 8px 0; }
+.context-text p { margin: 4px 0; font-size: 0.9rem; }
 
 /* File Tree */
 .file-tree { list-style: none; padding: 0; margin: 0; }
@@ -270,6 +276,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 
 /* Highlighted message in transcript */
 .message.highlighted { box-shadow: 0 0 0 3px var(--user-border); }
+
+/* Clickable messages in transcript (code view mode) */
+.transcript-panel .message { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
+.transcript-panel .message:hover { transform: translateX(2px); }
+.transcript-panel .message.highlighted:hover { transform: none; }
 
 /* Diff-only View */
 .diff-only-view { padding: 16px; }

@@ -46,6 +46,71 @@ def group_operations_by_file(
     return file_ops
 
 
+def read_blob_content(tree, file_path: str) -> Optional[str]:
+    """Read file content from a git tree/commit as string.
+
+    Args:
+        tree: Git tree object (e.g., commit.tree).
+        file_path: Relative path to the file within the repo.
+
+    Returns:
+        File content as string, or None if not found.
+    """
+    try:
+        blob = tree / file_path
+        return blob.data_stream.read().decode("utf-8")
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def read_blob_bytes(tree, file_path: str) -> Optional[bytes]:
+    """Read file content from a git tree/commit as bytes.
+
+    Args:
+        tree: Git tree object (e.g., commit.tree).
+        file_path: Relative path to the file within the repo.
+
+    Returns:
+        File content as bytes, or None if not found.
+    """
+    try:
+        blob = tree / file_path
+        return blob.data_stream.read()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def parse_iso_timestamp(timestamp: str) -> Optional[datetime]:
+    """Parse ISO timestamp string to datetime with UTC timezone.
+
+    Handles 'Z' suffix by converting to '+00:00' format.
+
+    Args:
+        timestamp: ISO format timestamp (e.g., "2025-12-27T16:12:36.904Z").
+
+    Returns:
+        datetime object, or None on parse failure.
+    """
+    try:
+        ts = timestamp.replace("Z", "+00:00")
+        return datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Operation types for file operations
+OP_WRITE = "write"
+OP_EDIT = "edit"
+
+# File status for tree display
+STATUS_ADDED = "added"
+STATUS_MODIFIED = "modified"
+
+
 # ============================================================================
 # Data Structures
 # ============================================================================
@@ -205,7 +270,7 @@ def extract_file_operations(
                     operations.append(
                         FileOperation(
                             file_path=file_path,
-                            operation_type="write",
+                            operation_type=OP_WRITE,
                             tool_id=tool_id,
                             timestamp=timestamp,
                             page_num=page_num,
@@ -227,7 +292,7 @@ def extract_file_operations(
                     operations.append(
                         FileOperation(
                             file_path=file_path,
-                            operation_type="edit",
+                            operation_type=OP_EDIT,
                             tool_id=tool_id,
                             timestamp=timestamp,
                             page_num=page_num,
@@ -308,12 +373,8 @@ def find_commit_before_timestamp(file_repo: Repo, timestamp: str) -> Optional[An
     Returns:
         Git commit object, or None if not found.
     """
-    # Parse the ISO timestamp
-    try:
-        # Handle various ISO formats
-        ts = timestamp.replace("Z", "+00:00")
-        target_dt = datetime.fromisoformat(ts)
-    except ValueError:
+    target_dt = parse_iso_timestamp(timestamp)
+    if target_dt is None:
         return None
 
     # Search through commits to find one before the target time
@@ -343,17 +404,16 @@ def get_commits_during_session(
     Returns:
         List of commit objects in chronological order (oldest first).
     """
-    from datetime import datetime, timezone
+    from datetime import timezone
+
+    start_dt = parse_iso_timestamp(start_timestamp)
+    end_dt = parse_iso_timestamp(end_timestamp)
+    if start_dt is None or end_dt is None:
+        return []
 
     commits = []
 
     try:
-        # Parse timestamps
-        start_ts = start_timestamp.replace("Z", "+00:00")
-        end_ts = end_timestamp.replace("Z", "+00:00")
-        start_dt = datetime.fromisoformat(start_ts)
-        end_dt = datetime.fromisoformat(end_ts)
-
         for commit in file_repo.iter_commits():
             commit_dt = datetime.fromtimestamp(commit.committed_date, tz=timezone.utc)
 
@@ -388,12 +448,13 @@ def find_file_content_at_timestamp(
     Returns:
         File content as string, or None if not found.
     """
-    from datetime import datetime, timezone
+    from datetime import timezone
+
+    target_dt = parse_iso_timestamp(timestamp)
+    if target_dt is None:
+        return None
 
     try:
-        ts = timestamp.replace("Z", "+00:00")
-        target_dt = datetime.fromisoformat(ts)
-
         # Find the most recent commit at or before the target timestamp
         best_commit = None
         for commit in session_commits:
@@ -404,16 +465,115 @@ def find_file_content_at_timestamp(
                 break  # Commits are chronological, so we can stop
 
         if best_commit:
-            try:
-                blob = best_commit.tree / file_rel_path
-                return blob.data_stream.read().decode("utf-8")
-            except (KeyError, TypeError):
-                pass  # File doesn't exist in that commit
+            content = read_blob_content(best_commit.tree, file_rel_path)
+            if content is not None:
+                return content
 
     except Exception:
         pass
 
     return None
+
+
+def _init_temp_repo() -> Tuple[Repo, Path]:
+    """Create and configure a temporary git repository.
+
+    Returns:
+        Tuple of (repo, temp_dir).
+    """
+    temp_dir = Path(tempfile.mkdtemp(prefix="claude-session-"))
+    repo = Repo.init(temp_dir)
+
+    with repo.config_writer() as config:
+        config.set_value("user", "name", "Claude")
+        config.set_value("user", "email", "claude@session")
+
+    return repo, temp_dir
+
+
+def _find_actual_repo_context(
+    sorted_ops: List[FileOperation], session_start: str, session_end: str
+) -> Tuple[Optional[Repo], Optional[Path], List[Any]]:
+    """Find the actual git repo and session commits from operation file paths.
+
+    Args:
+        sorted_ops: List of operations sorted by timestamp.
+        session_start: ISO timestamp of first operation.
+        session_end: ISO timestamp of last operation.
+
+    Returns:
+        Tuple of (actual_repo, actual_repo_root, session_commits).
+    """
+    for op in sorted_ops:
+        repo_root = find_git_repo_root(str(Path(op.file_path).parent))
+        if repo_root:
+            try:
+                actual_repo = Repo(repo_root)
+                session_commits = get_commits_during_session(
+                    actual_repo, session_start, session_end
+                )
+                return actual_repo, repo_root, session_commits
+            except InvalidGitRepositoryError:
+                pass
+    return None, None, []
+
+
+def _fetch_initial_content(
+    op: FileOperation,
+    full_path: Path,
+    earliest_op_by_file: Dict[str, str],
+) -> bool:
+    """Fetch initial file content using fallback chain.
+
+    Priority: pre-session git commit > HEAD > disk > original_content
+
+    Args:
+        op: The edit operation needing initial content.
+        full_path: Path where content should be written.
+        earliest_op_by_file: Map of file path to earliest operation timestamp.
+
+    Returns:
+        True if content was fetched successfully.
+    """
+    # Try to find a git repo for this file
+    file_repo_root = find_git_repo_root(str(Path(op.file_path).parent))
+    if file_repo_root:
+        try:
+            file_repo = Repo(file_repo_root)
+            file_rel_path = os.path.relpath(op.file_path, file_repo_root)
+
+            # Find commit from before the session started for this file
+            earliest_ts = earliest_op_by_file.get(op.file_path, op.timestamp)
+            pre_session_commit = find_commit_before_timestamp(file_repo, earliest_ts)
+
+            if pre_session_commit:
+                content = read_blob_bytes(pre_session_commit.tree, file_rel_path)
+                if content is not None:
+                    full_path.write_bytes(content)
+                    return True
+
+            # Fallback to HEAD (file might be new)
+            content = read_blob_bytes(file_repo.head.commit.tree, file_rel_path)
+            if content is not None:
+                full_path.write_bytes(content)
+                return True
+        except InvalidGitRepositoryError:
+            pass
+
+    # Fallback: read from disk if file exists
+    if Path(op.file_path).exists():
+        try:
+            full_path.write_text(Path(op.file_path).read_text())
+            return True
+        except Exception:
+            pass
+
+    # Fallback: use original_content from tool result (for remote sessions)
+    if op.original_content:
+        full_path.write_text(op.original_content)
+        return True
+
+    return False
 
 
 def build_file_history_repo(
@@ -435,13 +595,7 @@ def build_file_history_repo(
         - temp_dir: Path to the temp directory
         - path_mapping: Dict mapping original paths to relative paths
     """
-    temp_dir = Path(tempfile.mkdtemp(prefix="claude-session-"))
-    repo = Repo.init(temp_dir)
-
-    # Configure git user for commits
-    with repo.config_writer() as config:
-        config.set_value("user", "name", "Claude")
-        config.set_value("user", "email", "claude@session")
+    repo, temp_dir = _init_temp_repo()
 
     # Get path mapping
     common_prefix, path_mapping = normalize_file_paths(operations)
@@ -463,26 +617,9 @@ def build_file_history_repo(
             earliest_op_by_file[op.file_path] = op.timestamp
 
     # Try to find the actual git repo and get commits during the session
-    # We'll use the first file's path to find the repo
-    actual_repo = None
-    actual_repo_root = None
-    session_commits = []
-
-    for op in sorted_ops:
-        actual_repo_root = find_git_repo_root(str(Path(op.file_path).parent))
-        if actual_repo_root:
-            try:
-                actual_repo = Repo(actual_repo_root)
-                session_commits = get_commits_during_session(
-                    actual_repo, session_start, session_end
-                )
-                break
-            except InvalidGitRepositoryError:
-                pass
-
-    # Track the last commit we synced from for each file
-    # This helps us know when to resync
-    last_sync_commit_by_file: Dict[str, Optional[str]] = {}
+    actual_repo, actual_repo_root, session_commits = _find_actual_repo_context(
+        sorted_ops, session_start, session_end
+    )
 
     for op in sorted_ops:
         rel_path = path_mapping.get(op.file_path, op.file_path)
@@ -490,7 +627,7 @@ def build_file_history_repo(
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         # For edit operations, try to sync from commits when our reconstruction diverges
-        if op.operation_type == "edit" and actual_repo and actual_repo_root:
+        if op.operation_type == OP_EDIT and actual_repo and actual_repo_root:
             file_rel_path = os.path.relpath(op.file_path, actual_repo_root)
             old_str = op.old_string or ""
 
@@ -512,68 +649,21 @@ def build_file_history_repo(
                         repo.index.commit("{}")  # Sync commit
                     else:
                         # Try HEAD - the final state should be correct
-                        try:
-                            blob = actual_repo.head.commit.tree / file_rel_path
-                            head_content = blob.data_stream.read().decode("utf-8")
-                            if old_str in head_content:
-                                # Resync from HEAD
-                                full_path.write_text(head_content)
-                                repo.index.add([rel_path])
-                                repo.index.commit("{}")  # Sync commit
-                        except (KeyError, TypeError):
-                            pass  # File not in HEAD
+                        head_content = read_blob_content(
+                            actual_repo.head.commit.tree, file_rel_path
+                        )
+                        if head_content and old_str in head_content:
+                            # Resync from HEAD
+                            full_path.write_text(head_content)
+                            repo.index.add([rel_path])
+                            repo.index.commit("{}")  # Sync commit
 
-        if op.operation_type == "write":
+        if op.operation_type == OP_WRITE:
             full_path.write_text(op.content or "")
-        elif op.operation_type == "edit":
+        elif op.operation_type == OP_EDIT:
             # If file doesn't exist, try to fetch initial content
             if not full_path.exists():
-                fetched = False
-
-                # Try to find a git repo for this file
-                file_repo_root = find_git_repo_root(str(Path(op.file_path).parent))
-                if file_repo_root:
-                    try:
-                        file_repo = Repo(file_repo_root)
-                        file_rel_path = os.path.relpath(op.file_path, file_repo_root)
-
-                        # Find commit from before the session started for this file
-                        earliest_ts = earliest_op_by_file.get(
-                            op.file_path, op.timestamp
-                        )
-                        pre_session_commit = find_commit_before_timestamp(
-                            file_repo, earliest_ts
-                        )
-
-                        if pre_session_commit:
-                            # Get file content from the pre-session commit
-                            try:
-                                blob = pre_session_commit.tree / file_rel_path
-                                full_path.write_bytes(blob.data_stream.read())
-                                fetched = True
-                            except (KeyError, TypeError):
-                                pass  # File didn't exist in that commit
-
-                        if not fetched:
-                            # Fallback to HEAD (file might be new)
-                            blob = file_repo.head.commit.tree / file_rel_path
-                            full_path.write_bytes(blob.data_stream.read())
-                            fetched = True
-                    except (KeyError, TypeError, ValueError, InvalidGitRepositoryError):
-                        pass  # File not in git
-
-                # Fallback: read from disk if file exists
-                if not fetched and Path(op.file_path).exists():
-                    try:
-                        full_path.write_text(Path(op.file_path).read_text())
-                        fetched = True
-                    except Exception:
-                        pass
-
-                # Fallback: use original_content from tool result (for remote sessions)
-                if not fetched and op.original_content:
-                    full_path.write_text(op.original_content)
-                    fetched = True
+                fetched = _fetch_initial_content(op, full_path, earliest_op_by_file)
 
                 # Commit the initial content first (no metadata = pre-session)
                 # This allows git blame to correctly attribute unchanged lines
@@ -686,9 +776,8 @@ def get_file_content_from_repo(repo: Repo, file_path: str) -> Optional[str]:
         File content as string, or None if file doesn't exist.
     """
     try:
-        blob = repo.head.commit.tree / file_path
-        return blob.data_stream.read().decode("utf-8")
-    except (KeyError, TypeError, ValueError):
+        return read_blob_content(repo.head.commit.tree, file_path)
+    except ValueError:
         # ValueError occurs when repo has no commits yet
         return None
 
@@ -778,13 +867,13 @@ def reconstruct_file_with_blame(
 
     # Apply each operation
     for op in operations:
-        if op.operation_type == "write":
+        if op.operation_type == OP_WRITE:
             # Write replaces all content
             if op.content:
                 new_lines = op.content.rstrip("\n").split("\n")
                 blame_lines = [(line, op) for line in new_lines]
 
-        elif op.operation_type == "edit":
+        elif op.operation_type == OP_EDIT:
             if op.old_string is None or op.new_string is None:
                 continue
 
@@ -862,7 +951,7 @@ def build_file_states(
     for file_path, ops in file_ops.items():
 
         # Determine status based on first operation
-        status = "added" if ops[0].operation_type == "write" else "modified"
+        status = STATUS_ADDED if ops[0].operation_type == OP_WRITE else STATUS_MODIFIED
 
         file_state = FileState(
             file_path=file_path,
@@ -872,7 +961,7 @@ def build_file_states(
         )
 
         # If first operation is a Write (file creation), we can show full content
-        if ops[0].operation_type == "write":
+        if ops[0].operation_type == OP_WRITE:
             final_content, blame_lines = reconstruct_file_with_blame(None, ops)
             file_state.final_content = final_content
             file_state.blame_lines = blame_lines
@@ -1044,7 +1133,11 @@ def generate_code_view_html(
             blame_ranges = get_file_blame_ranges(repo, rel_path)
 
             # Determine status
-            status = "added" if file_ops[0].operation_type == "write" else "modified"
+            status = (
+                STATUS_ADDED
+                if file_ops[0].operation_type == OP_WRITE
+                else STATUS_MODIFIED
+            )
 
             # Build file data
             file_data[orig_path] = {
@@ -1114,6 +1207,143 @@ def generate_code_view_html(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def _build_tooltip_html(
+    prompt_num: int,
+    conv_timestamp: str,
+    rendered_user: str,
+    context_html: str = "",
+) -> str:
+    """Build HTML for a tooltip item.
+
+    Args:
+        prompt_num: The prompt number (e.g., #1, #2).
+        conv_timestamp: ISO timestamp for the conversation.
+        rendered_user: Pre-rendered user message HTML.
+        context_html: Optional HTML for assistant context/thinking blocks.
+
+    Returns:
+        Complete HTML string for the tooltip item.
+    """
+    return f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div>{context_html}</div>"""
+
+
+def _truncate_for_tooltip(content: str, max_length: int = 500) -> Tuple[str, bool]:
+    """Truncate content for tooltip display, handling code blocks safely.
+
+    Truncation in the middle of a markdown code block can leave unbalanced
+    backticks, causing HTML inside code examples to be interpreted as actual
+    HTML. This function strips code blocks entirely for tooltip display.
+
+    Args:
+        content: The text content to truncate.
+        max_length: Maximum length before truncation.
+
+    Returns:
+        Tuple of (truncated content, was_truncated flag).
+    """
+    import re
+
+    original_length = len(content)
+    was_truncated = False
+
+    # Remove code blocks entirely (they're too verbose for tooltips)
+    # This handles both fenced (```) and indented code blocks
+    content = re.sub(r"```[\s\S]*?```", "[code block]", content)
+    content = re.sub(r"```[\s\S]*$", "[code block]", content)  # Incomplete fence
+
+    # Also remove inline code that might contain HTML
+    content = re.sub(r"`[^`]+`", "`...`", content)
+
+    # Track if we stripped code blocks (significant content removed)
+    if len(content) < original_length * 0.7:  # More than 30% was code blocks
+        was_truncated = True
+
+    # Now truncate
+    if len(content) > max_length:
+        content = content[:max_length] + "..."
+        was_truncated = True
+
+    return content, was_truncated
+
+
+def _render_context_block_inner(
+    block_type: str, content: str, render_fn
+) -> Tuple[str, bool]:
+    """Render a context block (text or thinking) as inner HTML.
+
+    Args:
+        block_type: Either "text" or "thinking".
+        content: The block content to render.
+        render_fn: Function to render markdown text to HTML.
+
+    Returns:
+        Tuple of (HTML string for the block content, was_truncated flag).
+    """
+    # Truncate safely, removing code blocks
+    content, was_truncated = _truncate_for_tooltip(content)
+    rendered = render_fn(content)
+
+    if block_type == "thinking":
+        return (
+            f"""<div class="context-thinking"><div class="context-thinking-label">Thinking:</div>{rendered}</div>""",
+            was_truncated,
+        )
+    else:  # text
+        return f"""<div class="context-text">{rendered}</div>""", was_truncated
+
+
+def _render_context_section(blocks: List[Tuple[str, str, int, str]], render_fn) -> str:
+    """Render all context blocks inside a single Assistant context section.
+
+    Args:
+        blocks: List of (block_type, content, order, msg_id) tuples.
+        render_fn: Function to render markdown text to HTML.
+
+    Returns:
+        HTML string for the complete assistant context section.
+    """
+    if not blocks:
+        return ""
+
+    any_truncated = False
+    inner_html_parts = []
+
+    for block_type, content, _, _ in blocks:
+        html, was_truncated = _render_context_block_inner(
+            block_type, content, render_fn
+        )
+        inner_html_parts.append(html)
+        if was_truncated:
+            any_truncated = True
+
+    inner_html = "".join(inner_html_parts)
+    truncated_indicator = (
+        ' <span class="truncated-indicator">(truncated)</span>' if any_truncated else ""
+    )
+
+    return f"""<div class="tooltip-assistant"><div class="tooltip-assistant-label">Assistant context:{truncated_indicator}</div>{inner_html}</div>"""
+
+
+def _collect_conversation_messages(
+    conversations: List[Dict], start_index: int
+) -> List[Tuple]:
+    """Collect all messages from a conversation and its continuations.
+
+    Args:
+        conversations: Full list of conversation dicts.
+        start_index: Index of the starting conversation.
+
+    Returns:
+        List of (log_type, message_json, timestamp) tuples.
+    """
+    all_messages = list(conversations[start_index].get("messages", []))
+    for j in range(start_index + 1, len(conversations)):
+        if not conversations[j].get("is_continuation"):
+            break
+        all_messages.extend(conversations[j].get("messages", []))
+    return all_messages
+
+
 def build_msg_to_user_html(
     conversations: List[Dict],
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -1153,18 +1383,9 @@ def build_msg_to_user_html(
 
         prompt_num += 1
 
-        # Collect all messages including from subsequent continuation conversations
-        all_messages = list(conv.get("messages", []))
-        for j in range(i + 1, len(conversations)):
-            if not conversations[j].get("is_continuation"):
-                break
-            all_messages.extend(conversations[j].get("messages", []))
-
-        # Render the user message content
+        all_messages = _collect_conversation_messages(conversations, i)
         rendered_user = render_markdown_text(user_text)
-
-        # Build base HTML with user prompt
-        user_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div></div>"""
+        user_html = _build_tooltip_html(prompt_num, conv_timestamp, rendered_user)
 
         # Track most recent thinking and text blocks with order for sequencing
         # Each is (content, order, msg_id) tuple or None
@@ -1223,21 +1444,13 @@ def build_msg_to_user_html(
                     context_msg_id = blocks_to_render[-1][3]
                     msg_to_context_id[msg_id] = context_msg_id
 
-                    context_html = ""
-                    for block_type, block_content, _, _ in blocks_to_render:
-                        # Truncate long content
-                        if len(block_content) > 500:
-                            block_content = block_content[:500] + "..."
+                    context_html = _render_context_section(
+                        blocks_to_render, render_markdown_text
+                    )
 
-                        if block_type == "text":
-                            rendered = render_markdown_text(block_content)
-                            context_html += f"""<div class="tooltip-assistant"><div class="tooltip-assistant-label">Assistant context:</div>{rendered}</div>"""
-                        elif block_type == "thinking":
-                            rendered = render_markdown_text(block_content)
-                            context_html += f"""<div class="thinking"><div class="thinking-label">Thinking</div>{rendered}</div>"""
-
-                    item_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div>{context_html}</div>"""
-                    msg_to_user_html[msg_id] = item_html
+                    msg_to_user_html[msg_id] = _build_tooltip_html(
+                        prompt_num, conv_timestamp, rendered_user, context_html
+                    )
                 else:
                     msg_to_user_html[msg_id] = user_html
             else:

@@ -73,6 +73,39 @@ messagesData.forEach((msg, index) => {
     }
 });
 
+// Build msg_id to file/range map for navigating from transcript to code
+const msgIdToBlame = new Map();
+Object.entries(fileData).forEach(([filePath, data]) => {
+    (data.blame_ranges || []).forEach((range, rangeIndex) => {
+        if (range.msg_id) {
+            // Store first occurrence of each msg_id (there may be multiple ranges per msg)
+            if (!msgIdToBlame.has(range.msg_id)) {
+                msgIdToBlame.set(range.msg_id, { filePath, range, rangeIndex });
+            }
+        }
+    });
+});
+
+// Build sorted list of blame operations by message index for "find next edit" navigation
+const sortedBlameOps = [];
+msgIdToBlame.forEach((blameInfo, msgId) => {
+    const msgIndex = msgIdToIndex.get(msgId);
+    if (msgIndex !== undefined) {
+        sortedBlameOps.push({ msgId, msgIndex, ...blameInfo });
+    }
+});
+sortedBlameOps.sort((a, b) => a.msgIndex - b.msgIndex);
+
+// Find the first blame operation at or after a given message index
+function findNextBlameOp(msgIndex) {
+    for (const op of sortedBlameOps) {
+        if (op.msgIndex >= msgIndex) {
+            return op;
+        }
+    }
+    return null;
+}
+
 // Current state
 let currentEditor = null;
 let currentFilePath = null;
@@ -580,10 +613,73 @@ function loadFile(path) {
     currentBlameRanges = data.blame_ranges || [];
     createEditor(codeContent, data.content || '', currentBlameRanges, path);
 
-    // Scroll transcript to first operation for this file
-    if (currentBlameRanges.length > 0 && currentBlameRanges[0].msg_id) {
-        scrollToMessage(currentBlameRanges[0].msg_id);
+    // Find first blame range with a msg_id (from tool operations, not pre-session content)
+    const firstOpRange = currentBlameRanges.find(r => r.msg_id);
+    if (firstOpRange) {
+        // Scroll transcript to first operation for this file
+        scrollToMessage(firstOpRange.msg_id);
+
+        // Scroll code editor to first blame block
+        scrollEditorToLine(firstOpRange.start);
     }
+}
+
+// Scroll the editor to center a specific line
+function scrollEditorToLine(lineNumber) {
+    if (!currentEditor) return;
+    const doc = currentEditor.state.doc;
+    if (lineNumber < 1 || lineNumber > doc.lines) return;
+
+    const line = doc.line(lineNumber);
+    currentEditor.dispatch({
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' })
+    });
+}
+
+// Navigate from a message ID to its corresponding code location
+function navigateToBlame(msgId) {
+    const blameInfo = msgIdToBlame.get(msgId);
+    if (!blameInfo) return false;
+
+    const { filePath, range, rangeIndex } = blameInfo;
+
+    // Select the file in the tree
+    const fileEl = document.querySelector(`.tree-file[data-path="${CSS.escape(filePath)}"]`);
+    if (fileEl) {
+        // Expand parent directories if collapsed
+        let parent = fileEl.parentElement;
+        while (parent && parent.id !== 'file-tree') {
+            if (parent.classList.contains('tree-dir') && !parent.classList.contains('open')) {
+                parent.classList.add('open');
+            }
+            parent = parent.parentElement;
+        }
+
+        // Update selection
+        document.querySelectorAll('.tree-file.selected').forEach(el => el.classList.remove('selected'));
+        fileEl.classList.add('selected');
+    }
+
+    // Load the file if not already loaded
+    if (currentFilePath !== filePath) {
+        loadFile(filePath);
+    }
+
+    // Scroll to the blame block and highlight it
+    setTimeout(() => {
+        scrollEditorToLine(range.start);
+        if (currentEditor && currentBlameRanges.length > 0) {
+            // Find the correct range index in current ranges
+            const idx = currentBlameRanges.findIndex(r => r.msg_id === msgId && r.start === range.start);
+            if (idx >= 0) {
+                highlightRange(idx, currentBlameRanges, currentEditor);
+            }
+        }
+        // Highlight the message in the transcript panel
+        scrollToMessage(msgId);
+    }, 50); // Small delay to ensure editor is ready
+
+    return true;
 }
 
 // File tree interaction
@@ -816,3 +912,23 @@ transcriptPanel?.addEventListener('scroll', () => {
 
 // Initial update after first render
 setTimeout(updatePinnedUserMessage, 100);
+
+// Click handler for transcript messages to navigate to code
+transcriptContent?.addEventListener('click', (e) => {
+    // Find the closest message element
+    const messageEl = e.target.closest('.message');
+    if (!messageEl) return;
+
+    // Get the message ID and its index
+    const msgId = messageEl.id;
+    if (!msgId) return;
+
+    const msgIndex = msgIdToIndex.get(msgId);
+    if (msgIndex === undefined) return;
+
+    // Find the next blame operation at or after this message
+    const nextOp = findNextBlameOp(msgIndex);
+    if (nextOp) {
+        navigateToBlame(nextOp.msgId);
+    }
+});

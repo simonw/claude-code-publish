@@ -12,7 +12,9 @@
             </nav>
             {% endif %}
         </div>
-        {{ pagination_html|safe }}
-        {{ messages_html|safe }}
-        {{ pagination_html|safe }}
+        <div class="transcript-wrapper">
+            {{ pagination_html|safe }}
+            {{ messages_html|safe }}
+            {{ pagination_html|safe }}
+        </div>
 {%- endblock %}

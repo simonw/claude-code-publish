@@ -122,6 +122,27 @@ def fetch_session_from_url(url: str) -> Path:
     return Path(temp_path)
 
 
+def extract_github_repo_from_url(url: str) -> Optional[str]:
+    """Extract 'owner/name' from various GitHub URL formats.
+
+    Handles:
+    - https://github.com/owner/repo
+    - https://github.com/owner/repo.git
+    - git@github.com:owner/repo.git
+
+    Args:
+        url: GitHub URL or git remote URL.
+
+    Returns:
+        Repository identifier as 'owner/name', or None if not found.
+    """
+    match = re.search(r"github\.com[:/]([^/]+/[^/?#.]+)", url)
+    if match:
+        repo = match.group(1)
+        return repo[:-4] if repo.endswith(".git") else repo
+    return None
+
+
 def parse_repo_value(repo: Optional[str]) -> Tuple[Optional[str], Optional[Path]]:
     """Parse --repo value to extract GitHub repo name and/or local path.
 
@@ -149,25 +170,15 @@ def parse_repo_value(repo: Optional[str]) -> Tuple[Optional[str], Optional[Path]
                 text=True,
             )
             if result.returncode == 0:
-                remote_url = result.stdout.strip()
-                # Extract owner/name from various URL formats
-                match = re.search(r"github\.com[:/]([^/]+/[^/.]+)", remote_url)
-                if match:
-                    github_repo = match.group(1)
-                    if github_repo.endswith(".git"):
-                        github_repo = github_repo[:-4]
+                github_repo = extract_github_repo_from_url(result.stdout.strip())
         except Exception:
             pass
         return github_repo, repo_path
 
     # Check if it's a GitHub URL
     if is_url(repo):
-        # Extract owner/name from URL
-        match = re.search(r"github\.com/([^/]+/[^/?#]+)", repo)
-        if match:
-            github_repo = match.group(1)
-            if github_repo.endswith(".git"):
-                github_repo = github_repo[:-4]
+        github_repo = extract_github_repo_from_url(repo)
+        if github_repo:
             return github_repo, None
         # Not a GitHub URL, ignore
         return None, None
@@ -1172,9 +1183,7 @@ def generate_index_pagination_html(total_pages):
     return _macros.index_pagination(total_pages)
 
 
-def generate_html(
-    json_path, output_dir, github_repo=None, code_view=False, repo_path=None
-):
+def generate_html(json_path, output_dir, github_repo=None, code_view=False):
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
 
@@ -1495,14 +1504,13 @@ def local_cmd(
         output = Path(tempfile.gettempdir()) / f"claude-session-{session_file.stem}"
 
     output = Path(output)
-    # Parse --repo to get GitHub repo name and/or local path
-    github_repo, repo_path = parse_repo_value(repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
     generate_html(
         session_file,
         output,
         github_repo=github_repo,
         code_view=code_view,
-        repo_path=repo_path,
     )
 
     # Show output directory
@@ -1586,8 +1594,8 @@ def json_cmd(
         if not Path(json_file).exists():
             raise click.ClickException(f"File not found: {json_file}")
 
-    # Parse --repo to get GitHub repo name and/or local path
-    github_repo, repo_path = parse_repo_value(repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
 
     # Determine output directory and whether to open browser
     # If no -o specified, use temp dir and open browser by default
@@ -1605,7 +1613,6 @@ def json_cmd(
         output,
         github_repo=github_repo,
         code_view=code_view,
-        repo_path=repo_path,
     )
 
     # Show output directory
@@ -1689,7 +1696,7 @@ def format_session_for_display(session_data):
 
 
 def generate_html_from_session_data(
-    session_data, output_dir, github_repo=None, code_view=False, repo_path=None
+    session_data, output_dir, github_repo=None, code_view=False
 ):
     """Generate HTML from session data dict (instead of file path)."""
     output_dir = Path(output_dir)
@@ -2026,14 +2033,13 @@ def web_cmd(
 
     output = Path(output)
     click.echo(f"Generating HTML in {output}/...")
-    # Parse --repo to get GitHub repo name and/or local path
-    github_repo, repo_path = parse_repo_value(repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
     generate_html_from_session_data(
         session_data,
         output,
         github_repo=github_repo,
         code_view=code_view,
-        repo_path=repo_path,
     )
 
     # Show output directory

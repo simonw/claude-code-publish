@@ -974,10 +974,12 @@ class TestBuildMsgToUserHtml:
 
         html = result["msg-2025-01-01T10-00-05Z"]
 
-        # Should contain thinking block with proper styling
-        assert 'class="thinking"' in html
-        assert "Thinking" in html
+        # Should contain thinking block with proper styling inside assistant context
+        assert 'class="context-thinking"' in html
+        assert "Thinking:" in html
         assert "Let me think about this" in html
+        # Should be inside the assistant context section
+        assert 'class="tooltip-assistant"' in html
 
     def test_thinking_persists_across_messages(self):
         """Test that thinking from a previous message is captured for tool calls."""
@@ -1043,11 +1045,13 @@ class TestBuildMsgToUserHtml:
         # The tool_use message should have the thinking from the previous message
         html = result["msg-2025-01-01T10-00-10Z"]
 
-        # Should contain thinking block (persisted from previous message)
-        assert 'class="thinking"' in html
+        # Should contain thinking block (persisted from previous message) inside assistant context
+        assert 'class="context-thinking"' in html
         assert "plan this carefully" in html
-        # Should also have assistant context
+        # Should also have assistant text
         assert "create that file" in html
+        # Both should be inside the assistant context section
+        assert 'class="tooltip-assistant"' in html
 
     def test_preserves_block_order_thinking_first(self):
         """Test that blocks are rendered in original order (thinking before text)."""
@@ -1445,3 +1449,203 @@ class TestBuildMsgToUserHtml:
         assert "..." in html
         # Should not contain the full 1000 char string
         assert long_text not in html
+
+    def test_first_tool_use_with_no_preceding_context(self):
+        """Test first tool_use only shows user prompt when no assistant context exists."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        # First (and only) assistant message has only tool_use, no text/thinking
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result, context_ids = build_msg_to_user_html(conversations)
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Should still have user prompt
+        assert "Create a file" in html
+        # Should NOT have assistant context since there's none
+        assert "Assistant context" not in html
+        assert "Thinking" not in html
+
+    def test_text_after_tool_use_in_same_message(self):
+        """Test text that appears after tool_use in same message is still captured."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        # Content order: tool_use THEN text (Claude sometimes comments after acting)
+        conversations = [
+            {
+                "user_text": "Do something",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Read",
+                                        "input": {"file_path": "/test.py"},
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": "Now I can see the differences...",
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result, context_ids = build_msg_to_user_html(conversations)
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Should contain the text that came after tool_use
+        assert "Now I can see the differences" in html
+        assert "Assistant context" in html
+
+    def test_text_in_later_message_not_included(self):
+        """Test that text from a later message is NOT included (by design).
+
+        When tool_use happens first and text comes in a subsequent message,
+        the tooltip only shows context that preceded the tool_use.
+        """
+        from claude_code_transcripts import build_msg_to_user_html
+
+        # First message: tool_use only
+        # Second message: text (comes after, so not included for first tool)
+        conversations = [
+            {
+                "user_text": "Do something",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Read",
+                                        "input": {"file_path": "/test.py"},
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "Now I can see the differences...",
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:10Z",
+                    ),
+                ],
+            }
+        ]
+
+        result, context_ids = build_msg_to_user_html(conversations)
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Text from later message should NOT be included
+        assert "Now I can see the differences" not in html
+        # But user prompt should still be there
+        assert "Do something" in html
+
+    def test_strips_code_blocks_from_tooltip(self):
+        """Test that code blocks are stripped from tooltip content to avoid HTML injection."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        # Content with code block containing HTML that could cause issues
+        text_with_code = """Let me analyze this:
+
+```html
+<div id="prompts-modal" class="prompts-modal">
+  <button type="button" class="btn">Close</button>
+</div>
+```
+
+The implementation looks correct."""
+
+        conversations = [
+            {
+                "user_text": "Do something",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "text", "text": text_with_code},
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Read",
+                                        "input": {"file_path": "/test.py"},
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result, context_ids = build_msg_to_user_html(conversations)
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Code block should be replaced with placeholder, not rendered as HTML
+        assert "<div id=" not in html
+        assert "<button" not in html
+        # But the surrounding text should still be there
+        assert "Let me analyze this" in html
+        assert "implementation looks correct" in html
+        # Code block should be replaced with placeholder
+        assert "[code block]" in html
+        # Should show truncation indicator since code block was stripped
+        assert "(truncated)" in html

@@ -213,6 +213,12 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .tooltip-assistant p { margin: 4px 0; font-size: 0.9rem; }
 .blame-tooltip .tooltip-assistant { max-height: 200px; overflow: hidden; }
 .blame-tooltip .thinking { max-height: 200px; overflow: hidden; margin: 8px 16px 12px 16px; }
+.truncated-indicator { font-weight: normal; font-style: italic; color: var(--text-muted); text-transform: none; }
+.context-thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.context-thinking-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 4px; }
+.context-thinking p { margin: 4px 0; font-size: 0.85rem; color: var(--thinking-text); }
+.context-text { margin: 8px 0; }
+.context-text p { margin: 4px 0; font-size: 0.9rem; }
 
 /* File Tree */
 .file-tree { list-style: none; padding: 0; margin: 0; }
@@ -271,6 +277,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 /* Highlighted message in transcript */
 .message.highlighted { box-shadow: 0 0 0 3px var(--user-border); }
 
+/* Clickable messages in transcript (code view mode) */
+.transcript-panel .message { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
+.transcript-panel .message:hover { transform: translateX(2px); }
+.transcript-panel .message.highlighted:hover { transform: none; }
+
 /* Diff-only View */
 .diff-only-view { padding: 16px; }
 .diff-operation { margin-bottom: 20px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
@@ -303,7 +314,8 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
             <h1><a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a> - page 2/2</h1>
             
         </div>
-        
+        <div class="transcript-wrapper">
+            
 
 <div class="pagination">
 <a href="index.html" class="index-link">Index</a>
@@ -313,7 +325,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <span class="disabled">Next &rarr;</span>
 </div>
 
-        
+            
 <div class="message user" id="msg-2025-12-24T10-05-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-05-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:00.000Z" data-timestamp="2025-12-24T10:05:00.000Z">2025-12-24T10:05:00.000Z</time></a></div><div class="message-content">
 <div class="user-content"><p>Add a multiply function too</p></div></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-05-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-05-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:05.000Z" data-timestamp="2025-12-24T10:05:05.000Z">2025-12-24T10:05:05.000Z</time></a></div><div class="message-content"><div class="file-tool edit-tool" data-tool-id="toolu_edit_003">
@@ -334,7 +346,7 @@ def multiply(a: int, b: int) -&gt; int:
 <div class="message tool-reply" id="msg-2025-12-24T10-05-10-000Z"><div class="message-header"><span class="role-label">Tool reply</span><a href="#msg-2025-12-24T10-05-10-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:10.000Z" data-timestamp="2025-12-24T10:05:10.000Z">2025-12-24T10:05:10.000Z</time></a></div><div class="message-content"><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File edited successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-05-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-05-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:15.000Z" data-timestamp="2025-12-24T10:05:15.000Z">2025-12-24T10:05:15.000Z</time></a></div><div class="message-content">
 <div class="assistant-text"><p>Added multiply function!</p></div></div></div>
-        
+            
 
 <div class="pagination">
 <a href="index.html" class="index-link">Index</a>
@@ -344,6 +356,7 @@ def multiply(a: int, b: int) -&gt; int:
 <span class="disabled">Next &rarr;</span>
 </div>
 
+        </div>
     </div>
     <script>
 function formatTimestamp(date) {
