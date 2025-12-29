@@ -1327,50 +1327,6 @@ PAGE_DATA_SIZE_THRESHOLD = 500 * 1024
 # Note: page-data-*.json files are added dynamically based on what exists
 DATA_FILES = ["code-data.json"]
 
-# Maximum size per gist batch (10MB - GitHub gists can be up to 100MB total)
-# When adding files to existing gists with gh gist edit --add, we can use larger batches
-GIST_BATCH_SIZE = 10 * 1024 * 1024
-
-# Maximum files per gist batch
-GIST_BATCH_MAX_FILES = 100
-
-
-def _batch_files_for_gist(files):
-    """Split files into batches suitable for gist upload.
-
-    Each batch respects both size and file count limits to avoid
-    GitHub API errors like 'contents are too large'.
-
-    Args:
-        files: List of file paths to batch.
-
-    Returns:
-        List of batches, where each batch is a list of file paths.
-    """
-    batches = []
-    current_batch = []
-    current_size = 0
-
-    for file_path in files:
-        file_size = file_path.stat().st_size
-
-        # Start a new batch if adding this file would exceed limits
-        if current_batch and (
-            current_size + file_size > GIST_BATCH_SIZE
-            or len(current_batch) >= GIST_BATCH_MAX_FILES
-        ):
-            batches.append(current_batch)
-            current_batch = []
-            current_size = 0
-
-        current_batch.append(file_path)
-        current_size += file_size
-
-    if current_batch:
-        batches.append(current_batch)
-
-    return batches
-
 
 def _create_single_gist(files, public=False, description=None):
     """Create a single gist from the given files.
@@ -1518,20 +1474,11 @@ def create_gist(output_dir, public=False, description=None):
             [data_files[0]], public=public, description=data_desc
         )
 
-        # Add remaining files in batches
+        # Add remaining files one at a time
         remaining_files = data_files[1:]
         if remaining_files:
-            data_batches = _batch_files_for_gist(remaining_files)
-            click.echo(
-                f"Adding {len(remaining_files)} more files to data gist in {len(data_batches)} batch(es)..."
-            )
-            for i, batch in enumerate(data_batches, 1):
-                batch_names = [f.name for f in batch]
-                click.echo(f"  Batch {i}/{len(data_batches)}: {len(batch)} files")
-                _add_files_to_gist(data_gist_id, batch)
-                click.echo(
-                    f"  Added: {', '.join(batch_names[:5])}{'...' if len(batch_names) > 5 else ''}"
-                )
+            click.echo(f"Adding {len(remaining_files)} more files to data gist...")
+            _add_files_to_gist(data_gist_id, remaining_files)
 
         # Inject data gist ID and gist preview JS into HTML files
         inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
@@ -1544,17 +1491,8 @@ def create_gist(output_dir, public=False, description=None):
 
         remaining_main_files = main_files[1:]
         if remaining_main_files:
-            main_batches = _batch_files_for_gist(remaining_main_files)
-            click.echo(
-                f"Adding {len(remaining_main_files)} more files to main gist in {len(main_batches)} batch(es)..."
-            )
-            for i, batch in enumerate(main_batches, 1):
-                batch_names = [f.name for f in batch]
-                click.echo(f"  Batch {i}/{len(main_batches)}: {len(batch)} files")
-                _add_files_to_gist(main_gist_id, batch)
-                click.echo(
-                    f"  Added: {', '.join(batch_names[:5])}{'...' if len(batch_names) > 5 else ''}"
-                )
+            click.echo(f"Adding {len(remaining_main_files)} more files to main gist...")
+            _add_files_to_gist(main_gist_id, remaining_main_files)
 
         return main_gist_id, main_gist_url
     else:
@@ -1569,14 +1507,8 @@ def create_gist(output_dir, public=False, description=None):
 
         remaining_files = all_files[1:]
         if remaining_files:
-            all_batches = _batch_files_for_gist(remaining_files)
             click.echo(f"Adding {len(remaining_files)} more files to gist...")
-            for i, batch in enumerate(all_batches, 1):
-                _add_files_to_gist(main_gist_id, batch)
-                if len(all_batches) > 1:
-                    click.echo(
-                        f"  Added batch {i}/{len(all_batches)} to gist {main_gist_id}"
-                    )
+            _add_files_to_gist(main_gist_id, remaining_files)
 
         return main_gist_id, main_gist_url
 
