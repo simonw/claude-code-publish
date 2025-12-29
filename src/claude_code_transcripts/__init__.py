@@ -1168,50 +1168,16 @@ def inject_gist_preview_js(output_dir, data_gist_id=None):
                 )
                 content = content.replace("<head>", f"<head>\n{data_gist_script}")
 
-        # For index.html, strip inline content if index-data.json exists
-        if html_file.name == "index.html":
-            import re
-
-            index_data_file = output_dir / "index-data.json"
-            if index_data_file.exists():
-                # Remove inline index items content (gist version fetches from JSON)
-                # Keep the container div but empty it
-                content = re.sub(
-                    r'(<div id="index-items">).*?(</div>\s*<nav class="pagination">)',
-                    r"\1\2",
-                    content,
-                    flags=re.DOTALL,
-                )
-
+        # For index.html and page-*.html, inject data gist ID if needed
+        # (Content is already excluded in templates when use_*_data_json is true)
+        if html_file.name == "index.html" or (
+            html_file.name.startswith("page-") and html_file.name.endswith(".html")
+        ):
             if data_gist_id:
                 data_gist_script = (
                     f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
                 )
                 content = content.replace("<head>", f"<head>\n{data_gist_script}")
-
-        # For page-*.html, strip inline content if corresponding JSON exists
-        if html_file.name.startswith("page-") and html_file.name.endswith(".html"):
-            import re
-
-            # Check if page-data-XXX.json exists for this page
-            page_num = html_file.name.replace("page-", "").replace(".html", "")
-            page_data_file = output_dir / f"page-data-{page_num}.json"
-
-            if page_data_file.exists():
-                # Remove inline page messages content (gist version fetches from JSON)
-                # Keep the container div but empty it
-                content = re.sub(
-                    r'(<div id="page-messages">).*?(</div>\s*<nav class="pagination">)',
-                    r"\1\2",
-                    content,
-                    flags=re.DOTALL,
-                )
-
-                if data_gist_id:
-                    data_gist_script = (
-                        f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
-                    )
-                    content = content.replace("<head>", f"<head>\n{data_gist_script}")
 
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
@@ -1396,70 +1362,65 @@ def create_gist(output_dir, public=False, description=None):
 
     # Decide whether to use two-gist strategy
     if data_total_size > GIST_SIZE_THRESHOLD and data_files:
-        # Two-gist strategy: create data gist(s) first
-        # Batch data files to avoid GitHub API limits
-        data_batches = _batch_files_for_gist(data_files)
-
-        # Create data gist with first batch, then add remaining batches to same gist
+        # Two-gist strategy: create data gist first, then add remaining files
+        # Create gist with first file only (gh gist create can be unreliable with many files)
         data_desc = f"{description} (data)" if description else None
         data_gist_id, _ = _create_single_gist(
-            data_batches[0], public=public, description=data_desc
+            [data_files[0]], public=public, description=data_desc
         )
 
-        if len(data_batches) > 1:
-            click.echo(f"Adding {len(data_batches) - 1} more batches to data gist...")
-            for i, batch in enumerate(data_batches[1:], 2):
+        # Add remaining files in batches
+        remaining_files = data_files[1:]
+        if remaining_files:
+            data_batches = _batch_files_for_gist(remaining_files)
+            click.echo(f"Adding {len(remaining_files)} more files to data gist...")
+            for i, batch in enumerate(data_batches, 1):
                 _add_files_to_gist(data_gist_id, batch)
-                click.echo(
-                    f"  Added batch {i}/{len(data_batches)} to gist {data_gist_id}"
-                )
+                if len(data_batches) > 1:
+                    click.echo(
+                        f"  Added batch {i}/{len(data_batches)} to gist {data_gist_id}"
+                    )
 
         # Inject data gist ID and gist preview JS into HTML files
         inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
 
-        # Create main gist (excluding data files) - also may need batching
-        main_batches = _batch_files_for_gist(main_files)
+        # Create main gist with first file, then add remaining files
         main_gist_id, main_gist_url = _create_single_gist(
-            main_batches[0], public=public, description=description
+            [main_files[0]], public=public, description=description
         )
 
-        if len(main_batches) > 1:
-            click.echo(f"Adding {len(main_batches) - 1} more batches to main gist...")
-            for i, batch in enumerate(main_batches[1:], 2):
+        remaining_main_files = main_files[1:]
+        if remaining_main_files:
+            main_batches = _batch_files_for_gist(remaining_main_files)
+            click.echo(f"Adding {len(remaining_main_files)} more files to main gist...")
+            for i, batch in enumerate(main_batches, 1):
                 _add_files_to_gist(main_gist_id, batch)
-                click.echo(
-                    f"  Added batch {i}/{len(main_batches)} to gist {main_gist_id}"
-                )
+                if len(main_batches) > 1:
+                    click.echo(
+                        f"  Added batch {i}/{len(main_batches)} to gist {main_gist_id}"
+                    )
 
         return main_gist_id, main_gist_url
     else:
         # Single gist strategy: inject gist preview JS first
         inject_gist_preview_js(output_dir)
 
-        # Create gist with all files
-        # Only use batching if total size exceeds threshold (to avoid API errors)
+        # Create gist with first file, then add remaining files
         all_files = main_files + data_files
-        total_size = sum(f.stat().st_size for f in all_files)
-
-        if total_size <= GIST_SIZE_THRESHOLD:
-            # Small enough for single gist without batching
-            return _create_single_gist(
-                all_files, public=public, description=description
-            )
-
-        # Need batching for large total size
-        all_batches = _batch_files_for_gist(all_files)
         main_gist_id, main_gist_url = _create_single_gist(
-            all_batches[0], public=public, description=description
+            [all_files[0]], public=public, description=description
         )
 
-        if len(all_batches) > 1:
-            click.echo(f"Adding {len(all_batches) - 1} more batches to gist...")
-            for i, batch in enumerate(all_batches[1:], 2):
+        remaining_files = all_files[1:]
+        if remaining_files:
+            all_batches = _batch_files_for_gist(remaining_files)
+            click.echo(f"Adding {len(remaining_files)} more files to gist...")
+            for i, batch in enumerate(all_batches, 1):
                 _add_files_to_gist(main_gist_id, batch)
-                click.echo(
-                    f"  Added batch {i}/{len(all_batches)} to gist {main_gist_id}"
-                )
+                if len(all_batches) > 1:
+                    click.echo(
+                        f"  Added batch {i}/{len(all_batches)} to gist {main_gist_id}"
+                    )
 
         return main_gist_id, main_gist_url
 

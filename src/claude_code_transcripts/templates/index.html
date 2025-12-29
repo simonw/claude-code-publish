@@ -7,7 +7,9 @@
             {{ pagination_html|safe }}
             <p style="color: var(--text-muted); margin-bottom: 24px;">{{ prompt_num }} prompts · {{ total_messages }} messages · {{ total_tool_calls }} tool calls · {{ total_commits }} commits · {{ total_pages }} pages</p>
             <div id="index-items">
+{%- if not use_index_data_json %}
                 {{ index_items_html|safe }}
+{%- endif %}
             </div>
             {{ pagination_html|safe }}
         </div>

@@ -1568,7 +1568,7 @@ class TestTwoGistStrategy:
     """Tests for the two-gist strategy when files are too large."""
 
     def test_single_gist_when_files_small(self, output_dir, monkeypatch):
-        """Test that small files use single gist strategy."""
+        """Test that small files use single gist strategy (one gist, not two)."""
         import subprocess
 
         # Create small test HTML files (under 1MB total)
@@ -1595,8 +1595,11 @@ class TestTwoGistStrategy:
 
         gist_id, gist_url = create_gist(output_dir)
 
-        # Should only call gh gist create once (single gist strategy)
-        assert len(subprocess_calls) == 1
+        # Should call gh gist create once, then gh gist edit to add remaining files
+        # (We create with first file, then add rest to avoid issues with many files)
+        assert len(subprocess_calls) == 2
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
+        assert subprocess_calls[1][0:3] == ["gh", "gist", "edit"]
         assert gist_id == "abc123def456"
 
     def test_two_gist_when_files_large(self, output_dir, monkeypatch):
@@ -1634,16 +1637,19 @@ class TestTwoGistStrategy:
 
         gist_id, gist_url = create_gist(output_dir)
 
-        # Should call gh gist create twice (data gist + main gist)
-        assert len(subprocess_calls) == 2
+        # Should call gh gist create twice (data gist + main gist), then edit to add remaining files
+        assert len(subprocess_calls) == 3
         # First call should be for data gist (code-data.json)
         first_cmd = subprocess_calls[0]
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
         assert "code-data.json" in " ".join(str(x) for x in first_cmd)
-        # Second call should be for main gist (HTML files)
+        # Second call should create main gist with first HTML file
         second_cmd = subprocess_calls[1]
-        assert "index.html" in " ".join(str(x) for x in second_cmd)
-        # code-data.json should NOT be in main gist
+        assert subprocess_calls[1][0:3] == ["gh", "gist", "create"]
         assert "code-data.json" not in " ".join(str(x) for x in second_cmd)
+        # Third call should add remaining HTML files to main gist
+        third_cmd = subprocess_calls[2]
+        assert subprocess_calls[2][0:3] == ["gh", "gist", "edit"]
 
     def test_data_gist_id_injected_into_html(self, output_dir, monkeypatch):
         """Test that data gist ID is injected into HTML when using two-gist strategy."""
@@ -1715,9 +1721,11 @@ class TestTwoGistStrategy:
 
         monkeypatch.setattr(subprocess, "run", mock_run)
 
-        # With default threshold (1MB), should use single gist
+        # With default threshold (1MB), should use single gist (create + edit to add remaining files)
         gist_id, gist_url = create_gist(output_dir)
-        assert len(subprocess_calls) == 1
+        assert len(subprocess_calls) == 2
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
+        assert subprocess_calls[1][0:3] == ["gh", "gist", "edit"]
 
 
 class TestSearchFeature:

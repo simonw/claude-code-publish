@@ -8,7 +8,9 @@
         <div class="transcript-wrapper">
             {{ pagination_html|safe }}
             <div id="page-messages">
+{%- if not use_page_data_json %}
                 {{ messages_html|safe }}
+{%- endif %}
             </div>
             {{ pagination_html|safe }}
         </div>

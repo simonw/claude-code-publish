@@ -52,8 +52,8 @@ The UI is far from perfect. I tried to stay true to not introducing any frontend
 
 -> [See resulting code view](https://gistpreview.github.io/?c0fdb0e0a763a983a04a5475bb63954e/code.html#%2Ftmp%2Fhttp-proxy-server%2Ftests%2Ftest_proxy.py:L10)
 
-I ran into an issue that gistpreview relies listing all files in the gist. This fails if you exceed the size limit as then every file after you hit the limit is blank. To work around this I adopted an approach of putting data files in a separate gist. These can then be loaded via the raw API & doesn't have the same limitations.  This was a pre-existing issue, but exacerbated by the code view. Search is also updated to make use of these data files instead of the HTML if available.
+I ran into an issue that gistpreview relies listing all files in the gist. This fails if you exceed the size limit as then every file after you hit the limit is blank. To work around this I adopted an approach of putting data files in a separate gist. These can then be loaded via the raw API & doesn't have the same limitations.  This was a pre-existing issue, but exacerbated by the code view. Search is also updated to make use of these data files instead of the HTML if available. This ended up being a large part of the PR.
 
-Also added are e2e tests with python-playwright. This was very helpful as the complexity of the UI increased.
+Also added are e2e tests with python-playwright. This was very helpful as the complexity of the code view UI increased.
 
 This is obviously a huge PR, and no hard feelings if you do not want to accept it into the main codebase.
