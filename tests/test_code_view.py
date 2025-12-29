@@ -2157,3 +2157,84 @@ class TestDeletedFileFiltering:
             import shutil
 
             shutil.rmtree(temp_dir)
+
+    def test_handles_relative_path_in_rm_command(self):
+        """Test that rm commands with relative paths don't break path normalization.
+
+        Write/Edit operations always have absolute paths, but rm commands can have
+        relative paths. This should not cause a ValueError when mixing them.
+        """
+        from claude_code_transcripts.code_view import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+        )
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create and delete", "role": "user"},
+            },
+            # Create with absolute path
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/src/main.py",
+                                "content": "# main\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            # Delete with RELATIVE path (this is what causes the bug)
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:01:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_bash_001",
+                            "name": "Bash",
+                            "input": {"command": "rm temp.py"},
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create and delete",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:01:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+
+        # This should NOT raise ValueError: Can't mix absolute and relative paths
+        repo, temp_dir, path_mapping = build_file_history_repo(operations)
+
+        try:
+            # The file should exist
+            rel_path = path_mapping.get("/project/src/main.py", "main.py")
+            content = get_file_content_from_repo(repo, rel_path)
+            assert content == "# main\n"
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir)
