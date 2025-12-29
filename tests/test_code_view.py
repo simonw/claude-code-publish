@@ -1707,3 +1707,453 @@ The implementation looks correct."""
         assert "[code block]" in html
         # Should show truncation indicator since code block was stripped
         assert "(truncated)" in html
+
+
+class TestDeletedFileFiltering:
+    """Tests for filtering out files that are ultimately deleted in the session.
+
+    Delete operations are tracked as OP_DELETE and applied in the git repo.
+    Files that don't exist in the final repo state are filtered out when
+    generating the code view.
+    """
+
+    def test_extracts_delete_operations(self):
+        """Test that delete operations are extracted from rm commands."""
+        from claude_code_transcripts.code_view import OP_DELETE
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Delete a file", "role": "user"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_bash_001",
+                            "name": "Bash",
+                            "input": {"command": "rm /project/temp.py"},
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Delete a file",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+
+        # Should have one delete operation
+        delete_ops = [op for op in operations if op.operation_type == OP_DELETE]
+        assert len(delete_ops) == 1
+        assert delete_ops[0].file_path == "/project/temp.py"
+
+    def test_file_deleted_via_rm_not_in_final_repo(self):
+        """Test that a file created then deleted doesn't exist in final repo."""
+        from claude_code_transcripts.code_view import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+        )
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create a temp file", "role": "user"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/temp.py",
+                                "content": "# temporary file\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:01:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_bash_001",
+                            "name": "Bash",
+                            "input": {"command": "rm /project/temp.py"},
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create a temp file",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:01:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+        repo, temp_dir, path_mapping = build_file_history_repo(operations)
+
+        try:
+            # File should not exist in final repo
+            rel_path = path_mapping.get("/project/temp.py", "temp.py")
+            content = get_file_content_from_repo(repo, rel_path)
+            assert content is None, "Deleted file should not exist in repo"
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir)
+
+    def test_file_not_deleted_still_exists_in_repo(self):
+        """Test that files NOT deleted still exist in final repo."""
+        from claude_code_transcripts.code_view import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+        )
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create a file", "role": "user"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/keeper.py",
+                                "content": "# permanent file\n",
+                            },
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+        repo, temp_dir, path_mapping = build_file_history_repo(operations)
+
+        try:
+            # File should exist in final repo
+            rel_path = path_mapping.get("/project/keeper.py", "keeper.py")
+            content = get_file_content_from_repo(repo, rel_path)
+            assert content == "# permanent file\n", "Non-deleted file should exist"
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir)
+
+    def test_deleted_file_with_quotes_in_rm(self):
+        """Test deletion detection with quoted paths in rm command."""
+        from claude_code_transcripts.code_view import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+        )
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create and delete", "role": "user"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/file with spaces.py",
+                                "content": "# file\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:01:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_bash_001",
+                            "name": "Bash",
+                            "input": {
+                                "command": 'rm "/project/file with spaces.py"',
+                            },
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create and delete",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:01:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+        repo, temp_dir, path_mapping = build_file_history_repo(operations)
+
+        try:
+            rel_path = path_mapping.get(
+                "/project/file with spaces.py", "file with spaces.py"
+            )
+            content = get_file_content_from_repo(repo, rel_path)
+            assert content is None, "File deleted with quotes should not exist"
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir)
+
+    def test_rm_rf_deletes_directory_contents(self):
+        """Test that rm -rf deletes files in a directory."""
+        from claude_code_transcripts.code_view import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+        )
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create files then delete dir", "role": "user"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/subdir/file1.py",
+                                "content": "# file 1\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:10.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_002",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/subdir/file2.py",
+                                "content": "# file 2\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:01:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_bash_001",
+                            "name": "Bash",
+                            "input": {"command": "rm -rf /project/subdir"},
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create files then delete dir",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:10.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:01:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+        repo, temp_dir, path_mapping = build_file_history_repo(operations)
+
+        try:
+            # Both files in subdir should not exist
+            rel_path1 = path_mapping.get("/project/subdir/file1.py", "subdir/file1.py")
+            rel_path2 = path_mapping.get("/project/subdir/file2.py", "subdir/file2.py")
+            content1 = get_file_content_from_repo(repo, rel_path1)
+            content2 = get_file_content_from_repo(repo, rel_path2)
+            assert content1 is None, "file1.py should be deleted"
+            assert content2 is None, "file2.py should be deleted"
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir)
+
+    def test_create_delete_recreate_shows_file(self):
+        """Test that a file created, deleted, then recreated DOES appear."""
+        from claude_code_transcripts.code_view import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+        )
+
+        loglines = [
+            {
+                "type": "user",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "message": {"content": "Create delete recreate", "role": "user"},
+            },
+            # Create
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:00:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_001",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/temp.py",
+                                "content": "# version 1\n",
+                            },
+                        }
+                    ],
+                },
+            },
+            # Delete
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:01:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_bash_001",
+                            "name": "Bash",
+                            "input": {"command": "rm /project/temp.py"},
+                        }
+                    ],
+                },
+            },
+            # Recreate
+            {
+                "type": "assistant",
+                "timestamp": "2025-12-24T10:02:05.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_write_002",
+                            "name": "Write",
+                            "input": {
+                                "file_path": "/project/temp.py",
+                                "content": "# version 2\n",
+                            },
+                        }
+                    ],
+                },
+            },
+        ]
+
+        conversations = [
+            {
+                "user_text": "Create delete recreate",
+                "timestamp": "2025-12-24T10:00:00.000Z",
+                "messages": [
+                    ("user", "{}", "2025-12-24T10:00:00.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:00:05.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:01:05.000Z"),
+                    ("assistant", "{}", "2025-12-24T10:02:05.000Z"),
+                ],
+            }
+        ]
+
+        operations = extract_file_operations(loglines, conversations)
+        repo, temp_dir, path_mapping = build_file_history_repo(operations)
+
+        try:
+            # File should exist with version 2 content
+            rel_path = path_mapping.get("/project/temp.py", "temp.py")
+            content = get_file_content_from_repo(repo, rel_path)
+            assert content == "# version 2\n", "Recreated file should exist with v2"
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir)

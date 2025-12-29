@@ -6,12 +6,13 @@ This module handles the three-pane code viewer with git-based blame annotations.
 import html
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Any, Set
 
 from git import Repo
 from git.exc import InvalidGitRepositoryError
@@ -105,10 +106,15 @@ def parse_iso_timestamp(timestamp: str) -> Optional[datetime]:
 # Operation types for file operations
 OP_WRITE = "write"
 OP_EDIT = "edit"
+OP_DELETE = "delete"
 
 # File status for tree display
 STATUS_ADDED = "added"
 STATUS_MODIFIED = "modified"
+
+# Regex patterns for rm commands
+# Matches: rm, rm -f, rm -r, rm -rf, rm -fr, etc.
+RM_COMMAND_PATTERN = re.compile(r"^\s*rm\s+(?:-[rfivI]+\s+)*(.+)$")
 
 
 # ============================================================================
@@ -191,12 +197,80 @@ class BlameRange:
 # ============================================================================
 
 
+def extract_deleted_paths_from_bash(command: str) -> List[str]:
+    """Extract file paths deleted by an rm command.
+
+    Handles various rm forms:
+    - rm file.py
+    - rm -f file.py
+    - rm -rf /path/to/dir
+    - rm "file with spaces.py"
+    - rm 'file.py'
+
+    Args:
+        command: The bash command string.
+
+    Returns:
+        List of file paths that would be deleted by this command.
+    """
+    paths = []
+
+    # Check if this is an rm command
+    match = RM_COMMAND_PATTERN.match(command)
+    if not match:
+        return paths
+
+    # Get the path arguments part
+    args_str = match.group(1).strip()
+
+    # Parse paths - handle quoted and unquoted paths
+    # Simple approach: split on spaces but respect quotes
+    current_path = ""
+    in_quotes = None
+    i = 0
+
+    while i < len(args_str):
+        char = args_str[i]
+
+        if in_quotes:
+            if char == in_quotes:
+                # End of quoted string
+                if current_path:
+                    paths.append(current_path)
+                    current_path = ""
+                in_quotes = None
+            else:
+                current_path += char
+        elif char in ('"', "'"):
+            # Start of quoted string
+            in_quotes = char
+        elif char == " ":
+            # Space outside quotes - end of path
+            if current_path:
+                paths.append(current_path)
+                current_path = ""
+        else:
+            current_path += char
+
+        i += 1
+
+    # Don't forget the last path if not quoted
+    if current_path:
+        paths.append(current_path)
+
+    return paths
+
+
 def extract_file_operations(
     loglines: List[Dict],
     conversations: List[Dict],
     prompts_per_page: int = 5,
 ) -> List[FileOperation]:
-    """Extract all Write and Edit operations from session loglines.
+    """Extract all Write, Edit, and Delete operations from session loglines.
+
+    Delete operations are extracted from Bash rm commands. Files that are
+    ultimately deleted will be filtered out when the operations are replayed
+    in the git repo (deleted files won't exist in the final state).
 
     Args:
         loglines: List of parsed logline entries from the session.
@@ -304,8 +378,30 @@ def extract_file_operations(
                         )
                     )
 
+            elif tool_name == "Bash":
+                # Extract delete operations from rm commands
+                command = tool_input.get("command", "")
+                deleted_paths = extract_deleted_paths_from_bash(command)
+                is_recursive = "-r" in command
+
+                for path in deleted_paths:
+                    operations.append(
+                        FileOperation(
+                            file_path=path,
+                            operation_type=OP_DELETE,
+                            tool_id=tool_id,
+                            timestamp=timestamp,
+                            page_num=page_num,
+                            msg_id=msg_id,
+                            # Store whether this is a recursive delete (directory)
+                            # We reuse replace_all field for this purpose
+                            replace_all=is_recursive,
+                        )
+                    )
+
     # Sort by timestamp
     operations.sort(key=lambda op: op.timestamp)
+
     return operations
 
 
@@ -693,6 +789,50 @@ def build_file_history_repo(
             else:
                 # Can't apply edit - file doesn't exist
                 continue
+        elif op.operation_type == OP_DELETE:
+            # Delete operation - remove file or directory contents
+            # op.replace_all is True for recursive deletes (rm -r)
+            is_recursive = op.replace_all
+
+            if is_recursive:
+                # Delete all files under this directory path
+                dir_prefix = rel_path.rstrip("/") + "/"
+                files_to_remove = []
+                for root, dirs, files in os.walk(temp_dir):
+                    for f in files:
+                        file_path_abs = Path(root) / f
+                        file_rel = str(file_path_abs.relative_to(temp_dir))
+                        if file_rel.startswith(dir_prefix) or file_rel == rel_path:
+                            files_to_remove.append((file_path_abs, file_rel))
+
+                if files_to_remove:
+                    for file_path_abs, file_rel in files_to_remove:
+                        file_path_abs.unlink()
+                        try:
+                            repo.index.remove([file_rel])
+                        except Exception:
+                            pass  # File might not be tracked
+                else:
+                    # No files found, nothing to delete
+                    continue
+            else:
+                # Single file delete
+                if full_path.exists():
+                    full_path.unlink()
+                    try:
+                        repo.index.remove([rel_path])
+                    except Exception:
+                        pass  # File might not be tracked
+                else:
+                    # File doesn't exist, nothing to delete
+                    continue
+
+            # Commit the deletion (no metadata needed, file won't appear in final state)
+            try:
+                repo.index.commit("{}")  # Delete commit
+            except Exception:
+                pass  # Nothing to commit if no files were tracked
+            continue  # Skip the normal commit below
 
         # Stage and commit with metadata
         repo.index.add([rel_path])
