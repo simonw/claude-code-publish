@@ -852,7 +852,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
 
         # Should have entry for the assistant message with tool_use
         assert "msg-2025-01-01T10-00-05Z" in result
@@ -862,6 +862,9 @@ class TestBuildMsgToUserHtml:
         assert "Create a file" in html
         # Should contain assistant context
         assert "Assistant context" in html
+
+        # Should have context_msg_id mapping
+        assert "msg-2025-01-01T10-00-05Z" in context_ids
         assert "create that file for you" in html
 
     def test_includes_thinking_block(self):
@@ -907,7 +910,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
 
         html = result["msg-2025-01-01T10-00-05Z"]
 
@@ -975,7 +978,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
 
         # The tool_use message should have the thinking from the previous message
         html = result["msg-2025-01-01T10-00-10Z"]
@@ -1031,7 +1034,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Thinking should appear before text in the HTML
@@ -1087,7 +1090,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Text should appear before thinking in the HTML
@@ -1157,7 +1160,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Both thinking and text should be present
@@ -1250,7 +1253,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Only the NEW (most recent) blocks should be present
@@ -1260,6 +1263,79 @@ class TestBuildMsgToUserHtml:
         # The OLD blocks should NOT be present
         assert "OLD_THINKING" not in html, "Old thinking should not be present"
         assert "OLD_TEXT" not in html, "Old text should not be present"
+
+    def test_context_msg_id_uses_most_recent_block_message(self):
+        """Test that context_msg_id is set to the message containing the most recent block."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-01-01T10:00:00Z",
+                    ),
+                    # First message has thinking
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "thinking", "thinking": "Thinking..."},
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:02Z",
+                    ),
+                    # Second message has text (more recent)
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "text", "text": "Creating file..."},
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:03Z",
+                    ),
+                    # Third message has tool_use
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result, context_ids = build_msg_to_user_html(conversations)
+
+        # The context_msg_id should be the message with the text (most recent block)
+        tool_msg_id = "msg-2025-01-01T10-00-05Z"
+        text_msg_id = "msg-2025-01-01T10-00-03Z"
+        assert tool_msg_id in context_ids
+        assert context_ids[tool_msg_id] == text_msg_id
 
     def test_truncates_long_text(self):
         """Test that long assistant text is truncated."""
@@ -1302,7 +1378,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result = build_msg_to_user_html(conversations)
+        result, context_ids = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Should contain ellipsis indicating truncation

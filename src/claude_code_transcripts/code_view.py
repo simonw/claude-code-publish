@@ -975,6 +975,7 @@ def generate_code_view_html(
     operations: List[FileOperation],
     transcript_messages: List[str] = None,
     msg_to_user_html: Dict[str, str] = None,
+    msg_to_context_id: Dict[str, str] = None,
 ) -> None:
     """Generate the code.html file with three-pane layout.
 
@@ -983,6 +984,7 @@ def generate_code_view_html(
         operations: List of FileOperation objects.
         transcript_messages: List of individual message HTML strings.
         msg_to_user_html: Mapping from msg_id to rendered user message HTML for tooltips.
+        msg_to_context_id: Mapping from msg_id to context_msg_id for blame coloring.
     """
     # Import here to avoid circular imports
     from claude_code_transcripts import CSS, JS, get_template
@@ -995,6 +997,9 @@ def generate_code_view_html(
 
     if msg_to_user_html is None:
         msg_to_user_html = {}
+
+    if msg_to_context_id is None:
+        msg_to_context_id = {}
 
     # Extract message IDs from HTML for chunked rendering
     # Messages have format: <div class="message ..." id="msg-...">
@@ -1044,6 +1049,7 @@ def generate_code_view_html(
                         "tool_id": r.tool_id,
                         "page_num": r.page_num,
                         "msg_id": r.msg_id,
+                        "context_msg_id": msg_to_context_id.get(r.msg_id, r.msg_id),
                         "operation_type": r.operation_type,
                         "timestamp": r.timestamp,
                         "user_html": msg_to_user_html.get(r.msg_id, ""),
@@ -1098,8 +1104,10 @@ def generate_code_view_html(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
-    """Build a mapping from msg_id to tooltip HTML.
+def build_msg_to_user_html(
+    conversations: List[Dict],
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Build a mapping from msg_id to tooltip HTML and context message ID.
 
     For each tool call message, render the user prompt followed by the
     assistant text that immediately preceded the tool call.
@@ -1108,7 +1116,9 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
         conversations: List of conversation dicts with user_text, timestamp, and messages.
 
     Returns:
-        Dict mapping msg_id to rendered tooltip HTML.
+        Tuple of:
+        - Dict mapping msg_id to rendered tooltip HTML
+        - Dict mapping msg_id to context_msg_id (the assistant message providing context)
     """
     # Import here to avoid circular imports
     from claude_code_transcripts import (
@@ -1118,6 +1128,7 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
     import json
 
     msg_to_user_html = {}
+    msg_to_context_id = {}
     prompt_num = 0
 
     for i, conv in enumerate(conversations):
@@ -1146,7 +1157,7 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
         user_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div></div>"""
 
         # Track most recent thinking and text blocks with order for sequencing
-        # Each is (content, order) tuple or None
+        # Each is (content, order, msg_id) tuple or None
         last_thinking = None
         last_text = None
         block_order = 0
@@ -1169,12 +1180,12 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
                         if block.get("type") == "text":
                             text = block.get("text", "")
                             if text:
-                                last_text = (text, block_order)
+                                last_text = (text, block_order, msg_id)
                                 block_order += 1
                         elif block.get("type") == "thinking":
                             thinking = block.get("thinking", "")
                             if thinking:
-                                last_thinking = (thinking, block_order)
+                                last_thinking = (thinking, block_order, msg_id)
                                 block_order += 1
                         elif block.get("type") == "tool_use":
                             has_tool_use = True
@@ -1185,14 +1196,25 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
                     blocks_to_render = []
                     if last_thinking:
                         blocks_to_render.append(
-                            ("thinking", last_thinking[0], last_thinking[1])
+                            (
+                                "thinking",
+                                last_thinking[0],
+                                last_thinking[1],
+                                last_thinking[2],
+                            )
                         )
                     if last_text:
-                        blocks_to_render.append(("text", last_text[0], last_text[1]))
+                        blocks_to_render.append(
+                            ("text", last_text[0], last_text[1], last_text[2])
+                        )
                     blocks_to_render.sort(key=lambda x: x[2])
 
+                    # Use the most recent block's msg_id as the context message ID
+                    context_msg_id = blocks_to_render[-1][3]
+                    msg_to_context_id[msg_id] = context_msg_id
+
                     context_html = ""
-                    for block_type, block_content, _ in blocks_to_render:
+                    for block_type, block_content, _, _ in blocks_to_render:
                         # Truncate long content
                         if len(block_content) > 500:
                             block_content = block_content[:500] + "..."
@@ -1211,4 +1233,4 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
             else:
                 msg_to_user_html[msg_id] = user_html
 
-    return msg_to_user_html
+    return msg_to_user_html, msg_to_context_id

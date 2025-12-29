@@ -158,26 +158,28 @@ function extractPromptNum(userHtml) {
 }
 
 // Build maps for range colors and message numbers
-// Ranges with the same prompt number get the same color
+// Ranges with the same context_msg_id get the same color
 function buildRangeMaps(blameRanges) {
-    const colorMap = new Map();      // range index -> color
-    const msgNumMap = new Map();     // range index -> user message number
-    const promptToColor = new Map(); // prompt number -> color
+    const colorMap = new Map();        // range index -> color
+    const msgNumMap = new Map();       // range index -> user message number
+    const contextToColor = new Map();  // context_msg_id -> color
     let colorIndex = 0;
 
     blameRanges.forEach((range, index) => {
         if (range.msg_id) {
-            // Extract prompt number from user_html
+            // Extract prompt number for display
             const promptNum = extractPromptNum(range.user_html);
             if (promptNum) {
                 msgNumMap.set(index, promptNum);
-                // Assign color based on prompt number, not msg_id
-                if (!promptToColor.has(promptNum)) {
-                    promptToColor.set(promptNum, rangeColors[colorIndex % rangeColors.length]);
-                    colorIndex++;
-                }
-                colorMap.set(index, promptToColor.get(promptNum));
             }
+
+            // Assign color based on context_msg_id (the assistant message providing context)
+            const contextId = range.context_msg_id || range.msg_id;
+            if (!contextToColor.has(contextId)) {
+                contextToColor.set(contextId, rangeColors[colorIndex % rangeColors.length]);
+                colorIndex++;
+            }
+            colorMap.set(index, contextToColor.get(contextId));
         }
     });
     return { colorMap, msgNumMap };

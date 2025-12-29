@@ -1379,12 +1379,13 @@ def generate_html(
 
     # Generate code view if requested
     if has_code_view:
-        msg_to_user_html = build_msg_to_user_html(conversations)
+        msg_to_user_html, msg_to_context_id = build_msg_to_user_html(conversations)
         generate_code_view_html(
             output_dir,
             file_operations,
             transcript_messages=all_messages_html,
             msg_to_user_html=msg_to_user_html,
+            msg_to_context_id=msg_to_context_id,
         )
         num_files = len(set(op.file_path for op in file_operations))
         print(f"Generated code.html ({num_files} files)")
@@ -1887,12 +1888,13 @@ def generate_html_from_session_data(
 
     # Generate code view if requested
     if has_code_view:
-        msg_to_user_html = build_msg_to_user_html(conversations)
+        msg_to_user_html, msg_to_context_id = build_msg_to_user_html(conversations)
         generate_code_view_html(
             output_dir,
             file_operations,
             transcript_messages=all_messages_html,
             msg_to_user_html=msg_to_user_html,
+            msg_to_context_id=msg_to_context_id,
         )
         num_files = len(set(op.file_path for op in file_operations))
         click.echo(f"Generated code.html ({num_files} files)")
