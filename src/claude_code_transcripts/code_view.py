@@ -405,6 +405,43 @@ def extract_file_operations(
     return operations
 
 
+def filter_deleted_files(operations: List[FileOperation]) -> List[FileOperation]:
+    """Filter out operations for files that no longer exist on disk.
+
+    This is used with the --exclude-deleted-files flag to filter out files
+    that were modified during the session but have since been deleted
+    (outside of the session or by commands we didn't detect).
+
+    Only checks absolute paths - relative paths are left as-is since we can't
+    reliably determine where they are.
+
+    Args:
+        operations: List of FileOperation objects.
+
+    Returns:
+        Filtered list excluding operations for files that don't exist.
+    """
+    if not operations:
+        return operations
+
+    # Get unique file paths from Write/Edit operations (not Delete)
+    file_paths = set(
+        op.file_path for op in operations if op.operation_type in (OP_WRITE, OP_EDIT)
+    )
+
+    # Check which files exist (only for absolute paths)
+    missing_files: Set[str] = set()
+    for file_path in file_paths:
+        if os.path.isabs(file_path) and not os.path.exists(file_path):
+            missing_files.add(file_path)
+
+    if not missing_files:
+        return operations
+
+    # Filter out operations for missing files
+    return [op for op in operations if op.file_path not in missing_files]
+
+
 def normalize_file_paths(operations: List[FileOperation]) -> Tuple[str, Dict[str, str]]:
     """Find common prefix in file paths and create normalized relative paths.
 

@@ -64,6 +64,7 @@ from claude_code_transcripts.code_view import (
     OP_EDIT,
     OP_DELETE,
     extract_file_operations,
+    filter_deleted_files,
     normalize_file_paths,
     find_git_repo_root,
     find_commit_before_timestamp,
@@ -1285,7 +1286,13 @@ def generate_index_pagination_html(total_pages):
     return _macros.index_pagination(total_pages)
 
 
-def generate_html(json_path, output_dir, github_repo=None, code_view=False):
+def generate_html(
+    json_path,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+):
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
 
@@ -1351,6 +1358,9 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
     file_operations = None
     if code_view:
         file_operations = extract_file_operations(loglines, conversations)
+        # Optionally filter out files that no longer exist on disk
+        if exclude_deleted_files and file_operations:
+            file_operations = filter_deleted_files(file_operations)
         has_code_view = len(file_operations) > 0
 
     # Collect all messages HTML for the code view transcript pane
@@ -1552,8 +1562,21 @@ def cli():
     is_flag=True,
     help="Generate a code viewer tab showing files modified during the session.",
 )
+@click.option(
+    "--exclude-deleted-files",
+    is_flag=True,
+    help="Exclude files that no longer exist on disk from the code viewer.",
+)
 def local_cmd(
-    output, output_auto, repo, gist, include_json, open_browser, limit, code_view
+    output,
+    output_auto,
+    repo,
+    gist,
+    include_json,
+    open_browser,
+    limit,
+    code_view,
+    exclude_deleted_files,
 ):
     """Select and convert a local Claude Code session to HTML."""
     projects_folder = Path.home() / ".claude" / "projects"
@@ -1612,6 +1635,7 @@ def local_cmd(
         output,
         github_repo=github_repo,
         code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
     )
 
     # Show output directory
@@ -1678,8 +1702,21 @@ def local_cmd(
     is_flag=True,
     help="Generate a code viewer tab showing files modified during the session.",
 )
+@click.option(
+    "--exclude-deleted-files",
+    is_flag=True,
+    help="Exclude files that no longer exist on disk from the code viewer.",
+)
 def json_cmd(
-    json_file, output, output_auto, repo, gist, include_json, open_browser, code_view
+    json_file,
+    output,
+    output_auto,
+    repo,
+    gist,
+    include_json,
+    open_browser,
+    code_view,
+    exclude_deleted_files,
 ):
     """Convert a Claude Code session JSON/JSONL file or URL to HTML."""
     # Handle URL input
@@ -1713,6 +1750,7 @@ def json_cmd(
         output,
         github_repo=github_repo,
         code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
     )
 
     # Show output directory
@@ -1795,7 +1833,11 @@ def format_session_for_display(session_data):
 
 
 def generate_html_from_session_data(
-    session_data, output_dir, github_repo=None, code_view=False
+    session_data,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
 ):
     """Generate HTML from session data dict (instead of file path)."""
     output_dir = Path(output_dir)
@@ -1856,6 +1898,9 @@ def generate_html_from_session_data(
     file_operations = None
     if code_view:
         file_operations = extract_file_operations(loglines, conversations)
+        # Optionally filter out files that no longer exist on disk
+        if exclude_deleted_files and file_operations:
+            file_operations = filter_deleted_files(file_operations)
         has_code_view = len(file_operations) > 0
 
     # Collect all messages HTML for the code view transcript pane
