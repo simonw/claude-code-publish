@@ -218,6 +218,9 @@ async function init() {
     let currentEditor = null;
     let currentFilePath = null;
     let currentBlameRanges = [];
+    let isInitializing = true;  // Skip pinned message updates during initial load
+    let isScrollingToTarget = false;  // Skip pinned updates during programmatic scrolls
+    let scrollTargetTimeout = null;
 
     // Tooltip element for blame hover
     let blameTooltip = null;
@@ -621,10 +624,20 @@ async function init() {
             const messageTop = message.offsetTop;
             const targetScroll = messageTop - stickyOffset;
 
+            // Suppress pinned message updates during scroll
+            isScrollingToTarget = true;
+            if (scrollTargetTimeout) clearTimeout(scrollTargetTimeout);
+
             transcriptPanel.scrollTo({
                 top: targetScroll,
                 behavior: 'smooth'
             });
+
+            // Re-enable pinned updates after scroll completes
+            scrollTargetTimeout = setTimeout(() => {
+                isScrollingToTarget = false;
+                updatePinnedUserMessage();
+            }, 500);
         }
     }
 
@@ -802,6 +815,11 @@ async function init() {
     // Check URL hash for deep-linking (after first file loads)
     requestAnimationFrame(() => {
         navigateFromHash();
+        // Mark initialization complete after a delay to let scrolling finish
+        setTimeout(() => {
+            isInitializing = false;
+            updatePinnedUserMessage();
+        }, 500);
     });
 
     // Handle hash changes (browser back/forward)
@@ -924,6 +942,7 @@ async function init() {
 
     function updatePinnedUserMessage() {
         if (!pinnedUserMessage || !transcriptContent || !transcriptPanel) return;
+        if (isInitializing || isScrollingToTarget) return;  // Skip during scrolling to avoid repeated updates
 
         const userMessages = transcriptContent.querySelectorAll('.message.user:not(.continuation *)');
         if (userMessages.length === 0) {

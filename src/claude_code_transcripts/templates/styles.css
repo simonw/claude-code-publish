@@ -194,7 +194,9 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 #code-header { padding: 12px 16px; background: rgba(0,0,0,0.03); border-bottom: 1px solid rgba(0,0,0,0.1); }
 #current-file-path { font-family: 'JetBrains Mono', 'SF Mono', monospace; font-weight: 600; font-size: 0.9rem; word-break: break-all; }
 #code-content { flex: 1; overflow: auto; }
-.no-file-selected { padding: 32px; text-align: center; color: var(--text-muted); }
+.no-file-selected, .initial-loading { padding: 32px; text-align: center; color: var(--text-muted); }
+.initial-loading { animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 .editor-wrapper { display: flex; height: 100%; }
 .editor-container { flex: 1; overflow: auto; }
 .blame-minimap { width: 10px; background: rgba(0,0,0,0.05); position: relative; flex-shrink: 0; border-left: 1px solid rgba(0,0,0,0.1); }
