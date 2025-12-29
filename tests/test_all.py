@@ -413,3 +413,120 @@ class TestAllCommand:
         assert "project-a" not in result.output
         # Should not create any files
         assert not (output_dir / "index.html").exists()
+
+
+class TestJsonCommandWithUrl:
+    """Tests for the json command with URL support."""
+
+    def test_json_command_accepts_url(self, output_dir):
+        """Test that json command can accept a URL starting with http:// or https://."""
+        from unittest.mock import patch, MagicMock
+
+        # Sample JSONL content
+        jsonl_content = (
+            '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Hello from URL"}}\n'
+            '{"type": "assistant", "timestamp": "2025-01-01T10:00:05.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]}}\n'
+        )
+
+        # Mock the httpx.get response
+        mock_response = MagicMock()
+        mock_response.text = jsonl_content
+        mock_response.raise_for_status = MagicMock()
+
+        runner = CliRunner()
+        with patch(
+            "claude_code_transcripts.httpx.get", return_value=mock_response
+        ) as mock_get:
+            result = runner.invoke(
+                cli,
+                [
+                    "json",
+                    "https://example.com/session.jsonl",
+                    "-o",
+                    str(output_dir),
+                ],
+            )
+
+        # Check that the URL was fetched
+        mock_get.assert_called_once()
+        call_url = mock_get.call_args[0][0]
+        assert call_url == "https://example.com/session.jsonl"
+
+        # Check that HTML was generated
+        assert result.exit_code == 0
+        assert (output_dir / "index.html").exists()
+
+    def test_json_command_accepts_http_url(self, output_dir):
+        """Test that json command can accept http:// URLs."""
+        from unittest.mock import patch, MagicMock
+
+        jsonl_content = '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Hello"}}\n'
+
+        mock_response = MagicMock()
+        mock_response.text = jsonl_content
+        mock_response.raise_for_status = MagicMock()
+
+        runner = CliRunner()
+        with patch(
+            "claude_code_transcripts.httpx.get", return_value=mock_response
+        ) as mock_get:
+            result = runner.invoke(
+                cli,
+                [
+                    "json",
+                    "http://example.com/session.jsonl",
+                    "-o",
+                    str(output_dir),
+                ],
+            )
+
+        mock_get.assert_called_once()
+        assert result.exit_code == 0
+
+    def test_json_command_url_fetch_error(self, output_dir):
+        """Test that json command handles URL fetch errors gracefully."""
+        from unittest.mock import patch
+        import httpx
+
+        runner = CliRunner()
+        with patch(
+            "claude_code_transcripts.httpx.get",
+            side_effect=httpx.RequestError("Network error"),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "json",
+                    "https://example.com/session.jsonl",
+                    "-o",
+                    str(output_dir),
+                ],
+            )
+
+        assert result.exit_code != 0
+        assert "error" in result.output.lower() or "Error" in result.output
+
+    def test_json_command_still_works_with_local_file(self, output_dir):
+        """Test that json command still works with local file paths."""
+        # Create a temp JSONL file
+        jsonl_file = output_dir / "test.jsonl"
+        jsonl_file.write_text(
+            '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Hello local"}}\n'
+            '{"type": "assistant", "timestamp": "2025-01-01T10:00:05.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hi!"}]}}\n'
+        )
+
+        html_output = output_dir / "html_output"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "json",
+                str(jsonl_file),
+                "-o",
+                str(html_output),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert (html_output / "index.html").exists()
