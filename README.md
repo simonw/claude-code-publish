@@ -142,6 +142,14 @@ The code viewer (`code.html`) provides:
 
 When you provide `--repo` pointing to the local git repository that was being modified, the code viewer can show the complete file content with accurate blame attribution. Without a repo path, it shows a diff-only view of the changes.
 
+Use `--exclude-deleted-files` to filter out files that no longer exist on disk:
+
+```bash
+claude-code-transcripts --code-view --exclude-deleted-files
+```
+
+This is useful when files were deleted after the session (either manually or by commands not captured in the transcript).
+
 ### Auto-naming output directories
 
 Use `-a/--output-auto` to automatically create a subdirectory named after the session:
