@@ -110,6 +110,8 @@ Files: /var/folders/.../session-id
 
 The preview URL uses [gistpreview.github.io](https://gistpreview.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gistpreview.
 
+**Large sessions:** When using `--code-view`, large sessions may have a `code-data.json` file that exceeds GitHub's API response size limits (~1MB). In this case, the tool automatically uses a two-gist strategy: it creates a separate "data gist" for the large data file, then creates the main gist with HTML files that reference it. This happens transparently and requires no additional options.
+
 Combine with `-o` to keep a local copy:
 
 ```bash
