@@ -2238,3 +2238,131 @@ class TestDeletedFileFiltering:
             import shutil
 
             shutil.rmtree(temp_dir)
+
+
+class TestFilterDeletedFiles:
+    """Tests for filter_deleted_files function (--exclude-deleted-files flag)."""
+
+    def test_filters_files_missing_from_disk(self, tmp_path):
+        """Test that files which no longer exist on disk are filtered out."""
+        from claude_code_transcripts.code_view import filter_deleted_files
+
+        # Create a real file
+        real_file = tmp_path / "exists.py"
+        real_file.write_text("# exists\n")
+
+        # File path that doesn't exist
+        missing_file = tmp_path / "missing.py"
+
+        operations = [
+            FileOperation(
+                file_path=str(real_file),
+                operation_type="write",
+                tool_id="toolu_001",
+                timestamp="2025-12-24T10:00:00.000Z",
+                page_num=1,
+                msg_id="msg-1",
+                content="# exists\n",
+            ),
+            FileOperation(
+                file_path=str(missing_file),
+                operation_type="write",
+                tool_id="toolu_002",
+                timestamp="2025-12-24T10:00:05.000Z",
+                page_num=1,
+                msg_id="msg-2",
+                content="# missing\n",
+            ),
+        ]
+
+        filtered = filter_deleted_files(operations)
+
+        # Should only have the operation for the file that exists
+        assert len(filtered) == 1
+        assert filtered[0].file_path == str(real_file)
+
+    def test_keeps_files_that_exist(self, tmp_path):
+        """Test that files which exist on disk are kept."""
+        from claude_code_transcripts.code_view import filter_deleted_files
+
+        # Create real files
+        file1 = tmp_path / "file1.py"
+        file1.write_text("# file1\n")
+        file2 = tmp_path / "file2.py"
+        file2.write_text("# file2\n")
+
+        operations = [
+            FileOperation(
+                file_path=str(file1),
+                operation_type="write",
+                tool_id="toolu_001",
+                timestamp="2025-12-24T10:00:00.000Z",
+                page_num=1,
+                msg_id="msg-1",
+                content="# file1\n",
+            ),
+            FileOperation(
+                file_path=str(file2),
+                operation_type="write",
+                tool_id="toolu_002",
+                timestamp="2025-12-24T10:00:05.000Z",
+                page_num=1,
+                msg_id="msg-2",
+                content="# file2\n",
+            ),
+        ]
+
+        filtered = filter_deleted_files(operations)
+
+        # Should keep both files
+        assert len(filtered) == 2
+
+    def test_ignores_relative_paths(self):
+        """Test that relative paths are not checked (kept as-is)."""
+        from claude_code_transcripts.code_view import filter_deleted_files
+
+        operations = [
+            FileOperation(
+                file_path="relative/path/file.py",  # Relative path
+                operation_type="write",
+                tool_id="toolu_001",
+                timestamp="2025-12-24T10:00:00.000Z",
+                page_num=1,
+                msg_id="msg-1",
+                content="# content\n",
+            ),
+        ]
+
+        filtered = filter_deleted_files(operations)
+
+        # Relative paths should be kept (we can't check them reliably)
+        assert len(filtered) == 1
+
+    def test_keeps_delete_operations(self, tmp_path):
+        """Test that delete operations are kept regardless of file existence."""
+        from claude_code_transcripts.code_view import filter_deleted_files, OP_DELETE
+
+        missing_file = tmp_path / "deleted.py"
+
+        operations = [
+            FileOperation(
+                file_path=str(missing_file),
+                operation_type=OP_DELETE,
+                tool_id="toolu_001",
+                timestamp="2025-12-24T10:00:00.000Z",
+                page_num=1,
+                msg_id="msg-1",
+            ),
+        ]
+
+        filtered = filter_deleted_files(operations)
+
+        # Delete operations should be kept
+        assert len(filtered) == 1
+
+    def test_empty_operations(self):
+        """Test with empty operations list."""
+        from claude_code_transcripts.code_view import filter_deleted_files
+
+        filtered = filter_deleted_files([])
+        assert filtered == []
