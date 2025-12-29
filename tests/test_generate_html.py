@@ -1954,3 +1954,59 @@ class TestPageDataJson:
 
         # Should have page number embedded for fetching
         assert "window.PAGE_NUM" in page_html
+
+    def test_generates_index_data_json_for_large_sessions(self, tmp_path):
+        """Test that index-data.json is generated for large sessions."""
+        # Create a large session
+        loglines = []
+        for i in range(50):
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": f"2025-01-01T{i:02d}:00:00.000Z",
+                    "message": {"role": "user", "content": f"Task {i}: " + "x" * 5000},
+                }
+            )
+            loglines.append(
+                {
+                    "type": "assistant",
+                    "timestamp": f"2025-01-01T{i:02d}:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response " + "y" * 5000}],
+                    },
+                }
+            )
+
+        session_file = tmp_path / "large_session.json"
+        session_file.write_text(json.dumps({"loglines": loglines}), encoding="utf-8")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(session_file, output_dir)
+
+        # Should generate index-data.json for large sessions
+        index_data_file = output_dir / "index-data.json"
+        assert index_data_file.exists(), "index-data.json should exist"
+
+        # The file contains the HTML string directly
+        index_data = json.loads(index_data_file.read_text(encoding="utf-8"))
+        assert "<div" in index_data, "index-data.json should contain HTML"
+
+        # index.html should have the loader script
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+        assert (
+            "index-data.json" in index_html
+        ), "index.html should reference index-data.json"
+
+    def test_no_index_data_json_for_small_sessions(self, output_dir):
+        """Test that index-data.json is NOT generated for small sessions."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir)
+
+        # Small sessions should not have index-data.json
+        index_data_file = output_dir / "index-data.json"
+        assert (
+            not index_data_file.exists()
+        ), "index-data.json should not exist for small sessions"

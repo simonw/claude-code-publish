@@ -1168,12 +1168,26 @@ def inject_gist_preview_js(output_dir, data_gist_id=None):
                 )
                 content = content.replace("<head>", f"<head>\n{data_gist_script}")
 
-        # For index.html, inject data gist ID for search to use
-        if html_file.name == "index.html" and data_gist_id:
-            data_gist_script = (
-                f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
-            )
-            content = content.replace("<head>", f"<head>\n{data_gist_script}")
+        # For index.html, strip inline content if index-data.json exists
+        if html_file.name == "index.html":
+            import re
+
+            index_data_file = output_dir / "index-data.json"
+            if index_data_file.exists():
+                # Remove inline index items content (gist version fetches from JSON)
+                # Keep the container div but empty it
+                content = re.sub(
+                    r'(<div id="index-items">).*?(</div>\s*<nav class="pagination">)',
+                    r"\1\2",
+                    content,
+                    flags=re.DOTALL,
+                )
+
+            if data_gist_id:
+                data_gist_script = (
+                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
+                )
+                content = content.replace("<head>", f"<head>\n{data_gist_script}")
 
         # For page-*.html, strip inline content if corresponding JSON exists
         if html_file.name.startswith("page-") and html_file.name.endswith(".html"):
@@ -1219,11 +1233,12 @@ PAGE_DATA_SIZE_THRESHOLD = 500 * 1024
 # Note: page-data-*.json files are added dynamically based on what exists
 DATA_FILES = ["code-data.json"]
 
-# Maximum size per gist batch (900KB to be safe under GitHub's ~1MB limit)
-GIST_BATCH_SIZE = 900 * 1024
+# Maximum size per gist batch (10MB - GitHub gists can be up to 100MB total)
+# When adding files to existing gists with gh gist edit --add, we can use larger batches
+GIST_BATCH_SIZE = 10 * 1024 * 1024
 
-# Maximum files per gist batch (GitHub can struggle with too many files)
-GIST_BATCH_MAX_FILES = 50
+# Maximum files per gist batch
+GIST_BATCH_MAX_FILES = 100
 
 
 def _batch_files_for_gist(files):
@@ -1370,10 +1385,14 @@ def create_gist(output_dir, public=False, description=None):
         if data_path.exists():
             data_files.append(data_path)
             data_total_size += data_path.stat().st_size
-    # Also collect page-data-*.json files (generated for large sessions)
+    # Also collect page-data-*.json and index-data.json files (generated for large sessions)
     for page_data_file in sorted(output_dir.glob("page-data-*.json")):
         data_files.append(page_data_file)
         data_total_size += page_data_file.stat().st_size
+    index_data_file = output_dir / "index-data.json"
+    if index_data_file.exists():
+        data_files.append(index_data_file)
+        data_total_size += index_data_file.stat().st_size
 
     # Decide whether to use two-gist strategy
     if data_total_size > GIST_SIZE_THRESHOLD and data_files:
@@ -1664,6 +1683,12 @@ def generate_html(
     # Sort by timestamp
     timeline_items.sort(key=lambda x: x[0])
     index_items = [item[2] for item in timeline_items]
+    index_items_html = "".join(index_items)
+
+    # Write index-data.json for gist lazy loading if session is large
+    if use_page_data_json:
+        index_data_file = output_dir / "index-data.json"
+        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
 
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
@@ -1674,9 +1699,10 @@ def generate_html(
         total_tool_calls=total_tool_calls,
         total_commits=total_commits,
         total_pages=total_pages,
-        index_items_html="".join(index_items),
+        index_items_html=index_items_html,
         has_code_view=has_code_view,
         active_tab="transcript",
+        use_index_data_json=use_page_data_json,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
@@ -2230,6 +2256,12 @@ def generate_html_from_session_data(
     # Sort by timestamp
     timeline_items.sort(key=lambda x: x[0])
     index_items = [item[2] for item in timeline_items]
+    index_items_html = "".join(index_items)
+
+    # Write index-data.json for gist lazy loading if session is large
+    if use_page_data_json:
+        index_data_file = output_dir / "index-data.json"
+        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
 
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
@@ -2240,9 +2272,10 @@ def generate_html_from_session_data(
         total_tool_calls=total_tool_calls,
         total_commits=total_commits,
         total_pages=total_pages,
-        index_items_html="".join(index_items),
+        index_items_html=index_items_html,
         has_code_view=has_code_view,
         active_tab="transcript",
+        use_index_data_json=use_page_data_json,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")

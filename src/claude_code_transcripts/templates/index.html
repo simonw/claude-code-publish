@@ -6,7 +6,54 @@
         <div class="transcript-wrapper">
             {{ pagination_html|safe }}
             <p style="color: var(--text-muted); margin-bottom: 24px;">{{ prompt_num }} prompts · {{ total_messages }} messages · {{ total_tool_calls }} tool calls · {{ total_commits }} commits · {{ total_pages }} pages</p>
-            {{ index_items_html|safe }}
+            <div id="index-items">
+                {{ index_items_html|safe }}
+            </div>
             {{ pagination_html|safe }}
         </div>
+{%- if use_index_data_json %}
+        <script>
+        // Load index content from index-data.json on gistpreview
+        (function() {
+            function getGistDataUrl() {
+                // Check if we're on gistpreview.github.io
+                if (window.location.hostname !== 'gistpreview.github.io') return null;
+
+                // Get gist ID from URL query string
+                var query = window.location.search.substring(1);
+                var parts = query.split('/');
+                var mainGistId = parts[0];
+
+                // Use DATA_GIST_ID if available, otherwise use main gist
+                var dataGistId = window.DATA_GIST_ID || mainGistId;
+                return 'https://gist.githubusercontent.com/raw/' + dataGistId + '/index-data.json';
+            }
+
+            var dataUrl = getGistDataUrl();
+            if (dataUrl) {
+                // We're on gistpreview - fetch index data
+                var container = document.getElementById('index-items');
+
+                fetch(dataUrl)
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('Failed to fetch');
+                        return response.json();
+                    })
+                    .then(function(html) {
+                        // The JSON file contains the HTML string directly
+                        container.innerHTML = html;
+                        // Handle fragment navigation after content loads
+                        if (window.location.hash) {
+                            var el = document.querySelector(window.location.hash);
+                            if (el) el.scrollIntoView();
+                        }
+                    })
+                    .catch(function(err) {
+                        console.error('Failed to load index data:', err);
+                        // Content is already in HTML as fallback
+                    });
+            }
+        })();
+        </script>
+{%- endif %}
 {%- endblock %}
