@@ -1208,8 +1208,9 @@ def create_gist(output_dir, public=False):
     cmd = ["gh", "gist", "create"]
     cmd.extend(str(f) for f in sorted(html_files))
 
-    # Include supporting files for gist
-    for extra_file in ["code-data.json", "styles.css", "main.js"]:
+    # Include supporting files for gist (excluding large data files that
+    # would cause GitHub API truncation and break gistpreview)
+    for extra_file in ["styles.css", "main.js"]:
         extra_path = output_dir / extra_file
         if extra_path.exists():
             cmd.append(str(extra_path))
