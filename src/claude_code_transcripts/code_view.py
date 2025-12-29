@@ -583,12 +583,22 @@ def build_file_history_repo(
 
             if full_path.exists():
                 content = full_path.read_text()
+                old_str = op.old_string or ""
+
+                # If old_string doesn't match, try to resync from original_content
+                # This handles remote sessions where we can't access the actual repo
+                if old_str and old_str not in content and op.original_content:
+                    if old_str in op.original_content:
+                        # Resync from original_content before applying this edit
+                        content = op.original_content
+                        full_path.write_text(content)
+                        repo.index.add([rel_path])
+                        repo.index.commit("{}")  # Sync commit
+
                 if op.replace_all:
-                    content = content.replace(op.old_string or "", op.new_string or "")
+                    content = content.replace(old_str, op.new_string or "")
                 else:
-                    content = content.replace(
-                        op.old_string or "", op.new_string or "", 1
-                    )
+                    content = content.replace(old_str, op.new_string or "", 1)
                 full_path.write_text(content)
             else:
                 # Can't apply edit - file doesn't exist

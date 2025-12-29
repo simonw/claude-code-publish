@@ -775,6 +775,66 @@ class TestGitBlameAttribution:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_resyncs_from_original_content_when_edit_fails_to_match(self):
+        """Test that edits resync from original_content when old_string doesn't match."""
+        from claude_code_transcripts import (
+            build_file_history_repo,
+            get_file_content_from_repo,
+            FileOperation,
+        )
+        import shutil
+
+        # First write creates file with content A
+        write_op = FileOperation(
+            file_path="/project/test.py",
+            operation_type="write",
+            tool_id="toolu_001",
+            timestamp="2025-12-24T10:00:00.000Z",
+            page_num=1,
+            msg_id="msg-001",
+            content="line1\nMARKER\nline3\n",
+        )
+
+        # Edit that expects different content (simulates divergence)
+        # old_string="MARKER" won't match if our reconstruction has "WRONG"
+        # But original_content shows the real state had "MARKER"
+        edit_op = FileOperation(
+            file_path="/project/test.py",
+            operation_type="edit",
+            tool_id="toolu_002",
+            timestamp="2025-12-24T10:01:00.000Z",
+            page_num=1,
+            msg_id="msg-002",
+            old_string="MARKER",
+            new_string="REPLACED",
+            original_content="line1\nMARKER\nline3\n",  # Real state before edit
+        )
+
+        # Simulate a scenario where our reconstruction diverged
+        # by using a write that puts wrong content, then the edit should resync
+        wrong_write = FileOperation(
+            file_path="/project/test.py",
+            operation_type="write",
+            tool_id="toolu_000",
+            timestamp="2025-12-24T09:59:00.000Z",  # Earlier than other ops
+            page_num=1,
+            msg_id="msg-000",
+            content="line1\nWRONG\nline3\n",  # Wrong content - MARKER not present
+        )
+
+        # Apply: wrong_write, then edit_op (which should resync from original_content)
+        repo, temp_dir, path_mapping = build_file_history_repo([wrong_write, edit_op])
+        try:
+            rel_path = path_mapping[edit_op.file_path]
+            content = get_file_content_from_repo(repo, rel_path)
+
+            # The edit should have resynced and replaced MARKER with REPLACED
+            assert "REPLACED" in content
+            assert "MARKER" not in content
+            assert "WRONG" not in content  # The wrong content should be gone
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 class TestGenerateCodeViewHtml:
     """Tests for generate_code_view_html function."""
