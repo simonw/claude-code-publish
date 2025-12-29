@@ -2,3 +2,4 @@
 __pycache__
 uv.lock
 .playwright-mcp/
+tests/.fixture_cache/
