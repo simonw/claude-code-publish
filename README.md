@@ -87,7 +87,41 @@ claude-code-transcripts web SESSION_ID
 claude-code-transcripts web SESSION_ID --gist
 ```
 
-On macOS, API credentials are automatically retrieved from your keychain (requires being logged into Claude Code). On other platforms, provide `--token` and `--org-uuid` manually.
+#### API Credentials
+
+**Automatic retrieval:**
+API credentials are automatically retrieved from your system keyring if you've logged into Claude Code CLI. The tool works on:
+- **macOS**: Uses macOS Keychain
+- **Linux**: Uses system keyring (GNOME Keyring, KWallet, etc.)
+- **Windows**: Uses Windows Credential Manager
+
+To set up automatic credentials:
+1. Install and run Claude Code CLI: https://claude.ai/code
+2. Log in when prompted
+3. Your credentials will be stored automatically
+
+**Manual credentials:**
+If automatic retrieval doesn't work, you can provide credentials manually:
+
+```bash
+claude-code-transcripts web --token YOUR_TOKEN --org-uuid YOUR_ORG_UUID
+```
+
+To get your credentials manually:
+
+1. **Get your access token:**
+   - Open your browser's developer tools (F12)
+   - Go to https://claude.ai
+   - Navigate to Application > Local Storage > https://claude.ai
+   - Copy the `sessionKey` value
+
+2. **Get your organization UUID:**
+   - In the same developer tools, go to the Network tab
+   - Refresh the page and look for requests to `api.claude.ai`
+   - Check the request headers for `x-organization-uuid`
+   - Or find it in `~/.claude.json` if you've used Claude Code before
+
+If you encounter issues retrieving credentials, the tool will provide detailed instructions on how to obtain them.
 
 ### Publishing to GitHub Gist
 

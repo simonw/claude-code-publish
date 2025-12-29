@@ -16,6 +16,7 @@ import click
 from click_default_group import DefaultGroup
 import httpx
 from jinja2 import Environment, PackageLoader
+import keyring
 import markdown
 import questionary
 
@@ -536,6 +537,28 @@ def get_access_token_from_keychain():
         return creds.get("claudeAiOauth", {}).get("accessToken")
     except (json.JSONDecodeError, subprocess.SubprocessError):
         return None
+
+
+def get_access_token_from_system_keyring():
+    """Get access token from system keyring (works on Linux, Windows, macOS).
+
+    Uses the keyring library to access system credential storage.
+    Returns the access token or None if not found.
+    """
+    try:
+        # Try to get credentials from system keyring
+        # Claude Code stores credentials with service name "Claude Code-credentials"
+        username = os.environ.get("USER", os.environ.get("USERNAME", ""))
+        creds_json = keyring.get_password("Claude Code-credentials", username)
+
+        if creds_json:
+            creds = json.loads(creds_json)
+            return creds.get("claudeAiOauth", {}).get("accessToken")
+    except Exception:
+        # If keyring access fails, return None
+        pass
+
+    return None
 
 
 def get_org_uuid_from_config():
@@ -1536,28 +1559,76 @@ def resolve_credentials(token, org_uuid):
     """
     # Get token
     if token is None:
+        # Try macOS keychain first
         token = get_access_token_from_keychain()
+
+        # If not on macOS or keychain failed, try system keyring
         if token is None:
-            if platform.system() == "Darwin":
-                raise click.ClickException(
-                    "Could not retrieve access token from macOS keychain. "
-                    "Make sure you are logged into Claude Code, or provide --token."
-                )
-            else:
-                raise click.ClickException(
-                    "On non-macOS platforms, you must provide --token with your access token."
-                )
+            token = get_access_token_from_system_keyring()
+
+        if token is None:
+            error_msg = _build_token_error_message()
+            raise click.ClickException(error_msg)
 
     # Get org UUID
     if org_uuid is None:
         org_uuid = get_org_uuid_from_config()
         if org_uuid is None:
-            raise click.ClickException(
-                "Could not find organization UUID in ~/.claude.json. "
-                "Provide --org-uuid with your organization UUID."
-            )
+            error_msg = _build_org_uuid_error_message()
+            raise click.ClickException(error_msg)
 
     return token, org_uuid
+
+
+def _build_token_error_message():
+    """Build a helpful error message for missing access token."""
+    system = platform.system()
+
+    if system == "Darwin":
+        return (
+            "Could not retrieve access token from macOS keychain.\n\n"
+            "Please ensure you are logged into Claude Code, or provide --token manually.\n\n"
+            "To get your access token:\n"
+            "1. Log into Claude Code (run 'claude' in your terminal)\n"
+            "2. The token will be automatically stored in your keychain\n\n"
+            "Alternatively, provide --token with your access token from https://claude.ai"
+        )
+    else:
+        return (
+            "Could not retrieve access token from system keyring.\n\n"
+            "To get your access token, you have two options:\n\n"
+            "Option 1: Log into Claude Code CLI\n"
+            "  1. Run 'claude' in your terminal\n"
+            "  2. Complete the login process\n"
+            "  3. Your credentials will be stored in your system keyring\n"
+            "  4. Re-run this command\n\n"
+            "Option 2: Get token from Claude web interface\n"
+            "  1. Open your browser's developer tools (F12)\n"
+            "  2. Go to https://claude.ai\n"
+            "  3. Look in Application > Local Storage > https://claude.ai\n"
+            "  4. Find the 'sessionKey' value\n"
+            "  5. Use it with: claude-code-transcripts web --token 'YOUR_TOKEN' --org-uuid 'YOUR_ORG_UUID'\n\n"
+            "Note: Your org-uuid may already be in ~/.claude.json if you've used Claude Code before."
+        )
+
+
+def _build_org_uuid_error_message():
+    """Build a helpful error message for missing organization UUID."""
+    return (
+        "Could not find organization UUID in ~/.claude.json.\n\n"
+        "To get your organization UUID:\n\n"
+        "Option 1: Use Claude Code CLI\n"
+        "  1. Run 'claude' in your terminal and log in\n"
+        "  2. Your org UUID will be automatically saved to ~/.claude.json\n"
+        "  3. Re-run this command\n\n"
+        "Option 2: Get it from Claude web interface\n"
+        "  1. Open your browser's developer tools (F12)\n"
+        "  2. Go to https://claude.ai\n"
+        "  3. Look in the Network tab for API requests\n"
+        "  4. Find requests to api.claude.ai and check the 'x-organization-uuid' header\n"
+        "  5. Use it with: claude-code-transcripts web --token 'YOUR_TOKEN' --org-uuid 'YOUR_ORG_UUID'\n\n"
+        "Alternatively, provide --org-uuid manually."
+    )
 
 
 def format_session_for_display(session_data):
