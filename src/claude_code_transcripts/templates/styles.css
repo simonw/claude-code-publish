@@ -206,6 +206,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .tooltip-assistant-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--assistant-border); margin-bottom: 6px; }
 .tooltip-assistant p { margin: 4px 0; font-size: 0.9rem; }
 .blame-tooltip .tooltip-assistant { max-height: 200px; overflow: hidden; }
+.blame-tooltip .thinking { max-height: 200px; overflow: hidden; margin: 8px 16px 12px 16px; }
 
 /* File Tree */
 .file-tree { list-style: none; padding: 0; margin: 0; }

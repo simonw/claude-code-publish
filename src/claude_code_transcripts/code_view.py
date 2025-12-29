@@ -1160,28 +1160,53 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
             content = message_data.get("content", [])
 
             if log_type == "assistant" and isinstance(content, list):
-                # Extract text blocks from assistant message
+                # Extract text and thinking blocks from assistant message
                 text_parts = []
+                thinking_parts = []
                 has_tool_use = False
                 for block in content:
                     if isinstance(block, dict):
                         if block.get("type") == "text":
                             text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "thinking":
+                            thinking_parts.append(block.get("thinking", ""))
                         elif block.get("type") == "tool_use":
                             has_tool_use = True
 
                 if text_parts:
                     last_assistant_text = "\n".join(text_parts)
+                if thinking_parts:
+                    last_thinking_text = "\n".join(thinking_parts)
+                else:
+                    last_thinking_text = ""
 
                 # For messages with tool_use, build tooltip with assistant context
-                if has_tool_use and last_assistant_text:
-                    rendered_assistant = render_markdown_text(last_assistant_text)
-                    # Truncate long assistant text
-                    if len(last_assistant_text) > 500:
-                        truncated = last_assistant_text[:500] + "..."
-                        rendered_assistant = render_markdown_text(truncated)
+                if has_tool_use and (last_assistant_text or last_thinking_text):
+                    context_html = ""
 
-                    item_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div><div class="tooltip-assistant"><div class="tooltip-assistant-label">Assistant context:</div>{rendered_assistant}</div></div>"""
+                    # Add assistant text if present
+                    if last_assistant_text:
+                        # Truncate long assistant text
+                        if len(last_assistant_text) > 500:
+                            truncated = last_assistant_text[:500] + "..."
+                            rendered_assistant = render_markdown_text(truncated)
+                        else:
+                            rendered_assistant = render_markdown_text(
+                                last_assistant_text
+                            )
+                        context_html += f"""<div class="tooltip-assistant"><div class="tooltip-assistant-label">Assistant context:</div>{rendered_assistant}</div>"""
+
+                    # Add thinking if present
+                    if last_thinking_text:
+                        # Truncate long thinking text
+                        if len(last_thinking_text) > 500:
+                            truncated = last_thinking_text[:500] + "..."
+                            rendered_thinking = render_markdown_text(truncated)
+                        else:
+                            rendered_thinking = render_markdown_text(last_thinking_text)
+                        context_html += f"""<div class="thinking"><div class="thinking-label">Thinking</div>{rendered_thinking}</div>"""
+
+                    item_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div>{context_html}</div>"""
                     msg_to_user_html[msg_id] = item_html
                 else:
                     msg_to_user_html[msg_id] = user_html
