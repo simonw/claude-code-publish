@@ -1171,6 +1171,96 @@ class TestBuildMsgToUserHtml:
         text_pos = html.find("TEXT_FROM_SECOND_MESSAGE")
         assert thinking_pos < text_pos, "Thinking should come before text"
 
+    def test_only_keeps_most_recent_of_each_block_type(self):
+        """Test that only the most recent thinking and text blocks are shown."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-01-01T10:00:00Z",
+                    ),
+                    # First thinking block
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "thinking", "thinking": "OLD_THINKING"},
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:01Z",
+                    ),
+                    # First text block
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "text", "text": "OLD_TEXT"},
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:02Z",
+                    ),
+                    # Second (newer) thinking block
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "thinking", "thinking": "NEW_THINKING"},
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:03Z",
+                    ),
+                    # Second (newer) text block + tool_use
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "text", "text": "NEW_TEXT"},
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result = build_msg_to_user_html(conversations)
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Only the NEW (most recent) blocks should be present
+        assert "NEW_THINKING" in html, "New thinking not found"
+        assert "NEW_TEXT" in html, "New text not found"
+
+        # The OLD blocks should NOT be present
+        assert "OLD_THINKING" not in html, "Old thinking should not be present"
+        assert "OLD_TEXT" not in html, "Old text should not be present"
+
     def test_truncates_long_text(self):
         """Test that long assistant text is truncated."""
         from claude_code_transcripts import build_msg_to_user_html

@@ -1145,8 +1145,11 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
         # Build base HTML with user prompt
         user_html = f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div></div>"""
 
-        # Track the most recent assistant context blocks (preserves order)
-        last_context_blocks = []
+        # Track most recent thinking and text blocks with order for sequencing
+        # Each is (content, order) tuple or None
+        last_thinking = None
+        last_text = None
+        block_order = 0
 
         for log_type, message_json, timestamp in all_messages:
             msg_id = make_msg_id(timestamp)
@@ -1160,33 +1163,36 @@ def build_msg_to_user_html(conversations: List[Dict]) -> Dict[str, str]:
             content = message_data.get("content", [])
 
             if log_type == "assistant" and isinstance(content, list):
-                # Extract text and thinking blocks from assistant message
-                # Preserve order: store as list of (type, content) tuples
-                context_blocks = []
                 has_tool_use = False
                 for block in content:
                     if isinstance(block, dict):
                         if block.get("type") == "text":
                             text = block.get("text", "")
                             if text:
-                                context_blocks.append(("text", text))
+                                last_text = (text, block_order)
+                                block_order += 1
                         elif block.get("type") == "thinking":
                             thinking = block.get("thinking", "")
                             if thinking:
-                                context_blocks.append(("thinking", thinking))
+                                last_thinking = (thinking, block_order)
+                                block_order += 1
                         elif block.get("type") == "tool_use":
                             has_tool_use = True
 
-                # Accumulate context blocks across messages
-                # (thinking may come in separate message before text)
-                if context_blocks:
-                    last_context_blocks.extend(context_blocks)
-
                 # For messages with tool_use, build tooltip with context in original order
-                if has_tool_use and last_context_blocks:
-                    context_html = ""
+                if has_tool_use and (last_thinking or last_text):
+                    # Collect blocks and sort by order
+                    blocks_to_render = []
+                    if last_thinking:
+                        blocks_to_render.append(
+                            ("thinking", last_thinking[0], last_thinking[1])
+                        )
+                    if last_text:
+                        blocks_to_render.append(("text", last_text[0], last_text[1]))
+                    blocks_to_render.sort(key=lambda x: x[2])
 
-                    for block_type, block_content in last_context_blocks:
+                    context_html = ""
+                    for block_type, block_content, _ in blocks_to_render:
                         # Truncate long content
                         if len(block_content) > 500:
                             block_content = block_content[:500] + "..."
