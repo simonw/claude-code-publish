@@ -1088,7 +1088,7 @@ def generate_code_view_html(
         total_pages: Total number of transcript pages (for search feature).
     """
     # Import here to avoid circular imports
-    from claude_code_transcripts import CSS, JS, get_template
+    from claude_code_transcripts import get_template
 
     if not operations:
         return
@@ -1203,8 +1203,6 @@ def generate_code_view_html(
 
         # Render page
         page_content = code_view_template.render(
-            css=CSS,
-            js=JS,
             file_tree_html=file_tree_html,
             code_view_js=code_view_js,
             inline_data_script=inline_data_script,

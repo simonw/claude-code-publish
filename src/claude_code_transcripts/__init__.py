@@ -542,8 +542,6 @@ def _generate_project_index(project, output_dir):
         project_name=project["name"],
         sessions=sessions_data,
         session_count=len(sessions_data),
-        css=CSS,
-        js=JS,
     )
 
     output_path = output_dir / "index.html"
@@ -581,8 +579,6 @@ def _generate_master_index(projects, output_dir):
         projects=projects_data,
         total_projects=len(projects),
         total_sessions=total_sessions,
-        css=CSS,
-        js=JS,
     )
 
     output_path = output_dir / "index.html"
@@ -1026,57 +1022,6 @@ def render_message(log_type, message_json, timestamp):
     return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
 
 
-# Load CSS from template file
-CSS = get_template("styles.css").render()
-
-JS = """
-function formatTimestamp(date) {
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const isYesterday = date.toDateString() === yesterday.toDateString();
-    const isThisYear = date.getFullYear() === now.getFullYear();
-
-    const timeStr = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-
-    if (isToday) {
-        return timeStr;
-    } else if (isYesterday) {
-        return 'Yesterday ' + timeStr;
-    } else if (isThisYear) {
-        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + timeStr;
-    } else {
-        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + timeStr;
-    }
-}
-document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
-    const timestamp = el.getAttribute('data-timestamp');
-    const date = new Date(timestamp);
-    el.textContent = formatTimestamp(date);
-    el.title = date.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'long' });
-});
-document.querySelectorAll('pre.json').forEach(function(el) {
-    let text = el.textContent;
-    text = text.replace(/"([^"]+)":/g, '<span style="color: #ce93d8">"$1"</span>:');
-    text = text.replace(/: "([^"]*)"/g, ': <span style="color: #81d4fa">"$1"</span>');
-    text = text.replace(/: (\\d+)/g, ': <span style="color: #ffcc80">$1</span>');
-    text = text.replace(/: (true|false|null)/g, ': <span style="color: #f48fb1">$1</span>');
-    el.innerHTML = text;
-});
-document.querySelectorAll('.truncatable').forEach(function(wrapper) {
-    const content = wrapper.querySelector('.truncatable-content');
-    const btn = wrapper.querySelector('.expand-btn');
-    if (content.scrollHeight > 250) {
-        wrapper.classList.add('truncated');
-        btn.addEventListener('click', function() {
-            if (wrapper.classList.contains('truncated')) { wrapper.classList.remove('truncated'); wrapper.classList.add('expanded'); btn.textContent = 'Show less'; }
-            else { wrapper.classList.remove('expanded'); wrapper.classList.add('truncated'); btn.textContent = 'Show more'; }
-        });
-    }
-});
-"""
-
 # JavaScript to fix relative URLs when served via gistpreview.github.io
 GIST_PREVIEW_JS = r"""
 (function() {
@@ -1085,33 +1030,6 @@ GIST_PREVIEW_JS = r"""
     var match = window.location.search.match(/^\?([^/]+)/);
     if (!match) return;
     var gistId = match[1];
-
-    // Load external CSS from raw gist URL
-    // (gistpreview injects via innerHTML, so <link> tags don't load)
-    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(link) {
-        var href = link.getAttribute('href');
-        if (href && !href.startsWith('http')) {
-            var rawUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + href;
-            fetch(rawUrl).then(function(r) { return r.text(); }).then(function(css) {
-                var style = document.createElement('style');
-                style.textContent = css;
-                document.head.appendChild(style);
-            });
-        }
-    });
-
-    // Load external JS from raw gist URL
-    document.querySelectorAll('script[src]').forEach(function(script) {
-        var src = script.getAttribute('src');
-        if (src && !src.startsWith('http')) {
-            var rawUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + src;
-            fetch(rawUrl).then(function(r) { return r.text(); }).then(function(js) {
-                var newScript = document.createElement('script');
-                newScript.textContent = js;
-                document.body.appendChild(newScript);
-            });
-        }
-    });
 
     // Fix relative links for navigation
     document.querySelectorAll('a[href]').forEach(function(link) {
@@ -1275,12 +1193,8 @@ def create_gist(output_dir, public=False):
     if not html_files:
         raise click.ClickException("No HTML files found to upload to gist.")
 
-    # Collect main files (HTML, CSS, JS)
+    # Collect main files (HTML only, CSS/JS are now inlined)
     main_files = sorted(html_files)
-    for extra_file in ["styles.css", "main.js"]:
-        extra_path = output_dir / extra_file
-        if extra_path.exists():
-            main_files.append(extra_path)
 
     # Collect data files and check their total size
     data_files = []
@@ -1420,8 +1334,6 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
         page_content = page_template.render(
-            css=CSS,
-            js=JS,
             page_num=page_num,
             total_pages=total_pages,
             pagination_html=pagination_html,
@@ -1506,8 +1418,6 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
         pagination_html=index_pagination,
         prompt_num=prompt_num,
         total_messages=total_messages,
@@ -1523,10 +1433,6 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
     print(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
-
-    # Write external CSS and JS files (reduces HTML size for gist compatibility)
-    (output_dir / "styles.css").write_text(CSS, encoding="utf-8")
-    (output_dir / "main.js").write_text(JS, encoding="utf-8")
 
     # Generate code view if requested
     if has_code_view:
@@ -1932,8 +1838,6 @@ def generate_html_from_session_data(
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
         page_content = page_template.render(
-            css=CSS,
-            js=JS,
             page_num=page_num,
             total_pages=total_pages,
             pagination_html=pagination_html,
@@ -2018,8 +1922,6 @@ def generate_html_from_session_data(
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
         pagination_html=index_pagination,
         prompt_num=prompt_num,
         total_messages=total_messages,
@@ -2035,10 +1937,6 @@ def generate_html_from_session_data(
     click.echo(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
-
-    # Write external CSS and JS files (reduces HTML size for gist compatibility)
-    (output_dir / "styles.css").write_text(CSS, encoding="utf-8")
-    (output_dir / "main.js").write_text(JS, encoding="utf-8")
 
     # Generate code view if requested
     if has_code_view:

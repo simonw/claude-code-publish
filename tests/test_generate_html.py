@@ -1536,13 +1536,11 @@ class TestTwoGistStrategy:
 
         # Create small test HTML files (under 1MB total)
         (output_dir / "index.html").write_text(
-            "<html><body>Index</body></html>", encoding="utf-8"
+            "<html><head></head><body>Index</body></html>", encoding="utf-8"
         )
         (output_dir / "page-001.html").write_text(
-            "<html><body>Page</body></html>", encoding="utf-8"
+            "<html><head></head><body>Page</body></html>", encoding="utf-8"
         )
-        (output_dir / "styles.css").write_text("body { margin: 0; }", encoding="utf-8")
-        (output_dir / "main.js").write_text("console.log('hi');", encoding="utf-8")
 
         # Track subprocess calls
         subprocess_calls = []
@@ -1733,26 +1731,26 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # CSS is now in external file
-        css_content = (output_dir / "styles.css").read_text(encoding="utf-8")
+        # CSS is inlined in HTML
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # CSS should style the search box
-        assert "#search-box" in css_content or ".search-box" in css_content
+        assert "#search-box" in index_html or ".search-box" in index_html
         # CSS should style the search modal
-        assert "#search-modal" in css_content or ".search-modal" in css_content
+        assert "#search-modal" in index_html or ".search-modal" in index_html
 
     def test_search_box_hidden_by_default_in_css(self, output_dir):
         """Test that search box is hidden by default (for progressive enhancement)."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # CSS is now in external file
-        css_content = (output_dir / "styles.css").read_text(encoding="utf-8")
+        # CSS is inlined in HTML
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Search box should be hidden by default in CSS
         # JavaScript will show it when loaded
-        assert "#search-box" in css_content
-        assert "display: none" in css_content
+        assert "#search-box" in index_html
+        assert "display: none" in index_html
 
     def test_search_total_pages_available(self, output_dir):
         """Test that total_pages is available to JavaScript for fetching."""
