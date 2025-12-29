@@ -1164,10 +1164,15 @@ GIST_PREVIEW_JS = r"""
 """
 
 
-def inject_gist_preview_js(output_dir):
+def inject_gist_preview_js(output_dir, data_gist_id=None):
     """Inject gist preview JavaScript into all HTML files in the output directory.
 
     Also removes inline CODE_DATA from code.html since gist version fetches it separately.
+
+    Args:
+        output_dir: Path to the output directory containing HTML files.
+        data_gist_id: Optional gist ID for a separate data gist. If provided,
+            code.html will fetch data from this gist instead of the main gist.
     """
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
@@ -1185,6 +1190,13 @@ def inject_gist_preview_js(output_dir):
                 flags=re.DOTALL,
             )
 
+            # If using separate data gist, inject the data gist ID
+            if data_gist_id:
+                data_gist_script = (
+                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
+                )
+                content = content.replace("<head>", f"<head>\n{data_gist_script}")
+
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
@@ -1193,27 +1205,29 @@ def inject_gist_preview_js(output_dir):
             html_file.write_text(content, encoding="utf-8")
 
 
-def create_gist(output_dir, public=False):
-    """Create a GitHub gist from the HTML files in output_dir.
+# Size threshold for using two-gist strategy (1MB)
+# GitHub API truncates gist content at ~1MB total response size
+GIST_SIZE_THRESHOLD = 1024 * 1024
 
-    Returns the gist ID on success, or raises click.ClickException on failure.
+# Data files that can be split into a separate gist
+DATA_FILES = ["code-data.json"]
+
+
+def _create_single_gist(files, public=False):
+    """Create a single gist from the given files.
+
+    Args:
+        files: List of file paths to include in the gist.
+        public: Whether to create a public gist.
+
+    Returns:
+        Tuple of (gist_id, gist_url).
+
+    Raises:
+        click.ClickException on failure.
     """
-    output_dir = Path(output_dir)
-    html_files = list(output_dir.glob("*.html"))
-    if not html_files:
-        raise click.ClickException("No HTML files found to upload to gist.")
-
-    # Build the gh gist create command
-    # gh gist create file1 file2 ... --public/--private
     cmd = ["gh", "gist", "create"]
-    cmd.extend(str(f) for f in sorted(html_files))
-
-    # Include supporting files for gist (excluding large data files that
-    # would cause GitHub API truncation and break gistpreview)
-    for extra_file in ["styles.css", "main.js"]:
-        extra_path = output_dir / extra_file
-        if extra_path.exists():
-            cmd.append(str(extra_path))
+    cmd.extend(str(f) for f in files)
     if public:
         cmd.append("--public")
 
@@ -1236,6 +1250,64 @@ def create_gist(output_dir, public=False):
         raise click.ClickException(
             "gh CLI not found. Install it from https://cli.github.com/ and run 'gh auth login'."
         )
+
+
+def create_gist(output_dir, public=False):
+    """Create a GitHub gist from the HTML files in output_dir.
+
+    Uses a two-gist strategy when data files exceed the size threshold:
+    1. Creates a data gist with large data files (code-data.json)
+    2. Injects data gist ID and gist preview JS into HTML files
+    3. Creates the main gist with HTML/CSS/JS files
+
+    For small files (single-gist strategy):
+    1. Injects gist preview JS into HTML files
+    2. Creates a single gist with all files
+
+    Returns (gist_id, gist_url) tuple.
+    Raises click.ClickException on failure.
+
+    Note: This function calls inject_gist_preview_js internally. Caller should NOT
+    call it separately.
+    """
+    output_dir = Path(output_dir)
+    html_files = list(output_dir.glob("*.html"))
+    if not html_files:
+        raise click.ClickException("No HTML files found to upload to gist.")
+
+    # Collect main files (HTML, CSS, JS)
+    main_files = sorted(html_files)
+    for extra_file in ["styles.css", "main.js"]:
+        extra_path = output_dir / extra_file
+        if extra_path.exists():
+            main_files.append(extra_path)
+
+    # Collect data files and check their total size
+    data_files = []
+    data_total_size = 0
+    for data_file in DATA_FILES:
+        data_path = output_dir / data_file
+        if data_path.exists():
+            data_files.append(data_path)
+            data_total_size += data_path.stat().st_size
+
+    # Decide whether to use two-gist strategy
+    if data_total_size > GIST_SIZE_THRESHOLD and data_files:
+        # Two-gist strategy: create data gist first
+        data_gist_id, _ = _create_single_gist(data_files, public=public)
+
+        # Inject data gist ID and gist preview JS into HTML files
+        inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
+
+        # Create main gist (excluding data files)
+        return _create_single_gist(main_files, public=public)
+    else:
+        # Single gist strategy: inject gist preview JS first
+        inject_gist_preview_js(output_dir)
+
+        # Create gist with all files
+        all_files = main_files + data_files
+        return _create_single_gist(all_files, public=public)
 
 
 def generate_pagination_html(current_page, total_pages):
@@ -1596,8 +1668,7 @@ def local_cmd(
         click.echo(f"JSONL: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
         gist_id, gist_url = create_gist(output)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
@@ -1707,8 +1778,7 @@ def json_cmd(
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
         gist_id, gist_url = create_gist(output)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
@@ -2133,8 +2203,7 @@ def web_cmd(
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
         gist_id, gist_url = create_gist(output)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"

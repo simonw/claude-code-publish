@@ -1527,6 +1527,164 @@ class TestOutputAutoOption:
         assert (expected_dir / "index.html").exists()
 
 
+class TestTwoGistStrategy:
+    """Tests for the two-gist strategy when files are too large."""
+
+    def test_single_gist_when_files_small(self, output_dir, monkeypatch):
+        """Test that small files use single gist strategy."""
+        import subprocess
+
+        # Create small test HTML files (under 1MB total)
+        (output_dir / "index.html").write_text(
+            "<html><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "page-001.html").write_text(
+            "<html><body>Page</body></html>", encoding="utf-8"
+        )
+        (output_dir / "styles.css").write_text("body { margin: 0; }", encoding="utf-8")
+        (output_dir / "main.js").write_text("console.log('hi');", encoding="utf-8")
+
+        # Track subprocess calls
+        subprocess_calls = []
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="https://gist.github.com/testuser/abc123def456\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        gist_id, gist_url = create_gist(output_dir)
+
+        # Should only call gh gist create once (single gist strategy)
+        assert len(subprocess_calls) == 1
+        assert gist_id == "abc123def456"
+
+    def test_two_gist_when_files_large(self, output_dir, monkeypatch):
+        """Test that large files use two-gist strategy."""
+        import subprocess
+
+        # Create test HTML files with a large code-data.json (over 1MB)
+        (output_dir / "index.html").write_text(
+            "<html><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "code.html").write_text(
+            "<html><body>Code</body></html>", encoding="utf-8"
+        )
+        # Create large code-data.json (1.5MB)
+        large_data = "x" * (1500 * 1024)  # 1.5MB
+        (output_dir / "code-data.json").write_text(large_data, encoding="utf-8")
+
+        # Track subprocess calls
+        subprocess_calls = []
+        gist_counter = [0]  # Use list to allow mutation in closure
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            gist_counter[0] += 1
+            # Return different gist IDs for each call
+            gist_id = f"gist{gist_counter[0]:03d}"
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=f"https://gist.github.com/testuser/{gist_id}\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        gist_id, gist_url = create_gist(output_dir)
+
+        # Should call gh gist create twice (data gist + main gist)
+        assert len(subprocess_calls) == 2
+        # First call should be for data gist (code-data.json)
+        first_cmd = subprocess_calls[0]
+        assert "code-data.json" in " ".join(str(x) for x in first_cmd)
+        # Second call should be for main gist (HTML files)
+        second_cmd = subprocess_calls[1]
+        assert "index.html" in " ".join(str(x) for x in second_cmd)
+        # code-data.json should NOT be in main gist
+        assert "code-data.json" not in " ".join(str(x) for x in second_cmd)
+
+    def test_data_gist_id_injected_into_html(self, output_dir, monkeypatch):
+        """Test that data gist ID is injected into HTML when using two-gist strategy."""
+        import subprocess
+
+        # Create test HTML files with large code-data.json
+        # Note: inject_gist_preview_js looks for <head> tag to inject DATA_GIST_ID
+        (output_dir / "index.html").write_text(
+            "<html><head></head><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "code.html").write_text(
+            "<html><head></head><body>Code</body></html>", encoding="utf-8"
+        )
+        # Large code-data.json to trigger two-gist strategy
+        large_data = "x" * (1500 * 1024)
+        (output_dir / "code-data.json").write_text(large_data, encoding="utf-8")
+
+        gist_counter = [0]
+
+        def mock_run(cmd, *args, **kwargs):
+            gist_counter[0] += 1
+            # Data gist gets ID "datagist001", main gist gets "maingist002"
+            if gist_counter[0] == 1:
+                gist_id = "datagist001"
+            else:
+                gist_id = "maingist002"
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=f"https://gist.github.com/testuser/{gist_id}\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        # create_gist handles inject_gist_preview_js internally
+        gist_id, gist_url = create_gist(output_dir)
+
+        # The main gist ID should be returned
+        assert gist_id == "maingist002"
+
+        # The code.html should have the data gist ID injected
+        code_html = (output_dir / "code.html").read_text(encoding="utf-8")
+        assert "datagist001" in code_html
+        assert 'window.DATA_GIST_ID = "datagist001"' in code_html
+
+    def test_size_threshold_configurable(self, output_dir, monkeypatch):
+        """Test that the size threshold for two-gist strategy can be configured."""
+        import subprocess
+
+        # Create files just under default threshold
+        (output_dir / "index.html").write_text(
+            "<html><body>Index</body></html>", encoding="utf-8"
+        )
+        # ~900KB code-data.json (under 1MB default threshold)
+        medium_data = "x" * (900 * 1024)
+        (output_dir / "code-data.json").write_text(medium_data, encoding="utf-8")
+
+        subprocess_calls = []
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="https://gist.github.com/testuser/abc123\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        # With default threshold (1MB), should use single gist
+        gist_id, gist_url = create_gist(output_dir)
+        assert len(subprocess_calls) == 1
+
+
 class TestSearchFeature:
     """Tests for the search feature on index.html pages."""
 

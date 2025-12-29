@@ -59,6 +59,12 @@ function formatTimestamps(container) {
 
 // Get the URL for fetching code-data.json on gistpreview
 function getGistDataUrl() {
+    // Check if we have a separate data gist (for large files)
+    // window.DATA_GIST_ID is injected by inject_gist_preview_js when two-gist strategy is used
+    if (window.DATA_GIST_ID) {
+        return `https://gist.githubusercontent.com/raw/${window.DATA_GIST_ID}/code-data.json`;
+    }
+
     // URL format: https://gistpreview.github.io/?GIST_ID/code.html
     const match = window.location.search.match(/^\?([^/]+)/);
     if (match) {
