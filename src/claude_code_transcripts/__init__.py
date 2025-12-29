@@ -21,6 +21,7 @@ from git.exc import InvalidGitRepositoryError
 import httpx
 from jinja2 import Environment, PackageLoader
 import markdown
+import nh3
 import questionary
 
 # Set up Jinja2 environment
@@ -774,17 +775,58 @@ def format_json(obj):
         return f"<pre>{html.escape(str(obj))}</pre>"
 
 
+# Allowed HTML tags for markdown content - anything else gets escaped
+ALLOWED_TAGS = {
+    # Block elements
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "hr",
+    # Lists
+    "ul",
+    "ol",
+    "li",
+    # Inline elements
+    "a",
+    "strong",
+    "b",
+    "em",
+    "i",
+    "code",
+    "br",
+    "span",
+    # Tables
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+}
+
+ALLOWED_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "code": {"class"},  # For syntax highlighting
+    "pre": {"class"},
+    "span": {"class"},
+    "td": {"align"},
+    "th": {"align"},
+}
+
+
 def render_markdown_text(text):
     if not text:
         return ""
-    html = markdown.markdown(text, extensions=["fenced_code", "tables"])
-    # Escape <style> and <script> tags that could affect the page
-    # These can appear in transcript content when showing code examples
-    html = html.replace("<style>", "&lt;style&gt;")
-    html = html.replace("</style>", "&lt;/style&gt;")
-    html = html.replace("<script>", "&lt;script&gt;")
-    html = html.replace("</script>", "&lt;/script&gt;")
-    return html
+    raw_html = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    # Sanitize HTML to only allow safe tags - escapes everything else
+    return nh3.clean(raw_html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
 
 
 def is_json_like(text):

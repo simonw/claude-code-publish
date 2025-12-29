@@ -131,23 +131,42 @@ class TestRenderFunctions:
         assert render_markdown_text("") == ""
         assert render_markdown_text(None) == ""
 
-    def test_render_markdown_escapes_style_tags(self):
-        """Test that <style> tags in markdown content are escaped."""
+    def test_render_markdown_strips_style_tags(self):
+        """Test that <style> tags in markdown content are stripped."""
         # This prevents CSS in transcript content from affecting page styles
         text = "Here is some CSS:\n<style>:root { --bg: red; }</style>"
         result = render_markdown_text(text)
         assert "<style>" not in result
-        assert "&lt;style&gt;" in result
-        assert "&lt;/style&gt;" in result
+        assert "</style>" not in result
 
-    def test_render_markdown_escapes_script_tags(self):
-        """Test that <script> tags in markdown content are escaped."""
+    def test_render_markdown_strips_script_tags(self):
+        """Test that <script> tags in markdown content are stripped."""
         # This prevents JS in transcript content from executing
         text = "Here is some code:\n<script>alert('xss')</script>"
         result = render_markdown_text(text)
         assert "<script>" not in result
-        assert "&lt;script&gt;" in result
-        assert "&lt;/script&gt;" in result
+        assert "</script>" not in result
+
+    def test_render_markdown_strips_form_elements(self):
+        """Test that form elements in markdown content are stripped."""
+        # This prevents forms/inputs from being rendered
+        text = (
+            "Here is a form:\n<form><input type='text'><button>Submit</button></form>"
+        )
+        result = render_markdown_text(text)
+        assert "<form>" not in result
+        assert "<input" not in result
+        assert "<button>" not in result
+
+    def test_render_markdown_allows_safe_tags(self):
+        """Test that safe markdown tags are preserved."""
+        text = "**bold** and `code` and [link](http://example.com)"
+        result = render_markdown_text(text)
+        assert "<strong>bold</strong>" in result
+        assert "<code>code</code>" in result
+        # nh3 adds rel="noopener noreferrer" to links for security
+        assert '<a href="http://example.com"' in result
+        assert ">link</a>" in result
 
     def test_format_json(self, snapshot_html):
         """Test JSON formatting."""
