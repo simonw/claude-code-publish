@@ -656,15 +656,12 @@ async function init() {
             return;
         }
 
-        // Show loading indicator for large files
-        const content = fileInfo.content || '';
-        const isLarge = content.length > 50000 || (fileInfo.blame_ranges || []).length > 50;
-        if (isLarge) {
-            codeContent.innerHTML = '<p style="padding: 16px; color: #888;">Loading file...</p>';
-        }
+        // Always show loading indicator - gives visual feedback during file switch
+        codeContent.innerHTML = '<div class="initial-loading"><p>Loading file...</p></div>';
 
-        // Use requestAnimationFrame to let the loading message render
-        requestAnimationFrame(() => {
+        // Use setTimeout to ensure loading message renders before heavy work
+        setTimeout(() => {
+            const content = fileInfo.content || '';
             currentBlameRanges = fileInfo.blame_ranges || [];
             createEditor(codeContent, content, currentBlameRanges, path);
 
@@ -673,7 +670,7 @@ async function init() {
                 scrollToMessage(firstOpRange.msg_id);
                 scrollEditorToLine(firstOpRange.start);
             }
-        });
+        }, 10);
     }
 
     // Scroll editor to a line
