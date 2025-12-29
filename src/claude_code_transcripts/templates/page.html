@@ -5,13 +5,9 @@
 {% block header_title %}<a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a> - page {{ page_num }}/{{ total_pages }}{% endblock %}
 
 {% block content %}
-        {% include "header.html" %}
         <div class="transcript-wrapper">
             {{ pagination_html|safe }}
             {{ messages_html|safe }}
             {{ pagination_html|safe }}
         </div>
-        <script>
-{% include "search.js" %}
-        </script>
 {%- endblock %}

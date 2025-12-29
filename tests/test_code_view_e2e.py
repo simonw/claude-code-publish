@@ -1,4 +1,4 @@
-"""End-to-end tests for code_view.html using Playwright.
+"""End-to-end tests for code.html using Playwright.
 
 These tests use a real session file to generate the code view HTML and then
 test the interactive features using Playwright browser automation.

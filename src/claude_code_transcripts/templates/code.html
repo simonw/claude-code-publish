@@ -5,8 +5,6 @@
 {% block header_title %}<a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a>{% endblock %}
 
 {% block content %}
-        {% include "header.html" %}
-
         <div class="code-viewer three-pane">
             <div class="file-tree-panel" id="file-tree-panel">
                 <div class="panel-header">
@@ -56,8 +54,5 @@
         <!-- CodeMirror 6 from CDN -->
         <script type="module">
 {{ code_view_js|safe }}
-        </script>
-        <script>
-{% include "search.js" %}
         </script>
 {%- endblock %}

@@ -1195,7 +1195,7 @@ def generate_code_view_html(
         inline_data_script = f"<script>window.CODE_DATA = {code_data_json};</script>"
 
         # Get templates
-        code_view_template = get_template("code_view.html")
+        code_view_template = get_template("code.html")
         code_view_js_template = get_template("code_view.js")
 
         # Render JavaScript
