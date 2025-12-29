@@ -5,7 +5,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .container { max-width: 800px; margin: 0 auto; }
 .transcript-wrapper { max-width: 800px; margin: 0 auto; }
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
-.header-row { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 0; margin-bottom: 24px; }
+/* Page header with optional search */
+.page-header { margin-bottom: 24px; }
+.page-header #search-box { justify-content: flex-end; margin-bottom: 12px; }
+.header-row { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 0; }
 .header-row h1 { border-bottom: none; padding-bottom: 8px; margin-bottom: 0; flex: 1; min-width: 200px; }
 
 /* Messages */

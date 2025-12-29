@@ -5,9 +5,12 @@ test the interactive features using Playwright browser automation.
 """
 
 import hashlib
+import http.server
 import re
 import shutil
+import socketserver
 import tempfile
+import threading
 from pathlib import Path
 
 import httpx
@@ -46,8 +49,8 @@ def fixture_path() -> Path:
 
 
 @pytest.fixture(scope="module")
-def code_view_html(fixture_path: Path) -> Path:
-    """Generate code view HTML from the fixture and return the path."""
+def code_view_dir(fixture_path: Path) -> Path:
+    """Generate code view HTML from the fixture and return the output directory."""
     from claude_code_transcripts import generate_html
 
     output_dir = Path(tempfile.mkdtemp(prefix="code_view_e2e_"))
@@ -58,16 +61,42 @@ def code_view_html(fixture_path: Path) -> Path:
     code_html_path = output_dir / "code.html"
     assert code_html_path.exists(), "code.html was not generated"
 
-    yield code_html_path
+    yield output_dir
 
     # Cleanup after all tests in this module
     shutil.rmtree(output_dir, ignore_errors=True)
 
 
+@pytest.fixture(scope="module")
+def http_server(code_view_dir: Path):
+    """Start an HTTP server to serve the generated files.
+
+    Required because fetch() doesn't work with file:// URLs.
+    """
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(code_view_dir), **kwargs)
+
+        def log_message(self, format, *args):
+            # Suppress server logs during tests
+            pass
+
+    # Use port 0 to get a random available port
+    with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        yield f"http://127.0.0.1:{port}"
+
+        server.shutdown()
+
+
 @pytest.fixture
-def code_view_page(page: Page, code_view_html: Path) -> Page:
+def code_view_page(page: Page, http_server: str) -> Page:
     """Navigate to the code view page and wait for it to load."""
-    page.goto(f"file://{code_view_html}")
+    page.goto(f"{http_server}/code.html")
     # Wait for the editor to be created (CodeMirror initializes)
     page.wait_for_selector(".cm-editor", timeout=10000)
     return page
@@ -265,17 +294,48 @@ class TestTranscriptPanel:
             expect(highlighted).to_be_visible()
 
     def test_pinned_user_message_on_scroll(self, code_view_page: Page):
-        """Test that scrolling shows pinned user message."""
+        """Test that scrolling shows pinned user message with correct content."""
+        panel = code_view_page.locator("#transcript-panel")
+        pinned = code_view_page.locator("#pinned-user-message")
+        pinned_content = code_view_page.locator(".pinned-user-content")
+
+        # Get the first user message's text for comparison
+        first_user = code_view_page.locator(
+            "#transcript-content .message.user:not(.continuation)"
+        ).first
+        first_user_text = first_user.locator(".message-content").text_content().strip()
+
+        # Scroll down past the first user message
+        panel.evaluate("el => el.scrollTop = 800")
+        code_view_page.wait_for_timeout(100)
+
+        # Pinned header should be visible with content from the first user message
+        expect(pinned).to_be_visible()
+        pinned_text = pinned_content.text_content()
+        # The pinned text should be a truncated prefix of the user message
+        assert len(pinned_text) > 0, "Pinned content should not be empty"
+        assert (
+            first_user_text.startswith(pinned_text[:50])
+            or pinned_text in first_user_text
+        ), f"Pinned text '{pinned_text[:50]}...' should match user message"
+
+    def test_pinned_user_message_click_scrolls_back(self, code_view_page: Page):
+        """Test that clicking pinned header scrolls to the original message."""
         panel = code_view_page.locator("#transcript-panel")
         pinned = code_view_page.locator("#pinned-user-message")
 
-        # Scroll down in the transcript panel
-        panel.evaluate("el => el.scrollTop = 500")
+        # Scroll down to show pinned header
+        panel.evaluate("el => el.scrollTop = 800")
         code_view_page.wait_for_timeout(100)
 
-        # Check if pinned message appears (it should if scrolled past a user message)
-        # This may not always show depending on content, so we just check it exists
-        assert pinned.count() == 1
+        # Click the pinned header
+        if pinned.is_visible():
+            pinned.click()
+            code_view_page.wait_for_timeout(300)  # Wait for smooth scroll
+
+            # Panel should have scrolled up (scrollTop should be less)
+            scroll_top = panel.evaluate("el => el.scrollTop")
+            assert scroll_top < 800, "Clicking pinned header should scroll up"
 
 
 class TestPanelResizing:
@@ -390,12 +450,18 @@ class TestChunkedRendering:
         sentinel = code_view_page.locator("#transcript-sentinel")
         expect(sentinel).to_be_attached()
 
-    def test_messages_data_embedded_in_script(self, code_view_page: Page):
-        """Test that messagesData is embedded in the page for chunked rendering."""
-        # Check that the script tag contains messagesData
+    def test_data_loading_and_chunked_rendering_setup(self, code_view_page: Page):
+        """Test that data loading and chunked rendering are configured."""
+        # Check that the script tag contains chunked rendering setup
         scripts = code_view_page.locator("script[type='module']")
         script_content = scripts.first.text_content()
-        assert "messagesData" in script_content, "messagesData should be embedded"
+        # Local version uses embedded CODE_DATA, gist version uses fetch
+        assert (
+            "CODE_DATA" in script_content
+        ), "CODE_DATA should be checked for embedded data"
+        assert (
+            "getGistDataUrl" in script_content
+        ), "getGistDataUrl should be defined for gist fetching"
         assert "CHUNK_SIZE" in script_content, "CHUNK_SIZE should be defined"
         assert "renderedCount" in script_content, "renderedCount should be defined"
 

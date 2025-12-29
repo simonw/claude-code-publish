@@ -1075,6 +1075,7 @@ def generate_code_view_html(
     transcript_messages: List[str] = None,
     msg_to_user_html: Dict[str, str] = None,
     msg_to_context_id: Dict[str, str] = None,
+    total_pages: int = 1,
 ) -> None:
     """Generate the code.html file with three-pane layout.
 
@@ -1084,6 +1085,7 @@ def generate_code_view_html(
         transcript_messages: List of individual message HTML strings.
         msg_to_user_html: Mapping from msg_id to rendered user message HTML for tooltips.
         msg_to_context_id: Mapping from msg_id to context_msg_id for blame coloring.
+        total_pages: Total number of transcript pages (for search feature).
     """
     # Import here to avoid circular imports
     from claude_code_transcripts import CSS, JS, get_template
@@ -1173,23 +1175,31 @@ def generate_code_view_html(
         file_tree = build_file_tree(file_states)
         file_tree_html = render_file_tree_html(file_tree)
 
-        # Convert data to JSON for embedding in script tag
-        # Escape </ sequences to prevent premature script tag closing
-        def escape_for_script_tag(s):
-            return s.replace("</", r"<\/")
+        # Build code data object
+        code_data = {
+            "fileData": file_data,
+            "messagesData": messages_data,
+        }
 
-        file_data_json = escape_for_script_tag(json.dumps(file_data))
-        messages_json = escape_for_script_tag(json.dumps(messages_data))
+        # Write data to separate JSON file for gistpreview lazy loading
+        # (gistpreview has size limits, so it fetches this file separately)
+        (output_dir / "code-data.json").write_text(
+            json.dumps(code_data), encoding="utf-8"
+        )
+
+        # Also embed data inline for local file:// use
+        # (fetch() doesn't work with file:// URLs due to CORS)
+        code_data_json = json.dumps(code_data)
+        # Escape </script> in case it appears in content
+        code_data_json = code_data_json.replace("</script>", "<\\/script>")
+        inline_data_script = f"<script>window.CODE_DATA = {code_data_json};</script>"
 
         # Get templates
         code_view_template = get_template("code_view.html")
         code_view_js_template = get_template("code_view.js")
 
-        # Render JavaScript with data
-        code_view_js = code_view_js_template.render(
-            file_data_json=file_data_json,
-            messages_json=messages_json,
-        )
+        # Render JavaScript
+        code_view_js = code_view_js_template.render()
 
         # Render page
         page_content = code_view_template.render(
@@ -1197,6 +1207,10 @@ def generate_code_view_html(
             js=JS,
             file_tree_html=file_tree_html,
             code_view_js=code_view_js,
+            inline_data_script=inline_data_script,
+            total_pages=total_pages,
+            has_code_view=True,
+            active_tab="code",
         )
 
         # Write file

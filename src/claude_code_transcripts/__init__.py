@@ -1096,6 +1096,18 @@ GIST_PREVIEW_JS = r"""
         link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
     });
 
+    // Execute module scripts that were injected via innerHTML
+    // (browsers don't execute scripts added via innerHTML for security)
+    document.querySelectorAll('script[type="module"]').forEach(function(script) {
+        if (script.src) return; // Already has src, skip
+        var blob = new Blob([script.textContent], { type: 'application/javascript' });
+        var url = URL.createObjectURL(blob);
+        var newScript = document.createElement('script');
+        newScript.type = 'module';
+        newScript.src = url;
+        document.body.appendChild(newScript);
+    });
+
     // Handle fragment navigation after dynamic content loads
     // gistpreview.github.io loads content dynamically, so the browser's
     // native fragment navigation fails because the element doesn't exist yet
@@ -1124,10 +1136,26 @@ GIST_PREVIEW_JS = r"""
 
 
 def inject_gist_preview_js(output_dir):
-    """Inject gist preview JavaScript into all HTML files in the output directory."""
+    """Inject gist preview JavaScript into all HTML files in the output directory.
+
+    Also removes inline CODE_DATA from code.html since gist version fetches it separately.
+    """
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
         content = html_file.read_text(encoding="utf-8")
+
+        # For code.html, remove the inline CODE_DATA script
+        # (gist version fetches code-data.json instead to avoid size limits)
+        if html_file.name == "code.html":
+            import re
+
+            content = re.sub(
+                r"<script>window\.CODE_DATA = .*?;</script>\s*",
+                "",
+                content,
+                flags=re.DOTALL,
+            )
+
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
@@ -1150,6 +1178,11 @@ def create_gist(output_dir, public=False):
     # gh gist create file1 file2 ... --public/--private
     cmd = ["gh", "gist", "create"]
     cmd.extend(str(f) for f in sorted(html_files))
+
+    # Include code-data.json if it exists (for code view lazy loading)
+    code_data_file = output_dir / "code-data.json"
+    if code_data_file.exists():
+        cmd.append(str(code_data_file))
     if public:
         cmd.append("--public")
 
@@ -1291,6 +1324,7 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
             has_code_view=has_code_view,
+            active_tab="transcript",
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -1379,6 +1413,7 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
         total_pages=total_pages,
         index_items_html="".join(index_items),
         has_code_view=has_code_view,
+        active_tab="transcript",
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
@@ -1395,6 +1430,7 @@ def generate_html(json_path, output_dir, github_repo=None, code_view=False):
             transcript_messages=all_messages_html,
             msg_to_user_html=msg_to_user_html,
             msg_to_context_id=msg_to_context_id,
+            total_pages=total_pages,
         )
         num_files = len(set(op.file_path for op in file_operations))
         print(f"Generated code.html ({num_files} files)")
@@ -1798,6 +1834,7 @@ def generate_html_from_session_data(
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
             has_code_view=has_code_view,
+            active_tab="transcript",
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -1886,6 +1923,7 @@ def generate_html_from_session_data(
         total_pages=total_pages,
         index_items_html="".join(index_items),
         has_code_view=has_code_view,
+        active_tab="transcript",
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")

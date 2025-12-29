@@ -839,9 +839,10 @@ class TestGitBlameAttribution:
 class TestGenerateCodeViewHtml:
     """Tests for generate_code_view_html function."""
 
-    def test_escapes_script_closing_tags_in_json(self, tmp_path):
-        """Test that </script> sequences are escaped to prevent HTML injection."""
-        # Content with dangerous HTML sequences
+    def test_generates_separate_data_file(self, tmp_path):
+        """Test that code-data.json is generated with file content."""
+        import json
+
         content = 'console.log("</script>"); // end'
 
         operations = [
@@ -859,12 +860,23 @@ class TestGenerateCodeViewHtml:
         generate_code_view_html(tmp_path, operations)
 
         html = (tmp_path / "code.html").read_text()
+        assert "</script>" in html  # Has script tag
 
-        # The </script> in content should be escaped to <\/script>
-        # so it doesn't prematurely close the script tag
-        assert r"<\/script>" in html
-        # The actual closing </script> tag should still exist (for the real end)
-        assert "</script>" in html
+        # Local version has embedded data for file:// access
+        assert (
+            "window.CODE_DATA" in html
+        ), "Embedded data should be present for local use"
+        # Script tags in content should be escaped
+        assert r"<\/script>" in html, "Script tags should be escaped in embedded JSON"
+
+        # code-data.json should also exist for gist version fetching
+        data_file = tmp_path / "code-data.json"
+        assert data_file.exists()
+        data = json.loads(data_file.read_text())
+        assert "fileData" in data
+        assert "messagesData" in data
+        # The content should be preserved correctly in JSON
+        assert data["fileData"]["/test/path.js"]["content"] == content
 
 
 class TestBuildMsgToUserHtml:

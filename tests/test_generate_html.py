@@ -450,6 +450,21 @@ class TestInjectGistPreviewJs:
         # The JS should scroll to the element
         assert "scrollIntoView" in GIST_PREVIEW_JS
 
+    def test_gist_preview_js_executes_module_scripts(self):
+        """Test that GIST_PREVIEW_JS executes module scripts via blob URLs.
+
+        gistpreview.github.io injects HTML content via innerHTML, but browsers
+        don't execute <script> tags added via innerHTML for security. The JS
+        should manually execute module scripts by creating blob URLs.
+        """
+        # Should find module scripts
+        assert 'script[type="module"]' in GIST_PREVIEW_JS
+        # Should create blob URLs
+        assert "Blob" in GIST_PREVIEW_JS
+        assert "createObjectURL" in GIST_PREVIEW_JS
+        # Should create new script elements with src
+        assert "createElement" in GIST_PREVIEW_JS
+
     def test_skips_files_without_body(self, output_dir):
         """Test that files without </body> are not modified."""
         original_content = "<html><head><title>Test</title></head></html>"

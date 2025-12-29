@@ -3,41 +3,13 @@
 {% block title %}Claude Code transcript - Index{% endblock %}
 
 {% block content %}
-        <div class="header-row">
-            <h1>Claude Code transcript</h1>
-            {% if has_code_view %}
-            <nav class="tab-bar">
-                <a href="index.html" class="tab active">Transcript</a>
-                <a href="code.html" class="tab">Code</a>
-            </nav>
-            {% endif %}
-            <div id="search-box">
-                <input type="text" id="search-input" placeholder="Search..." aria-label="Search transcripts">
-                <button id="search-btn" type="button" aria-label="Search">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                </button>
-            </div>
-        </div>
+        {% include "header.html" %}
         <div class="transcript-wrapper">
             {{ pagination_html|safe }}
             <p style="color: var(--text-muted); margin-bottom: 24px;">{{ prompt_num }} prompts · {{ total_messages }} messages · {{ total_tool_calls }} tool calls · {{ total_commits }} commits · {{ total_pages }} pages</p>
             {{ index_items_html|safe }}
             {{ pagination_html|safe }}
         </div>
-
-        <dialog id="search-modal">
-            <div class="search-modal-header">
-                <input type="text" id="modal-search-input" placeholder="Search..." aria-label="Search transcripts">
-                <button id="modal-search-btn" type="button" aria-label="Search">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                </button>
-                <button id="modal-close-btn" type="button" aria-label="Close">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
-                </button>
-            </div>
-            <div id="search-status"></div>
-            <div id="search-results"></div>
-        </dialog>
         <script>
 {% include "search.js" %}
         </script>
