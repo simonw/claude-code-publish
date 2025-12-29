@@ -1084,6 +1084,37 @@ GIST_PREVIEW_JS = r"""
     if (!match) return;
     var gistId = match[1];
 
+    // Load CSS from gist (relative stylesheet links don't work on gistpreview)
+    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(link) {
+        var href = link.getAttribute('href');
+        if (href.startsWith('http')) return; // Already absolute
+        var cssUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + href;
+        fetch(cssUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
+            .then(function(css) {
+                var style = document.createElement('style');
+                style.textContent = css;
+                document.head.appendChild(style);
+                link.remove(); // Remove the broken link
+            })
+            .catch(function(e) { console.error('Failed to load CSS:', href, e); });
+    });
+
+    // Load JS from gist (relative script srcs don't work on gistpreview)
+    document.querySelectorAll('script[src]').forEach(function(script) {
+        var src = script.getAttribute('src');
+        if (src.startsWith('http')) return; // Already absolute
+        var jsUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + src;
+        fetch(jsUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
+            .then(function(js) {
+                var newScript = document.createElement('script');
+                newScript.textContent = js;
+                document.body.appendChild(newScript);
+            })
+            .catch(function(e) { console.error('Failed to load JS:', src, e); });
+    });
+
     // Fix relative links for navigation
     document.querySelectorAll('a[href]').forEach(function(link) {
         var href = link.getAttribute('href');
@@ -1386,6 +1417,7 @@ def _add_files_to_gist(gist_id, files):
     import time
 
     for i, f in enumerate(files):
+        click.echo(f"  Adding {f.name} ({i + 1}/{len(files)})...")
         cmd = ["gh", "gist", "edit", gist_id, "--add", str(f)]
         max_retries = 3
         for attempt in range(max_retries):
@@ -1443,8 +1475,13 @@ def create_gist(output_dir, public=False, description=None):
     if not html_files:
         raise click.ClickException("No HTML files found to upload to gist.")
 
-    # Collect main files (HTML only, CSS/JS are now inlined)
-    main_files = sorted(html_files)
+    # Collect main files (HTML + CSS/JS)
+    css_js_files = [
+        output_dir / f
+        for f in ["styles.css", "main.js", "search.js"]
+        if (output_dir / f).exists()
+    ]
+    main_files = sorted(html_files) + css_js_files
 
     # Collect data files and check their total size
     data_files = []
@@ -1465,50 +1502,48 @@ def create_gist(output_dir, public=False, description=None):
 
     # Decide whether to use two-gist strategy
     if data_total_size > GIST_SIZE_THRESHOLD and data_files:
-        # Two-gist strategy: create data gist first, then add remaining files
+        # Two-gist strategy: create data gist first
         click.echo(f"Data files to upload: {[f.name for f in data_files]}")
-        # Create gist with first file only (gh gist create can be unreliable with many files)
         data_desc = f"{description} (data)" if description else None
-        click.echo(f"Creating data gist with {data_files[0].name}...")
-        data_gist_id, _ = _create_single_gist(
-            [data_files[0]], public=public, description=data_desc
-        )
 
-        # Add remaining files one at a time
-        remaining_files = data_files[1:]
-        if remaining_files:
-            click.echo(f"Adding {len(remaining_files)} more files to data gist...")
-            _add_files_to_gist(data_gist_id, remaining_files)
+        # Try creating data gist with all files at once
+        click.echo(f"Creating data gist with {len(data_files)} files...")
+        try:
+            data_gist_id, _ = _create_single_gist(
+                data_files, public=public, description=data_desc
+            )
+        except click.ClickException as e:
+            # Fall back to one-by-one upload
+            click.echo(f"Bulk upload failed, falling back to one-by-one...")
+            click.echo(f"Creating data gist with {data_files[0].name}...")
+            data_gist_id, _ = _create_single_gist(
+                [data_files[0]], public=public, description=data_desc
+            )
+            remaining_files = data_files[1:]
+            if remaining_files:
+                click.echo(f"Adding {len(remaining_files)} more files to data gist...")
+                _add_files_to_gist(data_gist_id, remaining_files)
 
         # Inject data gist ID and gist preview JS into HTML files
         inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
 
-        # Create main gist with first file, then add remaining files
-        click.echo(f"Creating main gist with {main_files[0].name}...")
+        # Create main gist with all files at once
+        click.echo(f"Creating main gist with {len(main_files)} files...")
         main_gist_id, main_gist_url = _create_single_gist(
-            [main_files[0]], public=public, description=description
+            main_files, public=public, description=description
         )
-
-        remaining_main_files = main_files[1:]
-        if remaining_main_files:
-            click.echo(f"Adding {len(remaining_main_files)} more files to main gist...")
-            _add_files_to_gist(main_gist_id, remaining_main_files)
 
         return main_gist_id, main_gist_url
     else:
         # Single gist strategy: inject gist preview JS first
         inject_gist_preview_js(output_dir)
 
-        # Create gist with first file, then add remaining files
+        # Create gist with all files at once
         all_files = main_files + data_files
+        click.echo(f"Creating gist with {len(all_files)} files...")
         main_gist_id, main_gist_url = _create_single_gist(
-            [all_files[0]], public=public, description=description
+            all_files, public=public, description=description
         )
-
-        remaining_files = all_files[1:]
-        if remaining_files:
-            click.echo(f"Adding {len(remaining_files)} more files to gist...")
-            _add_files_to_gist(main_gist_id, remaining_files)
 
         return main_gist_id, main_gist_url
 
@@ -1531,6 +1566,13 @@ def generate_html(
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
+
+    # Copy CSS and JS files from templates to output directory
+    templates_dir = Path(__file__).parent / "templates"
+    for static_file in ["styles.css", "main.js", "search.js"]:
+        src = templates_dir / static_file
+        if src.exists():
+            shutil.copy(src, output_dir / static_file)
 
     # Load session file (supports both JSON and JSONL)
     data = parse_session_file(json_path)

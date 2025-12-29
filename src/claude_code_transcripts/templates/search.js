@@ -1,5 +1,5 @@
 (function() {
-    var totalPages = {{ total_pages }};
+    var totalPages = window.TOTAL_PAGES || 1;
     var searchBox = document.getElementById('search-box');
     var searchInput = document.getElementById('search-input');
     var searchBtn = document.getElementById('search-btn');

@@ -1595,11 +1595,9 @@ class TestTwoGistStrategy:
 
         gist_id, gist_url = create_gist(output_dir)
 
-        # Should call gh gist create once, then gh gist edit to add remaining files
-        # (We create with first file, then add rest to avoid issues with many files)
-        assert len(subprocess_calls) == 2
+        # Should call gh gist create once with all files
+        assert len(subprocess_calls) == 1
         assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
-        assert subprocess_calls[1][0:3] == ["gh", "gist", "edit"]
         assert gist_id == "abc123def456"
 
     def test_two_gist_when_files_large(self, output_dir, monkeypatch):
@@ -1637,19 +1635,16 @@ class TestTwoGistStrategy:
 
         gist_id, gist_url = create_gist(output_dir)
 
-        # Should call gh gist create twice (data gist + main gist), then edit to add remaining files
-        assert len(subprocess_calls) == 3
+        # Should call gh gist create twice (data gist + main gist with all HTML files)
+        assert len(subprocess_calls) == 2
         # First call should be for data gist (code-data.json)
         first_cmd = subprocess_calls[0]
         assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
         assert "code-data.json" in " ".join(str(x) for x in first_cmd)
-        # Second call should create main gist with first HTML file
+        # Second call should create main gist with all HTML files
         second_cmd = subprocess_calls[1]
         assert subprocess_calls[1][0:3] == ["gh", "gist", "create"]
         assert "code-data.json" not in " ".join(str(x) for x in second_cmd)
-        # Third call should add remaining HTML files to main gist
-        third_cmd = subprocess_calls[2]
-        assert subprocess_calls[2][0:3] == ["gh", "gist", "edit"]
 
     def test_data_gist_id_injected_into_html(self, output_dir, monkeypatch):
         """Test that data gist ID is injected into HTML when using two-gist strategy."""
@@ -1721,11 +1716,10 @@ class TestTwoGistStrategy:
 
         monkeypatch.setattr(subprocess, "run", mock_run)
 
-        # With default threshold (1MB), should use single gist (create + edit to add remaining files)
+        # With default threshold (1MB), should use single gist (create with all files)
         gist_id, gist_url = create_gist(output_dir)
-        assert len(subprocess_calls) == 2
+        assert len(subprocess_calls) == 1
         assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
-        assert subprocess_calls[1][0:3] == ["gh", "gist", "edit"]
 
 
 class TestSearchFeature:
@@ -1762,40 +1756,47 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # JavaScript is now in external search.js file
+        search_js = (output_dir / "search.js").read_text(encoding="utf-8")
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # JavaScript should handle DOMParser for parsing fetched pages
-        assert "DOMParser" in index_html
+        assert "DOMParser" in search_js
         # JavaScript should handle fetch for getting pages
-        assert "fetch(" in index_html
+        assert "fetch(" in search_js
         # JavaScript should handle #search= URL fragment
-        assert "#search=" in index_html or "search=" in index_html
+        assert "#search=" in search_js or "search=" in search_js
+        # HTML should reference the external script
+        assert 'src="search.js"' in index_html
 
     def test_search_css_present(self, output_dir):
         """Test that search CSS styles are present."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # CSS is inlined in HTML
+        # CSS is now in external styles.css file
+        styles_css = (output_dir / "styles.css").read_text(encoding="utf-8")
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # CSS should style the search box
-        assert "#search-box" in index_html or ".search-box" in index_html
+        assert "#search-box" in styles_css or ".search-box" in styles_css
         # CSS should style the search modal
-        assert "#search-modal" in index_html or ".search-modal" in index_html
+        assert "#search-modal" in styles_css or ".search-modal" in styles_css
+        # HTML should reference the external stylesheet
+        assert 'href="styles.css"' in index_html
 
     def test_search_box_hidden_by_default_in_css(self, output_dir):
         """Test that search box is hidden by default (for progressive enhancement)."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # CSS is inlined in HTML
-        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+        # CSS is now in external styles.css file
+        styles_css = (output_dir / "styles.css").read_text(encoding="utf-8")
 
         # Search box should be hidden by default in CSS
         # JavaScript will show it when loaded
-        assert "#search-box" in index_html
-        assert "display: none" in index_html
+        assert "#search-box" in styles_css
+        assert "display: none" in styles_css
 
     def test_search_total_pages_available(self, output_dir):
         """Test that total_pages is available to JavaScript for fetching."""
@@ -1805,7 +1806,7 @@ class TestSearchFeature:
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Total pages should be embedded for JS to know how many pages to fetch
-        assert "totalPages" in index_html or "total_pages" in index_html
+        assert "TOTAL_PAGES" in index_html
 
 
 class TestPageDataJson:
