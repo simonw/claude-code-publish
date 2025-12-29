@@ -805,3 +805,232 @@ class TestGenerateCodeViewHtml:
         assert r"<\/script>" in html
         # The actual closing </script> tag should still exist (for the real end)
         assert "</script>" in html
+
+
+class TestBuildMsgToUserHtml:
+    """Tests for build_msg_to_user_html function."""
+
+    def test_includes_assistant_context(self):
+        """Test that assistant text before tool_use is included in tooltip."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-01-01T10:00:00Z",
+                    ),
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": "I'll create that file for you.",
+                                    },
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result = build_msg_to_user_html(conversations)
+
+        # Should have entry for the assistant message with tool_use
+        assert "msg-2025-01-01T10-00-05Z" in result
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Should contain user prompt
+        assert "Create a file" in html
+        # Should contain assistant context
+        assert "Assistant context" in html
+        assert "create that file for you" in html
+
+    def test_includes_thinking_block(self):
+        """Test that thinking blocks are included in tooltip."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-01-01T10:00:00Z",
+                    ),
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "thinking",
+                                        "thinking": "Let me think about this...",
+                                    },
+                                    {"type": "text", "text": "I'll create that file."},
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result = build_msg_to_user_html(conversations)
+
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Should contain thinking block with proper styling
+        assert 'class="thinking"' in html
+        assert "Thinking" in html
+        assert "Let me think about this" in html
+
+    def test_thinking_persists_across_messages(self):
+        """Test that thinking from a previous message is captured for tool calls."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-01-01T10:00:00Z",
+                    ),
+                    # First assistant message with thinking and text
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "thinking",
+                                        "thinking": "I need to plan this carefully.",
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": "Let me create that file.",
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                    # Second assistant message with just tool_use (no thinking in this message)
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:10Z",
+                    ),
+                ],
+            }
+        ]
+
+        result = build_msg_to_user_html(conversations)
+
+        # The tool_use message should have the thinking from the previous message
+        html = result["msg-2025-01-01T10-00-10Z"]
+
+        # Should contain thinking block (persisted from previous message)
+        assert 'class="thinking"' in html
+        assert "plan this carefully" in html
+        # Should also have assistant context
+        assert "create that file" in html
+
+    def test_truncates_long_text(self):
+        """Test that long assistant text is truncated."""
+        from claude_code_transcripts import build_msg_to_user_html
+
+        long_text = "x" * 1000  # Much longer than 500 char limit
+
+        conversations = [
+            {
+                "user_text": "Create a file",
+                "timestamp": "2025-01-01T10:00:00Z",
+                "messages": [
+                    (
+                        "user",
+                        '{"content": "Create a file", "role": "user"}',
+                        "2025-01-01T10:00:00Z",
+                    ),
+                    (
+                        "assistant",
+                        json.dumps(
+                            {
+                                "content": [
+                                    {"type": "text", "text": long_text},
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_001",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": "/test.py",
+                                            "content": "# test",
+                                        },
+                                    },
+                                ],
+                                "role": "assistant",
+                            }
+                        ),
+                        "2025-01-01T10:00:05Z",
+                    ),
+                ],
+            }
+        ]
+
+        result = build_msg_to_user_html(conversations)
+        html = result["msg-2025-01-01T10-00-05Z"]
+
+        # Should contain ellipsis indicating truncation
+        assert "..." in html
+        # Should not contain the full 1000 char string
+        assert long_text not in html
