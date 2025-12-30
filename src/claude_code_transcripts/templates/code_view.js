@@ -1180,8 +1180,7 @@ async function init() {
         return text;
     }
 
-    // Get the prompt number for a user message by counting real user prompts before it
-    // Real prompts have "User Prompt #N" label, tool_result messages just have "User"
+    // Get the prompt number for a user message from server-provided data
     function getPromptNumber(messageEl) {
         const msgId = messageEl.id;
         if (!msgId) return null;
@@ -1189,16 +1188,19 @@ async function init() {
         const msgIndex = msgIdToIndex.get(msgId);
         if (msgIndex === undefined) return null;
 
-        // Count real user prompts (not tool_results) from start up to this message
-        // Server marks real prompts with ">User Prompt #" in the HTML
-        let promptNum = 0;
-        for (let i = 0; i <= msgIndex && i < messagesData.length; i++) {
-            const msg = messagesData[i];
-            if (msg.html && msg.html.includes('>User Prompt #')) {
-                promptNum++;
+        // Use server-provided prompt_num (canonical source of truth)
+        const msg = messagesData[msgIndex];
+        if (msg && msg.prompt_num) {
+            return msg.prompt_num;
+        }
+
+        // For non-prompt messages, find the most recent prompt before this message
+        for (let i = msgIndex - 1; i >= 0; i--) {
+            if (messagesData[i].prompt_num) {
+                return messagesData[i].prompt_num;
             }
         }
-        return promptNum;
+        return null;
     }
 
     // Cache the pinned message height to avoid flashing when it's hidden

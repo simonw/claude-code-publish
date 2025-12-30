@@ -1305,7 +1305,9 @@ def generate_code_view_html(
     for msg_html in transcript_messages:
         match = msg_id_pattern.search(msg_html)
         msg_id = match.group(1) if match else None
-        messages_data.append({"id": msg_id, "html": msg_html})
+        # Include prompt_num for user prompts (from msg_to_prompt_num mapping)
+        prompt_num = msg_to_prompt_num.get(msg_id) if msg_id else None
+        messages_data.append({"id": msg_id, "html": msg_html, "prompt_num": prompt_num})
 
     # Build temp git repo with file history
     if progress_callback:
