@@ -743,6 +743,46 @@ class TestPromptNumberConsistency:
         if tested_count == 0:
             pytest.skip("Could not test any blame blocks with visible pinned headers")
 
+    def test_all_messages_have_prompt_num(self, code_view_page: Page):
+        """Test that every message in messagesData has a prompt_num after first user prompt.
+
+        The server sets prompt_num on every message (not just user prompts) so the
+        client doesn't need to search backwards to find the current prompt number.
+        """
+        # Get messagesData from the page
+        messages_data = code_view_page.evaluate("() => window.codeViewData?.messagesData")
+
+        if not messages_data or len(messages_data) == 0:
+            pytest.skip("No messagesData found")
+
+        # Find the first message with a prompt_num (first user prompt)
+        first_prompt_idx = None
+        for i, msg in enumerate(messages_data):
+            if msg.get("prompt_num") is not None:
+                first_prompt_idx = i
+                break
+
+        if first_prompt_idx is None:
+            pytest.skip("No messages with prompt_num found")
+
+        # All messages after the first user prompt should have prompt_num set
+        for i in range(first_prompt_idx, len(messages_data)):
+            msg = messages_data[i]
+            assert msg.get("prompt_num") is not None, (
+                f"Message at index {i} (id={msg.get('id')}) should have prompt_num set"
+            )
+
+        # Verify prompt_num is monotonically non-decreasing
+        prev_num = 0
+        for msg in messages_data:
+            num = msg.get("prompt_num")
+            if num is not None:
+                assert num >= prev_num, (
+                    f"prompt_num should be monotonically non-decreasing, "
+                    f"got {num} after {prev_num}"
+                )
+                prev_num = num
+
 
 class TestLineAnchors:
     """Tests for line anchor deep-linking support."""

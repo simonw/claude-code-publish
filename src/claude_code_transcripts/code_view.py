@@ -1302,12 +1302,15 @@ def generate_code_view_html(
 
     msg_id_pattern = re.compile(r'id="(msg-[^"]+)"')
     messages_data = []
+    current_prompt_num = None
     for msg_html in transcript_messages:
         match = msg_id_pattern.search(msg_html)
         msg_id = match.group(1) if match else None
-        # Include prompt_num for user prompts (from msg_to_prompt_num mapping)
-        prompt_num = msg_to_prompt_num.get(msg_id) if msg_id else None
-        messages_data.append({"id": msg_id, "html": msg_html, "prompt_num": prompt_num})
+        # Update current prompt number when we hit a user prompt
+        if msg_id and msg_id in msg_to_prompt_num:
+            current_prompt_num = msg_to_prompt_num[msg_id]
+        # Every message gets the current prompt number (not just user prompts)
+        messages_data.append({"id": msg_id, "html": msg_html, "prompt_num": current_prompt_num})
 
     # Build temp git repo with file history
     if progress_callback:

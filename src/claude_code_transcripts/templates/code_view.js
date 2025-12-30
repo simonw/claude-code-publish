@@ -170,6 +170,9 @@ async function init() {
     const fileData = data.fileData;
     const messagesData = data.messagesData;
 
+    // Expose for testing
+    window.codeViewData = { messagesData, fileData };
+
     // Windowed rendering state
     // We render a "window" of messages, not necessarily starting from 0
     const CHUNK_SIZE = 50;
@@ -1180,7 +1183,7 @@ async function init() {
         return text;
     }
 
-    // Get the prompt number for a user message from server-provided data
+    // Get the prompt number for any message from server-provided data
     function getPromptNumber(messageEl) {
         const msgId = messageEl.id;
         if (!msgId) return null;
@@ -1188,19 +1191,8 @@ async function init() {
         const msgIndex = msgIdToIndex.get(msgId);
         if (msgIndex === undefined) return null;
 
-        // Use server-provided prompt_num (canonical source of truth)
-        const msg = messagesData[msgIndex];
-        if (msg && msg.prompt_num) {
-            return msg.prompt_num;
-        }
-
-        // For non-prompt messages, find the most recent prompt before this message
-        for (let i = msgIndex - 1; i >= 0; i--) {
-            if (messagesData[i].prompt_num) {
-                return messagesData[i].prompt_num;
-            }
-        }
-        return null;
+        // Every message has prompt_num set by the server
+        return messagesData[msgIndex]?.prompt_num || null;
     }
 
     // Cache the pinned message height to avoid flashing when it's hidden
