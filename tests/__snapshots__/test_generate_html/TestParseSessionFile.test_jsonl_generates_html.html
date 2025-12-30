@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Claude Code transcript - Index</title>
-    <style>
-:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
+    <style>:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
 .container { max-width: 800px; margin: 0 auto; }
@@ -20,6 +19,7 @@ h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom:
 .tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
 .tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
 .message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
 .role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .user .role-label { color: var(--user-border); }
 time { color: var(--text-muted); font-size: 0.8rem; }
@@ -104,6 +104,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .index-item a { display: block; text-decoration: none; color: inherit; }
 .index-item a:hover { background: rgba(25, 118, 210, 0.1); }
 .index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.index-item-header .header-actions { display: flex; align-items: center; gap: 8px; }
 .index-item-number { font-weight: 600; color: var(--user-border); }
 .index-item-content { padding: 16px; }
 .index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
@@ -137,11 +138,16 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .search-result { margin-bottom: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .search-result a { display: block; text-decoration: none; color: inherit; }
 .search-result a:hover { background: rgba(25, 118, 210, 0.05); }
-.search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
+.search-result-header { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(0,0,0,0.03); border-bottom: 1px solid rgba(0,0,0,0.06); }
+.search-result-page { font-size: 0.8rem; color: var(--text-muted); text-decoration: none; }
+.search-result-page:hover { text-decoration: underline; }
 .search-result-content { padding: 12px; }
 .search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
-</style>
+copy-button { display: inline-block; margin-right: 8px; }
+copy-button button { background: transparent; border: 1px solid var(--text-muted); border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+copy-button button:hover { background: rgba(0,0,0,0.05); border-color: var(--user-border); color: var(--user-border); }
+copy-button button.copied { background: #e8f5e9; border-color: #4caf50; color: #2e7d32; }
+@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }</style>
 </head>
 <body>
     <div class="container">
@@ -165,9 +171,9 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 
         <p style="color: var(--text-muted); margin-bottom: 24px;">2 prompts · 7 messages · 2 tool calls · 1 commits · 1 pages</p>
         
-<div class="index-item"><a href="page-001.html#msg-2025-12-24T10-00-00-000Z"><div class="index-item-header"><span class="index-item-number">#1</span><time datetime="2025-12-24T10:00:00.000Z" data-timestamp="2025-12-24T10:00:00.000Z">2025-12-24T10:00:00.000Z</time></div><div class="index-item-content"><p>Create a hello world function</p></div></a><div class="index-item-stats"><span>1 write · 1 bash</span>
-</div></div><div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">abc1234</span><time datetime="2025-12-24T10:00:20.000Z" data-timestamp="2025-12-24T10:00:20.000Z">2025-12-24T10:00:20.000Z</time></div><div class="index-commit-msg">Add hello function</div></div>
-<div class="index-item"><a href="page-001.html#msg-2025-12-24T10-01-00-000Z"><div class="index-item-header"><span class="index-item-number">#2</span><time datetime="2025-12-24T10:01:00.000Z" data-timestamp="2025-12-24T10:01:00.000Z">2025-12-24T10:01:00.000Z</time></div><div class="index-item-content"><p>Now add a goodbye function</p></div></a></div>
+<div class="index-item"><a href="page-001.html#msg-2025-12-24T10-00-00-000Z"><div class="index-item-header"><span class="index-item-number">#1</span><span class="header-actions"><copy-button label="Copy Markdown" data-content="Create a hello world function"></copy-button><time datetime="2025-12-24T10:00:00.000Z" data-timestamp="2025-12-24T10:00:00.000Z">2025-12-24T10:00:00.000Z</time></span></div><div class="index-item-content"><p>Create a hello world function</p></div></a><div class="index-item-stats"><span>1 write · 1 bash</span>
+</div></div><div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">abc1234</span><span class="header-actions"><copy-button label="Copy text" data-content-from=".index-commit-msg"></copy-button><time datetime="2025-12-24T10:00:20.000Z" data-timestamp="2025-12-24T10:00:20.000Z">2025-12-24T10:00:20.000Z</time></span></div><div class="index-commit-msg">Add hello function</div></div>
+<div class="index-item"><a href="page-001.html#msg-2025-12-24T10-01-00-000Z"><div class="index-item-header"><span class="index-item-number">#2</span><span class="header-actions"><copy-button label="Copy Markdown" data-content="Now add a goodbye function"></copy-button><time datetime="2025-12-24T10:01:00.000Z" data-timestamp="2025-12-24T10:01:00.000Z">2025-12-24T10:01:00.000Z</time></span></div><div class="index-item-content"><p>Now add a goodbye function</p></div></a></div>
         
 
 <div class="pagination">
@@ -357,8 +363,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 
                 var resultDiv = document.createElement('div');
                 resultDiv.className = 'search-result';
-                resultDiv.innerHTML = '<a href="' + link + '">' +
-                    '<div class="search-result-page">' + escapeHtml(pageFile) + '</div>' +
+                resultDiv.innerHTML = '<div class="search-result-header">' +
+                    '<copy-button label="Copy text" data-content-from=".search-result-content"></copy-button>' +
+                    '<a href="' + link + '" class="search-result-page">' + escapeHtml(pageFile) + '</a>' +
+                    '</div>' +
+                    '<a href="' + link + '">' +
                     '<div class="search-result-content">' + clone.innerHTML + '</div>' +
                     '</a>';
                 searchResults.appendChild(resultDiv);
@@ -471,7 +480,42 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 })();
         </script>
     </div>
-    <script>
+    <script>class CopyButton extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+    }
+    connectedCallback() {
+        const label = this.getAttribute('label') || 'Copy';
+        const style = document.createElement('style');
+        style.textContent = 'button { background: transparent; border: 1px solid #757575; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; color: #757575; cursor: pointer; white-space: nowrap; font-family: inherit; } button:hover { background: rgba(0,0,0,0.05); border-color: #1976d2; color: #1976d2; } button.copied { background: #e8f5e9; border-color: #4caf50; color: #2e7d32; }';
+        const btn = document.createElement('button');
+        btn.textContent = label;
+        btn.addEventListener('click', (e) => this.handleClick(e, btn, label));
+        this.shadowRoot.appendChild(style);
+        this.shadowRoot.appendChild(btn);
+    }
+    handleClick(e, btn, label) {
+        e.preventDefault();
+        e.stopPropagation();
+        let content = this.getAttribute('data-content');
+        if (!content) {
+            const selector = this.getAttribute('data-content-from');
+            if (selector) {
+                const el = this.closest('.message, .index-item, .index-commit, .search-result')?.querySelector(selector) || document.querySelector(selector);
+                if (el) content = el.innerText;
+            }
+        }
+        if (content) {
+            navigator.clipboard.writeText(content).then(() => {
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => { btn.textContent = label; btn.classList.remove('copied'); }, 2000);
+            });
+        }
+    }
+}
+customElements.define('copy-button', CopyButton);
 document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
     const timestamp = el.getAttribute('data-timestamp');
     const date = new Date(timestamp);
@@ -499,7 +543,6 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
             else { wrapper.classList.remove('expanded'); wrapper.classList.add('truncated'); btn.textContent = 'Show more'; }
         });
     }
-});
-</script>
+});</script>
 </body>
 </html>

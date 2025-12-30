@@ -35,6 +35,16 @@ def get_template(name):
     return _jinja_env.get_template(name)
 
 
+def get_css():
+    """Load CSS from template file."""
+    return get_template("styles.css").render()
+
+
+def get_js():
+    """Load JavaScript from template file."""
+    return get_template("scripts.js").render()
+
+
 # Regex to match git commit output: [branch hash] message
 COMMIT_PATTERN = re.compile(r"\[[\w\-/]+ ([a-f0-9]{7,})\] (.+?)(?:\n|$)")
 
@@ -401,8 +411,8 @@ def _generate_project_index(project, output_dir):
         project_name=project["name"],
         sessions=sessions_data,
         session_count=len(sessions_data),
-        css=CSS,
-        js=JS,
+        css=get_css(),
+        js=get_js(),
     )
 
     output_path = output_dir / "index.html"
@@ -440,8 +450,8 @@ def _generate_master_index(projects, output_dir):
         projects=projects_data,
         total_projects=len(projects),
         total_sessions=total_sessions,
-        css=CSS,
-        js=JS,
+        css=get_css(),
+        js=get_js(),
     )
 
     output_path = output_dir / "index.html"
@@ -852,6 +862,37 @@ def is_tool_result_message(message_data):
     )
 
 
+def extract_markdown_content(message_data, log_type):
+    """Extract markdown/text content from a message for copying."""
+    content = message_data.get("content", "")
+    if log_type == "user":
+        if isinstance(content, str):
+            if not is_json_like(content):
+                return content, "Copy Markdown", None
+            return None, "Copy JSON", ".message-content pre"
+        elif isinstance(content, list):
+            # Check for tool results (use selector) or text (use content)
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "tool_result":
+                        return None, "Copy text", ".message-content"
+                    if block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text and not is_json_like(text):
+                            return text, "Copy Markdown", None
+            return None, "Copy text", ".message-content"
+    elif log_type == "assistant":
+        # For assistant messages, extract text blocks
+        if isinstance(content, list):
+            texts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    texts.append(block.get("text", ""))
+            if texts:
+                return "\n\n".join(texts), "Copy Markdown", None
+    return None, "Copy text", ".message-content"
+
+
 def render_message(log_type, message_json, timestamp):
     if not message_json:
         return ""
@@ -874,178 +915,20 @@ def render_message(log_type, message_json, timestamp):
     if not content_html.strip():
         return ""
     msg_id = make_msg_id(timestamp)
-    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
+    copy_content, copy_label, copy_from = extract_markdown_content(
+        message_data, log_type
+    )
+    return _macros.message(
+        role_class,
+        role_label,
+        msg_id,
+        timestamp,
+        content_html,
+        copy_label=copy_label,
+        copy_content=copy_content,
+        copy_from=copy_from,
+    )
 
-
-CSS = """
-:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
-* { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
-.container { max-width: 800px; margin: 0 auto; }
-h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
-.header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
-.header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
-.message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
-.message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
-.tool-reply .role-label { color: #e65100; }
-.tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
-.tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.user .role-label { color: var(--user-border); }
-time { color: var(--text-muted); font-size: 0.8rem; }
-.timestamp-link { color: inherit; text-decoration: none; }
-.timestamp-link:hover { text-decoration: underline; }
-.message:target { animation: highlight 2s ease-out; }
-@keyframes highlight { 0% { background-color: rgba(25, 118, 210, 0.2); } 100% { background-color: transparent; } }
-.message-content { padding: 16px; }
-.message-content p { margin: 0 0 12px 0; }
-.message-content p:last-child { margin-bottom: 0; }
-.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 0.9rem; color: var(--thinking-text); }
-.thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
-.thinking p { margin: 8px 0; }
-.assistant-text { margin: 8px 0; }
-.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.tool-icon { font-size: 1.1rem; }
-.tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
-.tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-result.tool-error { background: var(--tool-error-bg); }
-.file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
-.write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
-.edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
-.file-tool-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.write-header { color: #2e7d32; }
-.edit-header { color: #e65100; }
-.file-tool-icon { font-size: 1rem; }
-.file-tool-path { font-family: monospace; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 4px; }
-.file-tool-fullpath { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
-.file-content { margin: 0; }
-.edit-section { display: flex; margin: 4px 0; border-radius: 4px; overflow: hidden; }
-.edit-label { padding: 8px 12px; font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
-.edit-old { background: #fce4ec; }
-.edit-old .edit-label { color: #b71c1c; background: #f8bbd9; }
-.edit-old .edit-content { color: #880e4f; }
-.edit-new { background: #e8f5e9; }
-.edit-new .edit-label { color: #1b5e20; background: #a5d6a7; }
-.edit-new .edit-content { color: #1b5e20; }
-.edit-content { margin: 0; flex: 1; background: transparent; font-size: 0.85rem; }
-.edit-replace-all { font-size: 0.75rem; font-weight: normal; color: var(--text-muted); }
-.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #e6f4ea); }
-.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff0e5); }
-.todo-list { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border: 1px solid #81c784; border-radius: 8px; padding: 12px; margin: 12px 0; }
-.todo-header { font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.todo-items { list-style: none; margin: 0; padding: 0; }
-.todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 0.9rem; }
-.todo-item:last-child { border-bottom: none; }
-.todo-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%; }
-.todo-completed .todo-icon { color: #2e7d32; background: rgba(46, 125, 50, 0.15); }
-.todo-completed .todo-content { color: #558b2f; text-decoration: line-through; }
-.todo-in-progress .todo-icon { color: #f57c00; background: rgba(245, 124, 0, 0.15); }
-.todo-in-progress .todo-content { color: #e65100; font-weight: 500; }
-.todo-pending .todo-icon { color: #757575; background: rgba(0,0,0,0.05); }
-.todo-pending .todo-content { color: #616161; }
-pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
-pre.json { color: #e0e0e0; }
-code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-pre code { background: none; padding: 0; }
-.user-content { margin: 0; }
-.truncatable { position: relative; }
-.truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
-.truncatable.truncated::after { content: ''; position: absolute; bottom: 32px; left: 0; right: 0; height: 60px; background: linear-gradient(to bottom, transparent, var(--card-bg)); pointer-events: none; }
-.message.user .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--user-bg)); }
-.message.tool-reply .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.tool-use .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-bg)); }
-.tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-result-bg)); }
-.expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
-.expand-btn:hover { background: rgba(0,0,0,0.1); }
-.truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
-.pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
-.pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
-.pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
-.pagination a:hover { background: var(--user-bg); }
-.pagination .current { background: var(--user-border); color: white; }
-.pagination .disabled { color: var(--text-muted); border: 1px solid #ddd; }
-.pagination .index-link { background: var(--user-border); color: white; }
-details.continuation { margin-bottom: 16px; }
-details.continuation summary { cursor: pointer; padding: 12px 16px; background: var(--user-bg); border-left: 4px solid var(--user-border); border-radius: 12px; font-weight: 500; color: var(--text-muted); }
-details.continuation summary:hover { background: rgba(25, 118, 210, 0.15); }
-details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom: 0; }
-.index-item { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background: var(--user-bg); border-left: 4px solid var(--user-border); }
-.index-item a { display: block; text-decoration: none; color: inherit; }
-.index-item a:hover { background: rgba(25, 118, 210, 0.1); }
-.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.index-item-number { font-weight: 600; color: var(--user-border); }
-.index-item-content { padding: 16px; }
-.index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
-.index-item-commit { margin-top: 6px; padding: 4px 8px; background: #fff3e0; border-radius: 4px; font-size: 0.85rem; color: #e65100; }
-.index-item-commit code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; margin-right: 6px; }
-.commit-card { margin: 8px 0; padding: 10px 14px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 6px; }
-.commit-card a { text-decoration: none; color: #5d4037; display: block; }
-.commit-card a:hover { color: #e65100; }
-.commit-card-hash { font-family: monospace; color: #e65100; font-weight: 600; margin-right: 8px; }
-.index-commit { margin-bottom: 12px; padding: 10px 16px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.index-commit a { display: block; text-decoration: none; color: inherit; }
-.index-commit a:hover { background: rgba(255, 152, 0, 0.1); margin: -10px -16px; padding: 10px 16px; border-radius: 8px; }
-.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 4px; }
-.index-commit-hash { font-family: monospace; color: #e65100; font-weight: 600; }
-.index-commit-msg { color: #5d4037; }
-.index-item-long-text { margin-top: 8px; padding: 12px; background: var(--card-bg); border-radius: 8px; border-left: 3px solid var(--assistant-border); }
-.index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
-.index-item-long-text-content { color: var(--text-color); }
-#search-box { display: none; align-items: center; gap: 8px; }
-#search-box input { padding: 6px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; width: 180px; }
-#search-box button, #modal-search-btn, #modal-close-btn { background: var(--user-border); color: white; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-#search-box button:hover, #modal-search-btn:hover { background: #1565c0; }
-#modal-close-btn { background: var(--text-muted); margin-left: 8px; }
-#modal-close-btn:hover { background: #616161; }
-#search-modal[open] { border: none; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
-#search-modal::backdrop { background: rgba(0,0,0,0.5); }
-.search-modal-header { display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--assistant-border); background: var(--bg-color); border-radius: 12px 12px 0 0; }
-.search-modal-header input { flex: 1; padding: 8px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; }
-#search-status { padding: 8px 16px; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-#search-results { flex: 1; overflow-y: auto; padding: 16px; }
-.search-result { margin-bottom: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.search-result a { display: block; text-decoration: none; color: inherit; }
-.search-result a:hover { background: rgba(25, 118, 210, 0.05); }
-.search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-.search-result-content { padding: 12px; }
-.search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
-"""
-
-JS = """
-document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
-    const timestamp = el.getAttribute('data-timestamp');
-    const date = new Date(timestamp);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    if (isToday) { el.textContent = timeStr; }
-    else { el.textContent = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + timeStr; }
-});
-document.querySelectorAll('pre.json').forEach(function(el) {
-    let text = el.textContent;
-    text = text.replace(/"([^"]+)":/g, '<span style="color: #ce93d8">"$1"</span>:');
-    text = text.replace(/: "([^"]*)"/g, ': <span style="color: #81d4fa">"$1"</span>');
-    text = text.replace(/: (\\d+)/g, ': <span style="color: #ffcc80">$1</span>');
-    text = text.replace(/: (true|false|null)/g, ': <span style="color: #f48fb1">$1</span>');
-    el.innerHTML = text;
-});
-document.querySelectorAll('.truncatable').forEach(function(wrapper) {
-    const content = wrapper.querySelector('.truncatable-content');
-    const btn = wrapper.querySelector('.expand-btn');
-    if (content.scrollHeight > 250) {
-        wrapper.classList.add('truncated');
-        btn.addEventListener('click', function() {
-            if (wrapper.classList.contains('truncated')) { wrapper.classList.remove('truncated'); wrapper.classList.add('expanded'); btn.textContent = 'Show less'; }
-            else { wrapper.classList.remove('expanded'); wrapper.classList.add('truncated'); btn.textContent = 'Show more'; }
-        });
-    }
-});
-"""
 
 # JavaScript to fix relative URLs when served via gistpreview.github.io
 GIST_PREVIEW_JS = r"""
@@ -1230,8 +1113,8 @@ def generate_html(json_path, output_dir, github_repo=None):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
         page_content = page_template.render(
-            css=CSS,
-            js=JS,
+            css=get_css(),
+            js=get_js(),
             page_num=page_num,
             total_pages=total_pages,
             pagination_html=pagination_html,
@@ -1293,7 +1176,12 @@ def generate_html(json_path, output_dir, github_repo=None):
         stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
 
         item_html = _macros.index_item(
-            prompt_num, link, conv["timestamp"], rendered_content, stats_html
+            prompt_num,
+            link,
+            conv["timestamp"],
+            rendered_content,
+            stats_html,
+            copy_content=conv["user_text"],
         )
         timeline_items.append((conv["timestamp"], "prompt", item_html))
 
@@ -1311,8 +1199,8 @@ def generate_html(json_path, output_dir, github_repo=None):
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
+        css=get_css(),
+        js=get_js(),
         pagination_html=index_pagination,
         prompt_num=prompt_num,
         total_messages=total_messages,
@@ -1700,8 +1588,8 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
         page_content = page_template.render(
-            css=CSS,
-            js=JS,
+            css=get_css(),
+            js=get_js(),
             page_num=page_num,
             total_pages=total_pages,
             pagination_html=pagination_html,
@@ -1763,7 +1651,12 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
 
         item_html = _macros.index_item(
-            prompt_num, link, conv["timestamp"], rendered_content, stats_html
+            prompt_num,
+            link,
+            conv["timestamp"],
+            rendered_content,
+            stats_html,
+            copy_content=conv["user_text"],
         )
         timeline_items.append((conv["timestamp"], "prompt", item_html))
 
@@ -1781,8 +1674,8 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
+        css=get_css(),
+        js=get_js(),
         pagination_html=index_pagination,
         prompt_num=prompt_num,
         total_messages=total_messages,

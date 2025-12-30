@@ -1537,3 +1537,60 @@ class TestSearchFeature:
 
         # Total pages should be embedded for JS to know how many pages to fetch
         assert "totalPages" in index_html or "total_pages" in index_html
+
+
+class TestCopyButton:
+    """Tests for the copy button web component feature."""
+
+    def test_copy_button_component_defined(self, output_dir):
+        """Test that the copy-button web component is defined in JavaScript."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # The custom element should be defined
+        assert "customElements.define" in page_html
+        assert "copy-button" in page_html
+
+    def test_page_messages_have_copy_buttons(self, output_dir):
+        """Test that messages in page HTML have copy buttons with data-content."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # Messages should contain copy-button elements
+        assert "<copy-button" in page_html
+        # Copy buttons should have data-content for markdown or data-content-from for selectors
+        assert "data-content" in page_html
+
+    def test_index_items_have_copy_buttons(self, output_dir):
+        """Test that index items have copy buttons."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+
+        # Index items should contain copy-button elements
+        assert "<copy-button" in index_html
+
+    def test_copy_button_has_label_attribute(self, output_dir):
+        """Test that copy buttons have label attributes for button text."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # Copy buttons should have a label attribute
+        assert 'label="' in page_html
+
+    def test_copy_button_css_present(self, output_dir):
+        """Test that copy button CSS styles are present."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # CSS should style the copy button
+        assert "copy-button" in page_html

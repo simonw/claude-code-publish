@@ -163,8 +163,11 @@
 
                 var resultDiv = document.createElement('div');
                 resultDiv.className = 'search-result';
-                resultDiv.innerHTML = '<a href="' + link + '">' +
-                    '<div class="search-result-page">' + escapeHtml(pageFile) + '</div>' +
+                resultDiv.innerHTML = '<div class="search-result-header">' +
+                    '<copy-button label="Copy text" data-content-from=".search-result-content"></copy-button>' +
+                    '<a href="' + link + '" class="search-result-page">' + escapeHtml(pageFile) + '</a>' +
+                    '</div>' +
+                    '<a href="' + link + '">' +
                     '<div class="search-result-content">' + clone.innerHTML + '</div>' +
                     '</a>';
                 searchResults.appendChild(resultDiv);

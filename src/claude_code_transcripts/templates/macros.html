@@ -147,8 +147,8 @@
 {%- endmacro %}
 
 {# Message wrapper - content_html is pre-rendered so needs |safe #}
-{% macro message(role_class, role_label, msg_id, timestamp, content_html) %}
-<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></div><div class="message-content">{{ content_html|safe }}</div></div>
+{% macro message(role_class, role_label, msg_id, timestamp, content_html, copy_label='Copy Markdown', copy_content=None, copy_from=None) %}
+<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><span class="header-actions">{% if copy_content %}<copy-button label="{{ copy_label }}" data-content="{{ copy_content|e }}"></copy-button>{% elif copy_from %}<copy-button label="{{ copy_label }}" data-content-from="{{ copy_from }}"></copy-button>{% endif %}<a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></span></div><div class="message-content">{{ content_html|safe }}</div></div>
 {%- endmacro %}
 
 {# Continuation wrapper - content_html is pre-rendered so needs |safe #}
@@ -157,17 +157,17 @@
 {%- endmacro %}
 
 {# Index item (prompt) - rendered_content and stats_html are pre-rendered so need |safe #}
-{% macro index_item(prompt_num, link, timestamp, rendered_content, stats_html) %}
-<div class="index-item"><a href="{{ link }}"><div class="index-item-header"><span class="index-item-number">#{{ prompt_num }}</span><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></div><div class="index-item-content">{{ rendered_content|safe }}</div></a>{{ stats_html|safe }}</div>
+{% macro index_item(prompt_num, link, timestamp, rendered_content, stats_html, copy_content=None) %}
+<div class="index-item"><a href="{{ link }}"><div class="index-item-header"><span class="index-item-number">#{{ prompt_num }}</span><span class="header-actions">{% if copy_content %}<copy-button label="Copy Markdown" data-content="{{ copy_content|e }}"></copy-button>{% endif %}<time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></span></div><div class="index-item-content">{{ rendered_content|safe }}</div></a>{{ stats_html|safe }}</div>
 {%- endmacro %}
 
 {# Index commit #}
 {% macro index_commit(commit_hash, commit_msg, timestamp, github_repo) %}
 {%- if github_repo -%}
 {%- set github_link = 'https://github.com/' ~ github_repo ~ '/commit/' ~ commit_hash -%}
-<div class="index-commit"><a href="{{ github_link }}"><div class="index-commit-header"><span class="index-commit-hash">{{ commit_hash[:7] }}</span><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></div><div class="index-commit-msg">{{ commit_msg }}</div></a></div>
+<div class="index-commit"><a href="{{ github_link }}"><div class="index-commit-header"><span class="index-commit-hash">{{ commit_hash[:7] }}</span><span class="header-actions"><copy-button label="Copy text" data-content-from=".index-commit-msg"></copy-button><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></span></div><div class="index-commit-msg">{{ commit_msg }}</div></a></div>
 {%- else -%}
-<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{{ commit_hash[:7] }}</span><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></div><div class="index-commit-msg">{{ commit_msg }}</div></div>
+<div class="index-commit"><div class="index-commit-header"><span class="index-commit-hash">{{ commit_hash[:7] }}</span><span class="header-actions"><copy-button label="Copy text" data-content-from=".index-commit-msg"></copy-button><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></span></div><div class="index-commit-msg">{{ commit_msg }}</div></div>
 {%- endif %}
 {%- endmacro %}
 
