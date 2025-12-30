@@ -1828,6 +1828,23 @@ def generate_html(
 
     # Generate code view if requested
     if has_code_view:
+        num_ops = len(file_operations)
+        num_files = len(set(op.file_path for op in file_operations))
+
+        def code_view_progress(phase, current, total):
+            if phase == "operations" and num_ops > 20:
+                print(
+                    f"\rCode view: replaying operation {current}/{total}...",
+                    end="",
+                    flush=True,
+                )
+            elif phase == "files" and num_files > 5:
+                print(
+                    f"\rCode view: processing file {current}/{total}...",
+                    end="",
+                    flush=True,
+                )
+
         msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
             conversations
         )
@@ -1839,8 +1856,11 @@ def generate_html(
             msg_to_context_id=msg_to_context_id,
             msg_to_prompt_num=msg_to_prompt_num,
             total_pages=total_pages,
+            progress_callback=code_view_progress,
         )
-        num_files = len(set(op.file_path for op in file_operations))
+        # Clear progress line
+        if num_ops > 20 or num_files > 5:
+            print("\r" + " " * 60 + "\r", end="", flush=True)
         print(f"Generated code.html ({num_files} files)")
 
 
@@ -2435,6 +2455,21 @@ def generate_html_from_session_data(
 
     # Generate code view if requested
     if has_code_view:
+        num_ops = len(file_operations)
+        num_files = len(set(op.file_path for op in file_operations))
+
+        def code_view_progress(phase, current, total):
+            if phase == "operations" and num_ops > 20:
+                click.echo(
+                    f"\rCode view: replaying operation {current}/{total}...",
+                    nl=False,
+                )
+            elif phase == "files" and num_files > 5:
+                click.echo(
+                    f"\rCode view: processing file {current}/{total}...",
+                    nl=False,
+                )
+
         msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
             conversations
         )
@@ -2446,8 +2481,11 @@ def generate_html_from_session_data(
             msg_to_context_id=msg_to_context_id,
             msg_to_prompt_num=msg_to_prompt_num,
             total_pages=total_pages,
+            progress_callback=code_view_progress,
         )
-        num_files = len(set(op.file_path for op in file_operations))
+        # Clear progress line
+        if num_ops > 20 or num_files > 5:
+            click.echo("\r" + " " * 60 + "\r", nl=False)
         click.echo(f"Generated code.html ({num_files} files)")
 
 

@@ -711,6 +711,7 @@ def _fetch_initial_content(
 
 def build_file_history_repo(
     operations: List[FileOperation],
+    progress_callback=None,
 ) -> Tuple[Repo, Path, Dict[str, str]]:
     """Create a temp git repo that replays all file operations as commits.
 
@@ -721,6 +722,7 @@ def build_file_history_repo(
 
     Args:
         operations: List of FileOperation objects in chronological order.
+        progress_callback: Optional callback for progress updates.
 
     Returns:
         Tuple of (repo, temp_dir, path_mapping) where:
@@ -756,7 +758,10 @@ def build_file_history_repo(
         sorted_ops, session_start, session_end
     )
 
-    for op in sorted_ops:
+    total_ops = len(sorted_ops)
+    for op_idx, op in enumerate(sorted_ops):
+        if progress_callback:
+            progress_callback("operations", op_idx + 1, total_ops)
         # Delete operations aren't in path_mapping - handle them specially
         if op.operation_type == OP_DELETE:
             rel_path = None  # Will find matching files below
@@ -1259,6 +1264,7 @@ def generate_code_view_html(
     msg_to_context_id: Dict[str, str] = None,
     msg_to_prompt_num: Dict[str, int] = None,
     total_pages: int = 1,
+    progress_callback=None,
 ) -> None:
     """Generate the code.html file with three-pane layout.
 
@@ -1270,6 +1276,7 @@ def generate_code_view_html(
         msg_to_context_id: Mapping from msg_id to context_msg_id for blame coloring.
         msg_to_prompt_num: Mapping from msg_id to prompt number (1-indexed).
         total_pages: Total number of transcript pages (for search feature).
+        progress_callback: Optional callback for progress updates. Called with (phase, current, total).
     """
     # Import here to avoid circular imports
     from claude_code_transcripts import get_template
@@ -1301,7 +1308,11 @@ def generate_code_view_html(
         messages_data.append({"id": msg_id, "html": msg_html})
 
     # Build temp git repo with file history
-    repo, temp_dir, path_mapping = build_file_history_repo(operations)
+    if progress_callback:
+        progress_callback("operations", 0, len(operations))
+    repo, temp_dir, path_mapping = build_file_history_repo(
+        operations, progress_callback=progress_callback
+    )
 
     try:
         # Build file data for each file
@@ -1309,8 +1320,13 @@ def generate_code_view_html(
 
         # Group operations by file (already sorted by timestamp)
         ops_by_file = group_operations_by_file(operations)
+        total_files = len(ops_by_file)
+        file_count = 0
 
         for orig_path, file_ops in ops_by_file.items():
+            file_count += 1
+            if progress_callback:
+                progress_callback("files", file_count, total_files)
             rel_path = path_mapping.get(orig_path, orig_path)
 
             # Get file content
