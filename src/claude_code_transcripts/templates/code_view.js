@@ -1180,7 +1180,8 @@ async function init() {
         return text;
     }
 
-    // Get the prompt number for a user message by counting user messages before it
+    // Get the prompt number for a user message by counting real user prompts before it
+    // Real prompts have "User Prompt #N" label, tool_result messages just have "User"
     function getPromptNumber(messageEl) {
         const msgId = messageEl.id;
         if (!msgId) return null;
@@ -1188,12 +1189,12 @@ async function init() {
         const msgIndex = msgIdToIndex.get(msgId);
         if (msgIndex === undefined) return null;
 
-        // Count user messages from start up to this message
-        // Include continuation messages to match server-side counting
+        // Count real user prompts (not tool_results) from start up to this message
+        // Server marks real prompts with ">User Prompt #" in the HTML
         let promptNum = 0;
         for (let i = 0; i <= msgIndex && i < messagesData.length; i++) {
             const msg = messagesData[i];
-            if (msg.html && msg.html.includes('class="message user"')) {
+            if (msg.html && msg.html.includes('>User Prompt #')) {
                 promptNum++;
             }
         }
@@ -1202,6 +1203,8 @@ async function init() {
 
     // Cache the pinned message height to avoid flashing when it's hidden
     let cachedPinnedHeight = 0;
+    // Store pinned message ID separately (element reference may become stale after teleportation)
+    let currentPinnedMsgId = null;
 
     function updatePinnedUserMessage() {
         if (!pinnedUserMessage || !transcriptContent || !transcriptPanel) return;
@@ -1211,6 +1214,7 @@ async function init() {
         if (userMessages.length === 0) {
             pinnedUserMessage.style.display = 'none';
             currentPinnedMessage = null;
+            currentPinnedMsgId = null;
             return;
         }
 
@@ -1254,6 +1258,7 @@ async function init() {
 
         if (messageToPin && messageToPin !== currentPinnedMessage) {
             currentPinnedMessage = messageToPin;
+            currentPinnedMsgId = messageToPin.id;
             const promptNum = getPromptNumber(messageToPin);
             // Update label with prompt number
             if (pinnedUserLabel) {
@@ -1261,12 +1266,22 @@ async function init() {
             }
             pinnedUserContent.textContent = extractUserMessageText(messageToPin);
             pinnedUserMessage.style.display = 'block';
+            // Use message ID to look up element on click (element may be stale after teleportation)
             pinnedUserMessage.onclick = () => {
-                messageToPin.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if (currentPinnedMsgId) {
+                    const msgEl = transcriptContent.querySelector(`#${CSS.escape(currentPinnedMsgId)}`);
+                    if (msgEl) {
+                        msgEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } else {
+                        // Element not in DOM (teleported away) - use scrollToMessage to bring it back
+                        scrollToMessage(currentPinnedMsgId);
+                    }
+                }
             };
         } else if (!messageToPin) {
             pinnedUserMessage.style.display = 'none';
             currentPinnedMessage = null;
+            currentPinnedMsgId = null;
         }
     }
 
