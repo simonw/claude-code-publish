@@ -4,7 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Claude Code transcript{% endblock %}</title>
+{%- if use_external_assets %}
     <link rel="stylesheet" href="styles.css">
+{%- else %}
+    <style>{% include "styles.css" %}</style>
+{%- endif %}
 </head>
 <body>
     <div class="container">
@@ -42,7 +46,12 @@
 
 {%- block content %}{% endblock %}
     </div>
+{%- if use_external_assets %}
     <script src="main.js"></script>
     <script src="search.js"></script>
+{%- else %}
+    <script>{% include "main.js" %}</script>
+    <script>{% include "search.js" %}</script>
+{%- endif %}
 </body>
 </html>

@@ -1567,13 +1567,6 @@ def generate_html(
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
 
-    # Copy CSS and JS files from templates to output directory
-    templates_dir = Path(__file__).parent / "templates"
-    for static_file in ["styles.css", "main.js", "search.js"]:
-        src = templates_dir / static_file
-        if src.exists():
-            shutil.copy(src, output_dir / static_file)
-
     # Load session file (supports both JSON and JSONL)
     data = parse_session_file(json_path)
 
@@ -1684,6 +1677,16 @@ def generate_html(
     total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
     use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
 
+    # For large sessions, use external CSS/JS files to reduce HTML size
+    # For small sessions, inline CSS/JS for simplicity
+    use_external_assets = use_page_data_json
+    if use_external_assets:
+        templates_dir = Path(__file__).parent / "templates"
+        for static_file in ["styles.css", "main.js", "search.js"]:
+            src = templates_dir / static_file
+            if src.exists():
+                shutil.copy(src, output_dir / static_file)
+
     if use_page_data_json:
         # Write individual page-data-NNN.json files for gist lazy loading
         # This allows batched uploads and avoids GitHub's gist size limits
@@ -1705,6 +1708,7 @@ def generate_html(
             has_code_view=has_code_view,
             active_tab="transcript",
             use_page_data_json=False,  # Always include content for local viewing
+            use_external_assets=use_external_assets,
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -1798,6 +1802,7 @@ def generate_html(
         has_code_view=has_code_view,
         active_tab="transcript",
         use_index_data_json=False,  # Always include content for local viewing
+        use_external_assets=use_external_assets,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
@@ -2261,6 +2266,16 @@ def generate_html_from_session_data(
     total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
     use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
 
+    # For large sessions, use external CSS/JS files to reduce HTML size
+    # For small sessions, inline CSS/JS for simplicity
+    use_external_assets = use_page_data_json
+    if use_external_assets:
+        templates_dir = Path(__file__).parent / "templates"
+        for static_file in ["styles.css", "main.js", "search.js"]:
+            src = templates_dir / static_file
+            if src.exists():
+                shutil.copy(src, output_dir / static_file)
+
     if use_page_data_json:
         # Write individual page-data-NNN.json files for gist lazy loading
         # This allows batched uploads and avoids GitHub's gist size limits
@@ -2282,6 +2297,7 @@ def generate_html_from_session_data(
             has_code_view=has_code_view,
             active_tab="transcript",
             use_page_data_json=False,  # Always include content for local viewing
+            use_external_assets=use_external_assets,
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -2375,6 +2391,7 @@ def generate_html_from_session_data(
         has_code_view=has_code_view,
         active_tab="transcript",
         use_index_data_json=False,  # Always include content for local viewing
+        use_external_assets=use_external_assets,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")

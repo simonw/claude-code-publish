@@ -1756,47 +1756,41 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # JavaScript is now in external search.js file
-        search_js = (output_dir / "search.js").read_text(encoding="utf-8")
+        # For small sessions, JavaScript is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # JavaScript should handle DOMParser for parsing fetched pages
-        assert "DOMParser" in search_js
+        assert "DOMParser" in index_html
         # JavaScript should handle fetch for getting pages
-        assert "fetch(" in search_js
+        assert "fetch(" in index_html
         # JavaScript should handle #search= URL fragment
-        assert "#search=" in search_js or "search=" in search_js
-        # HTML should reference the external script
-        assert 'src="search.js"' in index_html
+        assert "#search=" in index_html or "search=" in index_html
 
     def test_search_css_present(self, output_dir):
         """Test that search CSS styles are present."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # CSS is now in external styles.css file
-        styles_css = (output_dir / "styles.css").read_text(encoding="utf-8")
+        # For small sessions, CSS is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # CSS should style the search box
-        assert "#search-box" in styles_css or ".search-box" in styles_css
+        assert "#search-box" in index_html
         # CSS should style the search modal
-        assert "#search-modal" in styles_css or ".search-modal" in styles_css
-        # HTML should reference the external stylesheet
-        assert 'href="styles.css"' in index_html
+        assert "#search-modal" in index_html
 
     def test_search_box_hidden_by_default_in_css(self, output_dir):
         """Test that search box is hidden by default (for progressive enhancement)."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
-        # CSS is now in external styles.css file
-        styles_css = (output_dir / "styles.css").read_text(encoding="utf-8")
+        # For small sessions, CSS is inlined in HTML
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Search box should be hidden by default in CSS
         # JavaScript will show it when loaded
-        assert "#search-box" in styles_css
-        assert "display: none" in styles_css
+        assert "#search-box" in index_html
+        assert "display: none" in index_html
 
     def test_search_total_pages_available(self, output_dir):
         """Test that total_pages is available to JavaScript for fetching."""
