@@ -81,52 +81,6 @@ from claude_code_transcripts.code_view import (
 )
 
 
-def is_url(s: str) -> bool:
-    """Check if a string looks like a URL."""
-    return s.startswith("http://") or s.startswith("https://")
-
-
-def fetch_session_from_url(url: str) -> Path:
-    """Fetch a session file from a URL and save to a temp file.
-
-    Args:
-        url: The URL to fetch from.
-
-    Returns:
-        Path to the temporary file containing the session data.
-
-    Raises:
-        click.ClickException: If the fetch fails.
-    """
-    try:
-        response = httpx.get(url, follow_redirects=True, timeout=30.0)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise click.ClickException(
-            f"Failed to fetch URL: {e.response.status_code} {e.response.text[:200]}"
-        )
-    except httpx.RequestError as e:
-        raise click.ClickException(f"Network error fetching URL: {e}")
-
-    # Determine file extension from URL or default to .jsonl
-    url_path = url.split("?")[0]  # Remove query params
-    if url_path.endswith(".json"):
-        suffix = ".json"
-    else:
-        suffix = ".jsonl"
-
-    # Save to temp file
-    fd, temp_path = tempfile.mkstemp(suffix=suffix)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(response.text)
-    except Exception:
-        os.close(fd)
-        raise
-
-    return Path(temp_path)
-
-
 def extract_github_repo_from_url(url: str) -> Optional[str]:
     """Extract 'owner/name' from various GitHub URL formats.
 
@@ -2023,8 +1977,47 @@ def local_cmd(
         webbrowser.open(index_url)
 
 
+def is_url(path):
+    """Check if a path is a URL (starts with http:// or https://)."""
+    return path.startswith("http://") or path.startswith("https://")
+
+
+def fetch_url_to_tempfile(url):
+    """Fetch a URL and save to a temporary file.
+
+    Returns the Path to the temporary file.
+    Raises click.ClickException on network errors.
+    """
+    try:
+        response = httpx.get(url, timeout=60.0, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.RequestError as e:
+        raise click.ClickException(f"Failed to fetch URL: {e}")
+    except httpx.HTTPStatusError as e:
+        raise click.ClickException(
+            f"Failed to fetch URL: {e.response.status_code} {e.response.reason_phrase}"
+        )
+
+    # Determine file extension from URL
+    url_path = url.split("?")[0]  # Remove query params
+    if url_path.endswith(".jsonl"):
+        suffix = ".jsonl"
+    elif url_path.endswith(".json"):
+        suffix = ".json"
+    else:
+        suffix = ".jsonl"  # Default to JSONL
+
+    # Extract a name from the URL for the temp file
+    url_name = Path(url_path).stem or "session"
+
+    temp_dir = Path(tempfile.gettempdir())
+    temp_file = temp_dir / f"claude-url-{url_name}{suffix}"
+    temp_file.write_text(response.text, encoding="utf-8")
+    return temp_file
+
+
 @cli.command("json")
-@click.argument("json_file")
+@click.argument("json_file", type=click.Path())
 @click.option(
     "-o",
     "--output",
@@ -2081,16 +2074,19 @@ def json_cmd(
 ):
     """Convert a Claude Code session JSON/JSONL file or URL to HTML."""
     # Handle URL input
-    temp_file = None
     original_input = json_file
     if is_url(json_file):
-        click.echo(f"Fetching session from URL...")
-        temp_file = fetch_session_from_url(json_file)
-        json_file = str(temp_file)
+        click.echo(f"Fetching {json_file}...")
+        temp_file = fetch_url_to_tempfile(json_file)
+        json_file_path = temp_file
+        # Use URL path for naming
+        url_name = Path(json_file.split("?")[0]).stem or "session"
     else:
-        # Validate local file exists
-        if not Path(json_file).exists():
+        # Validate that local file exists
+        json_file_path = Path(json_file)
+        if not json_file_path.exists():
             raise click.ClickException(f"File not found: {json_file}")
+        url_name = None
 
     # Parse --repo to get GitHub repo name
     github_repo, _ = parse_repo_value(repo)
@@ -2101,13 +2097,16 @@ def json_cmd(
     if output_auto:
         # Use -o as parent dir (or current dir), with auto-named subdirectory
         parent_dir = Path(output) if output else Path(".")
-        output = parent_dir / Path(json_file).stem
+        output = parent_dir / (url_name or json_file_path.stem)
     elif output is None:
-        output = Path(tempfile.gettempdir()) / f"claude-session-{Path(json_file).stem}"
+        output = (
+            Path(tempfile.gettempdir())
+            / f"claude-session-{url_name or json_file_path.stem}"
+        )
 
     output = Path(output)
     generate_html(
-        json_file,
+        json_file_path,
         output,
         github_repo=github_repo,
         code_view=code_view,
@@ -2120,9 +2119,8 @@ def json_cmd(
     # Copy JSON file to output directory if requested
     if include_json and not is_url(original_input):
         output.mkdir(exist_ok=True)
-        json_source = Path(json_file)
-        json_dest = output / json_source.name
-        shutil.copy(json_file, json_dest)
+        json_dest = output / json_file_path.name
+        shutil.copy(json_file_path, json_dest)
         json_size_kb = json_dest.stat().st_size / 1024
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
     elif include_json and is_url(original_input):
