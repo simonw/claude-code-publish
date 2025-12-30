@@ -1137,6 +1137,9 @@ async function init() {
         return promptNum;
     }
 
+    // Cache the pinned message height to avoid flashing when it's hidden
+    let cachedPinnedHeight = 0;
+
     function updatePinnedUserMessage() {
         if (!pinnedUserMessage || !transcriptContent || !transcriptPanel) return;
         if (isInitializing || isScrollingToTarget) return;  // Skip during scrolling to avoid repeated updates
@@ -1150,15 +1153,24 @@ async function init() {
 
         const panelRect = transcriptPanel.getBoundingClientRect();
         const headerHeight = transcriptPanel.querySelector('h3')?.offsetHeight || 0;
-        const pinnedHeight = pinnedUserMessage.offsetHeight || 0;
-        const topThreshold = panelRect.top + headerHeight + pinnedHeight + 10;
+
+        // Use cached height if pinned is hidden, otherwise update cache
+        if (pinnedUserMessage.style.display !== 'none') {
+            cachedPinnedHeight = pinnedUserMessage.offsetHeight || cachedPinnedHeight;
+        }
+        // Use a minimum height estimate if we've never measured it
+        const pinnedHeight = cachedPinnedHeight || 40;
+
+        // Threshold for when a message is considered "scrolled past"
+        const pinnedAreaBottom = panelRect.top + headerHeight + pinnedHeight;
 
         let messageToPin = null;
         let nextUserMessage = null;
 
         for (const msg of userMessages) {
             const msgRect = msg.getBoundingClientRect();
-            if (msgRect.bottom < topThreshold) {
+            // A message should be pinned if its bottom is above the pinned area
+            if (msgRect.bottom < pinnedAreaBottom) {
                 messageToPin = msg;
             } else {
                 // This is the first user message that's visible
@@ -1167,13 +1179,12 @@ async function init() {
             }
         }
 
-        // Hide pinned if the next user message would overlap with the pinned area
-        // (i.e., its top is within the pinned header zone)
-        if (messageToPin && nextUserMessage) {
+        // Hide pinned if the next user message is entering the pinned area
+        // Use a small buffer to prevent flashing at the boundary
+        if (nextUserMessage) {
             const nextRect = nextUserMessage.getBoundingClientRect();
-            const pinnedBottomThreshold = panelRect.top + headerHeight + pinnedHeight + 5;
-            if (nextRect.top < pinnedBottomThreshold) {
-                // Next user message is overlapping - hide the pinned
+            if (nextRect.top < pinnedAreaBottom) {
+                // Next user message is in the pinned area - hide the pinned
                 messageToPin = null;
             }
         }
