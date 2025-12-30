@@ -842,14 +842,13 @@ async function init() {
             currentBlameRanges = fileInfo.blame_ranges || [];
             createEditor(codeContent, content, currentBlameRanges, path);
 
-            // Auto-select the first blame range and scroll transcript to it
+            // Scroll to first blame range and align transcript (without highlighting)
             // With windowed rendering + teleportation, this is now fast
             const firstOpIndex = currentBlameRanges.findIndex(r => r.msg_id);
             if (firstOpIndex >= 0) {
                 const firstOpRange = currentBlameRanges[firstOpIndex];
                 scrollEditorToLine(firstOpRange.start);
-                highlightRange(firstOpIndex, currentBlameRanges, currentEditor);
-                // Scroll transcript to the corresponding message
+                // Scroll transcript to the corresponding message (no highlight on initial load)
                 if (firstOpRange.msg_id) {
                     scrollToMessage(firstOpRange.msg_id);
                 }
@@ -961,11 +960,8 @@ async function init() {
             fileEl.classList.add('selected');
         }
 
-        if (currentFilePath !== filePath) {
-            loadFile(filePath);
-        }
-
-        requestAnimationFrame(() => {
+        // Helper to scroll and highlight the range
+        const scrollAndHighlight = () => {
             scrollEditorToLine(range.start);
             if (currentEditor && currentBlameRanges.length > 0) {
                 const idx = currentBlameRanges.findIndex(r => r.msg_id === msgId && r.start === range.start);
@@ -973,9 +969,16 @@ async function init() {
                     highlightRange(idx, currentBlameRanges, currentEditor);
                 }
             }
-            // Don't auto-scroll transcript - user is already viewing it and
-            // scrolling to a distant message would render thousands of DOM nodes
-        });
+            // Don't auto-scroll transcript - user is already viewing it
+        };
+
+        if (currentFilePath !== filePath) {
+            loadFile(filePath);
+            // Wait for file to load (loadFile uses setTimeout 10ms + rendering time)
+            setTimeout(scrollAndHighlight, 100);
+        } else {
+            requestAnimationFrame(scrollAndHighlight);
+        }
 
         return true;
     }

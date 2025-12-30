@@ -274,7 +274,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .resize-handle::after { content: ''; position: absolute; left: 3px; top: 50%; transform: translateY(-50%); width: 2px; height: 40px; background: rgba(0,0,0,0.15); border-radius: 1px; }
 
 /* Highlighted message in transcript */
-.message.highlighted { box-shadow: 0 0 0 3px var(--user-border); }
+.message.highlighted { box-shadow: 0 0 0 3px rgba(255, 235, 59, 0.8); }
 
 /* Clickable messages in transcript (code view mode) */
 .transcript-panel .message { cursor: pointer; transition: transform 0.1s ease, box-shadow 0.1s ease; }
