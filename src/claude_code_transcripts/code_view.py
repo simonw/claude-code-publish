@@ -47,38 +47,35 @@ def group_operations_by_file(
     return file_ops
 
 
-def read_blob_content(tree, file_path: str) -> Optional[str]:
-    """Read file content from a git tree/commit as string.
+def read_blob(tree, file_path: str, decode: bool = True) -> Optional[str | bytes]:
+    """Read file content from a git tree/commit.
 
     Args:
         tree: Git tree object (e.g., commit.tree).
         file_path: Relative path to the file within the repo.
+        decode: If True, decode as UTF-8 string; if False, return raw bytes.
 
     Returns:
-        File content as string, or None if not found.
+        File content as string (if decode=True) or bytes (if decode=False),
+        or None if not found.
     """
     try:
         blob = tree / file_path
-        return blob.data_stream.read().decode("utf-8")
+        data = blob.data_stream.read()
+        return data.decode("utf-8") if decode else data
     except (KeyError, TypeError, ValueError):
         return None
+
+
+# Backwards-compatible aliases
+def read_blob_content(tree, file_path: str) -> Optional[str]:
+    """Read file content from a git tree/commit as string."""
+    return read_blob(tree, file_path, decode=True)
 
 
 def read_blob_bytes(tree, file_path: str) -> Optional[bytes]:
-    """Read file content from a git tree/commit as bytes.
-
-    Args:
-        tree: Git tree object (e.g., commit.tree).
-        file_path: Relative path to the file within the repo.
-
-    Returns:
-        File content as bytes, or None if not found.
-    """
-    try:
-        blob = tree / file_path
-        return blob.data_stream.read()
-    except (KeyError, TypeError, ValueError):
-        return None
+    """Read file content from a git tree/commit as bytes."""
+    return read_blob(tree, file_path, decode=False)
 
 
 def parse_iso_timestamp(timestamp: str) -> Optional[datetime]:
@@ -127,7 +124,7 @@ class FileOperation:
     """Represents a single Write or Edit operation on a file."""
 
     file_path: str
-    operation_type: str  # "write" or "edit"
+    operation_type: str  # "write", "edit", or "delete"
     tool_id: str  # tool_use.id for linking
     timestamp: str
     page_num: int  # which page this operation appears on
@@ -140,6 +137,9 @@ class FileOperation:
     old_string: Optional[str] = None
     new_string: Optional[str] = None
     replace_all: bool = False
+
+    # For Delete operations
+    is_recursive: bool = False  # True for directory deletes (rm -r)
 
     # Original file content from tool result (for Edit operations)
     # This allows reconstruction without local file access
@@ -393,9 +393,7 @@ def extract_file_operations(
                             timestamp=timestamp,
                             page_num=page_num,
                             msg_id=msg_id,
-                            # Store whether this is a recursive delete (directory)
-                            # We reuse replace_all field for this purpose
-                            replace_all=is_recursive,
+                            is_recursive=is_recursive,
                         )
                     )
 
@@ -840,8 +838,7 @@ def build_file_history_repo(
                 continue
         elif op.operation_type == OP_DELETE:
             # Delete operation - remove file or directory contents
-            # op.replace_all is True for recursive deletes (rm -r)
-            is_recursive = op.replace_all
+            is_recursive = op.is_recursive
             delete_path = op.file_path
 
             # Find files to delete by matching original paths against path_mapping
@@ -1298,8 +1295,6 @@ def generate_code_view_html(
 
     # Extract message IDs from HTML for chunked rendering
     # Messages have format: <div class="message ..." id="msg-...">
-    import re
-
     msg_id_pattern = re.compile(r'id="(msg-[^"]+)"')
     messages_data = []
     current_prompt_num = None
@@ -1484,8 +1479,6 @@ def _truncate_for_tooltip(content: str, max_length: int = 500) -> Tuple[str, boo
     Returns:
         Tuple of (truncated content, was_truncated flag).
     """
-    import re
-
     original_length = len(content)
     was_truncated = False
 
@@ -1608,7 +1601,6 @@ def build_msg_to_user_html(
         make_msg_id,
         render_markdown_text,
     )
-    import json
 
     msg_to_user_html = {}
     msg_to_context_id = {}
