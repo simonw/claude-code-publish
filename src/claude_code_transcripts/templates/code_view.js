@@ -768,6 +768,7 @@ async function init() {
 
     // Scroll to a message in the transcript
     // Uses teleportation for distant messages to avoid rendering thousands of DOM nodes
+    // Always ensures the user prompt for the message is also loaded for context
     function scrollToMessage(msgId) {
         const transcriptContent = document.getElementById('transcript-content');
         const transcriptPanel = document.getElementById('transcript-panel');
@@ -775,20 +776,34 @@ async function init() {
         const msgIndex = msgIdToIndex.get(msgId);
         if (msgIndex === undefined) return;
 
-        // Check if message is far from current window - if so, teleport
-        if (!isNearCurrentWindow(msgIndex)) {
+        // Find the user prompt for this message - we always want it in the window
+        const userPromptIndex = findUserPromptIndex(msgIndex);
+
+        // Check if both user prompt and target message are in/near the window
+        const targetNear = isNearCurrentWindow(msgIndex);
+        const promptNear = isNearCurrentWindow(userPromptIndex);
+
+        // Track if we teleported (need longer delay for layout)
+        let didTeleport = false;
+
+        // If either user prompt or target is far from window, teleport
+        if (!targetNear || !promptNear) {
             teleportToMessage(msgIndex);
-        } else if (msgIndex > windowEnd) {
-            // Message is just past our window, extend it
-            renderMessagesDownTo(msgIndex);
-        } else if (msgIndex < windowStart) {
-            // Message is just before our window, extend it
-            renderMessagesUpTo(msgIndex);
+            didTeleport = true;
+        } else {
+            // Both are near the window - extend as needed
+            // Ensure user prompt is loaded (extend upward if needed)
+            if (userPromptIndex < windowStart) {
+                renderMessagesUpTo(userPromptIndex);
+            }
+            // Ensure target message is loaded (extend downward if needed)
+            if (msgIndex > windowEnd) {
+                renderMessagesDownTo(msgIndex);
+            }
         }
 
-        // Now the message should be rendered, find and highlight it
-        // Use requestAnimationFrame to ensure DOM is updated
-        requestAnimationFrame(() => {
+        // Helper to perform the scroll after DOM is ready
+        const performScroll = () => {
             const message = transcriptContent.querySelector(`#${CSS.escape(msgId)}`);
             if (message) {
                 transcriptContent.querySelectorAll('.message.highlighted').forEach(el => {
@@ -804,22 +819,35 @@ async function init() {
                 isScrollingToTarget = true;
                 if (scrollTargetTimeout) clearTimeout(scrollTargetTimeout);
 
+                // Use instant scroll after teleport (jumping anyway), smooth otherwise
                 transcriptPanel.scrollTo({
                     top: targetScroll,
-                    behavior: 'smooth'
+                    behavior: didTeleport ? 'instant' : 'smooth'
                 });
 
                 // Re-enable pinned updates after scroll completes
                 scrollTargetTimeout = setTimeout(() => {
                     isScrollingToTarget = false;
                     updatePinnedUserMessage();
-                }, 500);
+                }, didTeleport ? 100 : 500);
             }
-        });
+        };
+
+        // After teleporting, wait for layout to complete before scrolling
+        // Teleport adds many DOM elements - need time for browser to lay them out
+        if (didTeleport) {
+            // Use setTimeout to wait for layout, then requestAnimationFrame for paint
+            setTimeout(() => {
+                requestAnimationFrame(performScroll);
+            }, 50);
+        } else {
+            requestAnimationFrame(performScroll);
+        }
     }
 
     // Load file content
-    function loadFile(path) {
+    // skipInitialScroll: if true, don't scroll to first blame range (caller will handle scroll)
+    function loadFile(path, skipInitialScroll = false) {
         currentFilePath = path;
 
         const codeContent = document.getElementById('code-content');
@@ -843,14 +871,16 @@ async function init() {
             createEditor(codeContent, content, currentBlameRanges, path);
 
             // Scroll to first blame range and align transcript (without highlighting)
-            // With windowed rendering + teleportation, this is now fast
-            const firstOpIndex = currentBlameRanges.findIndex(r => r.msg_id);
-            if (firstOpIndex >= 0) {
-                const firstOpRange = currentBlameRanges[firstOpIndex];
-                scrollEditorToLine(firstOpRange.start);
-                // Scroll transcript to the corresponding message (no highlight on initial load)
-                if (firstOpRange.msg_id) {
-                    scrollToMessage(firstOpRange.msg_id);
+            // Skip if caller will handle scroll (e.g., hash navigation to specific line)
+            if (!skipInitialScroll) {
+                const firstOpIndex = currentBlameRanges.findIndex(r => r.msg_id);
+                if (firstOpIndex >= 0) {
+                    const firstOpRange = currentBlameRanges[firstOpIndex];
+                    scrollEditorToLine(firstOpRange.start);
+                    // Scroll transcript to the corresponding message (no highlight on initial load)
+                    if (firstOpRange.msg_id) {
+                        scrollToMessage(firstOpRange.msg_id);
+                    }
                 }
             }
         }, 10);
@@ -926,13 +956,20 @@ async function init() {
                 if (fileEl) {
                     document.querySelectorAll('.tree-file.selected').forEach(el => el.classList.remove('selected'));
                     fileEl.classList.add('selected');
-                    loadFile(filePath);
+                    // Skip initial scroll - scrollAndSelect will handle it
+                    loadFile(filePath, true);
                     // Wait for file to load (loadFile uses setTimeout 10ms + rendering time)
                     setTimeout(scrollAndSelect, 100);
                 }
-            } else {
-                // Same file, just scroll
+                return true;
+            } else if (filePath) {
+                // Same file already loaded, just scroll
                 requestAnimationFrame(scrollAndSelect);
+                return true;
+            } else if (lineNumber && !currentFilePath) {
+                // Line number but no file loaded yet - let caller load first file
+                // We'll handle the scroll after file loads
+                return false;
             }
             return true;
         }
@@ -973,7 +1010,8 @@ async function init() {
         };
 
         if (currentFilePath !== filePath) {
-            loadFile(filePath);
+            // Skip initial scroll - scrollAndHighlight will handle it
+            loadFile(filePath, true);
             // Wait for file to load (loadFile uses setTimeout 10ms + rendering time)
             setTimeout(scrollAndHighlight, 100);
         } else {
@@ -1001,21 +1039,28 @@ async function init() {
         }
     });
 
-    // Auto-select first file, or navigate from hash if present
-    const firstFile = document.querySelector('.tree-file');
-    if (firstFile) {
-        firstFile.click();
+    // Check URL hash for deep-linking FIRST
+    // If hash specifies a file, we load that directly instead of the first file
+    // This avoids race conditions between loading the first file and then the hash file
+    const hashFileLoaded = navigateFromHash();
+
+    // If no hash or hash didn't specify a file, load the first file
+    if (!hashFileLoaded) {
+        const firstFile = document.querySelector('.tree-file');
+        if (firstFile) {
+            firstFile.click();
+            // If hash has just a line number (no file), apply it after first file loads
+            if (window.location.hash.match(/^#L\d+$/)) {
+                setTimeout(() => navigateFromHash(), 100);
+            }
+        }
     }
 
-    // Check URL hash for deep-linking (after first file loads)
-    requestAnimationFrame(() => {
-        navigateFromHash();
-        // Mark initialization complete after a delay to let scrolling finish
-        setTimeout(() => {
-            isInitializing = false;
-            updatePinnedUserMessage();
-        }, 500);
-    });
+    // Mark initialization complete after a delay to let scrolling finish
+    setTimeout(() => {
+        isInitializing = false;
+        updatePinnedUserMessage();
+    }, 500);
 
     // Handle hash changes (browser back/forward)
     window.addEventListener('hashchange', () => {
@@ -1144,11 +1189,11 @@ async function init() {
         if (msgIndex === undefined) return null;
 
         // Count user messages from start up to this message
+        // Include continuation messages to match server-side counting
         let promptNum = 0;
         for (let i = 0; i <= msgIndex && i < messagesData.length; i++) {
             const msg = messagesData[i];
-            if (msg.html && msg.html.includes('class="message user"') &&
-                !msg.html.includes('class="continuation"')) {
+            if (msg.html && msg.html.includes('class="message user"')) {
                 promptNum++;
             }
         }
@@ -1162,7 +1207,7 @@ async function init() {
         if (!pinnedUserMessage || !transcriptContent || !transcriptPanel) return;
         if (isInitializing || isScrollingToTarget) return;  // Skip during scrolling to avoid repeated updates
 
-        const userMessages = transcriptContent.querySelectorAll('.message.user:not(.continuation *)');
+        const userMessages = transcriptContent.querySelectorAll('.message.user:not(.continuation)');
         if (userMessages.length === 0) {
             pinnedUserMessage.style.display = 'none';
             currentPinnedMessage = null;

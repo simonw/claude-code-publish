@@ -1462,7 +1462,7 @@ def _build_tooltip_html(
     Returns:
         Complete HTML string for the tooltip item.
     """
-    return f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">#{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div>{context_html}</div>"""
+    return f"""<div class="index-item tooltip-item"><div class="index-item-header"><span class="index-item-number">User Prompt #{prompt_num}</span><time datetime="{conv_timestamp}" data-timestamp="{conv_timestamp}">{conv_timestamp}</time></div><div class="index-item-content">{rendered_user}</div>{context_html}</div>"""
 
 
 def _truncate_for_tooltip(content: str, max_length: int = 500) -> Tuple[str, bool]:
@@ -1565,21 +1565,20 @@ def _render_context_section(blocks: List[Tuple[str, str, int, str]], render_fn) 
 def _collect_conversation_messages(
     conversations: List[Dict], start_index: int
 ) -> List[Tuple]:
-    """Collect all messages from a conversation and its continuations.
+    """Collect all messages from a conversation.
+
+    Previously this also collected following continuation conversations,
+    but now we process each conversation (including continuations) separately
+    to match how the HTML renderer counts prompt numbers.
 
     Args:
         conversations: Full list of conversation dicts.
-        start_index: Index of the starting conversation.
+        start_index: Index of the conversation.
 
     Returns:
         List of (log_type, message_json, timestamp) tuples.
     """
-    all_messages = list(conversations[start_index].get("messages", []))
-    for j in range(start_index + 1, len(conversations)):
-        if not conversations[j].get("is_continuation"):
-            break
-        all_messages.extend(conversations[j].get("messages", []))
-    return all_messages
+    return list(conversations[start_index].get("messages", []))
 
 
 def build_msg_to_user_html(
@@ -1612,9 +1611,9 @@ def build_msg_to_user_html(
     prompt_num = 0
 
     for i, conv in enumerate(conversations):
-        # Skip continuations (they're counted with their parent)
-        if conv.get("is_continuation"):
-            continue
+        # Don't skip continuations - count all user messages the same way
+        # the HTML renderer does, so prompt numbers match between
+        # transcript labels and blame tooltip labels
 
         user_text = conv.get("user_text", "")
         conv_timestamp = conv.get("timestamp", "")

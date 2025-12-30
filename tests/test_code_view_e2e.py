@@ -612,6 +612,47 @@ class TestChunkedRendering:
         assert "renderNextChunk" in script_content
 
 
+class TestBlameToTranscriptNavigation:
+    """Tests for blame block to transcript message navigation."""
+
+    def test_clicking_blame_shows_user_prompt_and_edit_message(
+        self, code_view_page: Page
+    ):
+        """Test that clicking a blame block shows both user prompt and edit message.
+
+        When clicking a blame block, the transcript should load all messages from
+        the user prompt through the edit message, ensuring the user can see the
+        full context of the change.
+        """
+        blame_lines = code_view_page.locator(".cm-line[data-msg-id]")
+
+        if blame_lines.count() > 0:
+            # Get the msg_id from a blame line
+            first_blame = blame_lines.first
+            msg_id = first_blame.get_attribute("data-msg-id")
+
+            if msg_id:
+                # Click the blame line
+                first_blame.click()
+
+                # Wait for the transcript to scroll and render
+                code_view_page.wait_for_timeout(500)
+
+                # The edit message should be visible and highlighted
+                message = code_view_page.locator(f"#{msg_id}")
+                expect(message).to_be_visible(timeout=5000)
+                expect(message).to_have_class(re.compile(r"highlighted"))
+
+                # Find the user message that started this conversation context
+                # The user prompt should be in the DOM (it may be scrolled above)
+                user_messages = code_view_page.locator(
+                    "#transcript-content .message.user:not(.continuation)"
+                )
+                assert (
+                    user_messages.count() > 0
+                ), "User prompt should be loaded in transcript"
+
+
 class TestLoadingIndicators:
     """Tests for loading indicators."""
 
@@ -624,6 +665,83 @@ class TestLoadingIndicators:
             # The code content area should exist and eventually show the editor
             code_content = code_view_page.locator("#code-content")
             expect(code_content).to_be_visible()
+
+
+class TestPromptNumberConsistency:
+    """Tests for prompt number consistency between tooltip and pinned header."""
+
+    def test_pinned_prompt_matches_tooltip_prompt(self, code_view_page: Page):
+        """Test that pinned user prompt number matches the tooltip's prompt number.
+
+        When clicking on a blame block, the pinned user prompt header should show
+        the same prompt number as displayed in the blame tooltip. This verifies
+        that the client-side prompt counting matches the server-side computation.
+        """
+        blame_lines = code_view_page.locator(".cm-line[data-msg-id]")
+
+        if blame_lines.count() == 0:
+            pytest.skip("No blame lines with msg_id found")
+
+        # Find blame lines that have tooltip HTML (user_html attribute)
+        # and iterate through several to test consistency
+        tested_count = 0
+        for i in range(min(blame_lines.count(), 10)):
+            blame_line = blame_lines.nth(i)
+            msg_id = blame_line.get_attribute("data-msg-id")
+            if not msg_id:
+                continue
+
+            # Hover to show tooltip and get its prompt number
+            blame_line.hover()
+            code_view_page.wait_for_timeout(200)
+
+            tooltip = code_view_page.locator(".blame-tooltip")
+            if not tooltip.is_visible():
+                continue
+
+            # Get prompt number from tooltip (User Prompt #N format in .index-item-number)
+            tooltip_number_el = tooltip.locator(".index-item-number")
+            if tooltip_number_el.count() == 0:
+                continue
+
+            tooltip_prompt_text = tooltip_number_el.text_content()
+            # Extract number from "User Prompt #N" format
+            tooltip_match = re.search(r"#(\d+)", tooltip_prompt_text)
+            if not tooltip_match:
+                continue
+            tooltip_prompt_num = int(tooltip_match.group(1))
+
+            # Click to navigate and show pinned header
+            blame_line.click()
+            code_view_page.wait_for_timeout(500)
+
+            # Get prompt number from pinned header
+            pinned = code_view_page.locator("#pinned-user-message")
+            if not pinned.is_visible():
+                # Pinned header might not show if message is at top
+                continue
+
+            pinned_label = code_view_page.locator(".pinned-user-message-label")
+            pinned_label_text = pinned_label.text_content()
+            # Extract number from "User Prompt #N" format
+            match = re.search(r"#(\d+)", pinned_label_text)
+            if not match:
+                continue
+
+            pinned_prompt_num = int(match.group(1))
+
+            # They should match!
+            assert pinned_prompt_num == tooltip_prompt_num, (
+                f"Pinned prompt #{pinned_prompt_num} should match "
+                f"tooltip prompt #{tooltip_prompt_num} for msg_id {msg_id}"
+            )
+
+            tested_count += 1
+            if tested_count >= 3:  # Test a few blame blocks
+                break
+
+        if tested_count == 0:
+            pytest.skip("Could not test any blame blocks with visible pinned headers")
 
 
 class TestLineAnchors:
