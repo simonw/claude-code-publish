@@ -1257,6 +1257,7 @@ def generate_code_view_html(
     transcript_messages: List[str] = None,
     msg_to_user_html: Dict[str, str] = None,
     msg_to_context_id: Dict[str, str] = None,
+    msg_to_prompt_num: Dict[str, int] = None,
     total_pages: int = 1,
 ) -> None:
     """Generate the code.html file with three-pane layout.
@@ -1267,6 +1268,7 @@ def generate_code_view_html(
         transcript_messages: List of individual message HTML strings.
         msg_to_user_html: Mapping from msg_id to rendered user message HTML for tooltips.
         msg_to_context_id: Mapping from msg_id to context_msg_id for blame coloring.
+        msg_to_prompt_num: Mapping from msg_id to prompt number (1-indexed).
         total_pages: Total number of transcript pages (for search feature).
     """
     # Import here to avoid circular imports
@@ -1283,6 +1285,9 @@ def generate_code_view_html(
 
     if msg_to_context_id is None:
         msg_to_context_id = {}
+
+    if msg_to_prompt_num is None:
+        msg_to_prompt_num = {}
 
     # Extract message IDs from HTML for chunked rendering
     # Messages have format: <div class="message ..." id="msg-...">
@@ -1323,26 +1328,46 @@ def generate_code_view_html(
                 else STATUS_MODIFIED
             )
 
-            # Build file data
-            file_data[orig_path] = {
-                "file_path": orig_path,
-                "rel_path": rel_path,
-                "content": content,
-                "status": status,
-                "blame_ranges": [
+            # Pre-compute color indices for each unique context_msg_id
+            # Colors are assigned per-file, with each unique context getting a sequential index
+            context_to_color_index: Dict[str, int] = {}
+            color_index = 0
+
+            # Build blame range data with pre-computed values
+            blame_range_data = []
+            for r in blame_ranges:
+                context_id = msg_to_context_id.get(r.msg_id, r.msg_id)
+
+                # Assign color index for new context IDs
+                if r.msg_id and context_id not in context_to_color_index:
+                    context_to_color_index[context_id] = color_index
+                    color_index += 1
+
+                blame_range_data.append(
                     {
                         "start": r.start_line,
                         "end": r.end_line,
                         "tool_id": r.tool_id,
                         "page_num": r.page_num,
                         "msg_id": r.msg_id,
-                        "context_msg_id": msg_to_context_id.get(r.msg_id, r.msg_id),
+                        "context_msg_id": context_id,
+                        "prompt_num": msg_to_prompt_num.get(r.msg_id),
+                        "color_index": (
+                            context_to_color_index.get(context_id) if r.msg_id else None
+                        ),
                         "operation_type": r.operation_type,
                         "timestamp": r.timestamp,
                         "user_html": msg_to_user_html.get(r.msg_id, ""),
                     }
-                    for r in blame_ranges
-                ],
+                )
+
+            # Build file data
+            file_data[orig_path] = {
+                "file_path": orig_path,
+                "rel_path": rel_path,
+                "content": content,
+                "status": status,
+                "blame_ranges": blame_range_data,
             }
 
         # Build file states for tree (reusing existing structure)
@@ -1543,8 +1568,8 @@ def _collect_conversation_messages(
 
 def build_msg_to_user_html(
     conversations: List[Dict],
-) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Build a mapping from msg_id to tooltip HTML and context message ID.
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, int]]:
+    """Build a mapping from msg_id to tooltip HTML, context message ID, and prompt number.
 
     For each tool call message, render the user prompt followed by the
     assistant text that immediately preceded the tool call.
@@ -1556,6 +1581,7 @@ def build_msg_to_user_html(
         Tuple of:
         - Dict mapping msg_id to rendered tooltip HTML
         - Dict mapping msg_id to context_msg_id (the assistant message providing context)
+        - Dict mapping msg_id to prompt_num (1-indexed user prompt number)
     """
     # Import here to avoid circular imports
     from claude_code_transcripts import (
@@ -1566,6 +1592,7 @@ def build_msg_to_user_html(
 
     msg_to_user_html = {}
     msg_to_context_id = {}
+    msg_to_prompt_num = {}
     prompt_num = 0
 
     for i, conv in enumerate(conversations):
@@ -1597,6 +1624,7 @@ def build_msg_to_user_html(
                 message_data = json.loads(message_json)
             except (json.JSONDecodeError, TypeError):
                 msg_to_user_html[msg_id] = user_html
+                msg_to_prompt_num[msg_id] = prompt_num
                 continue
 
             content = message_data.get("content", [])
@@ -1648,9 +1676,12 @@ def build_msg_to_user_html(
                     msg_to_user_html[msg_id] = _build_tooltip_html(
                         prompt_num, conv_timestamp, rendered_user, context_html
                     )
+                    msg_to_prompt_num[msg_id] = prompt_num
                 else:
                     msg_to_user_html[msg_id] = user_html
+                    msg_to_prompt_num[msg_id] = prompt_num
             else:
                 msg_to_user_html[msg_id] = user_html
+                msg_to_prompt_num[msg_id] = prompt_num
 
-    return msg_to_user_html, msg_to_context_id
+    return msg_to_user_html, msg_to_context_id, msg_to_prompt_num

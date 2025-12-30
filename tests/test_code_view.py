@@ -970,7 +970,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
 
         # Should have entry for the assistant message with tool_use
         assert "msg-2025-01-01T10-00-05Z" in result
@@ -1028,7 +1028,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
 
         html = result["msg-2025-01-01T10-00-05Z"]
 
@@ -1098,7 +1098,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
 
         # The tool_use message should have the thinking from the previous message
         html = result["msg-2025-01-01T10-00-10Z"]
@@ -1156,7 +1156,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Thinking should appear before text in the HTML
@@ -1212,7 +1212,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Text should appear before thinking in the HTML
@@ -1282,7 +1282,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Both thinking and text should be present
@@ -1375,7 +1375,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Only the NEW (most recent) blocks should be present
@@ -1451,7 +1451,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
 
         # The context_msg_id should be the message with the text (most recent block)
         tool_msg_id = "msg-2025-01-01T10-00-05Z"
@@ -1500,7 +1500,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Should contain ellipsis indicating truncation
@@ -1542,7 +1542,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Should still have user prompt
@@ -1586,7 +1586,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Should contain the text that came after tool_use
@@ -1644,7 +1644,7 @@ class TestBuildMsgToUserHtml:
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Text from later message should NOT be included
@@ -1694,7 +1694,7 @@ The implementation looks correct."""
             }
         ]
 
-        result, context_ids = build_msg_to_user_html(conversations)
+        result, context_ids, prompt_nums = build_msg_to_user_html(conversations)
         html = result["msg-2025-01-01T10-00-05Z"]
 
         # Code block should be replaced with placeholder, not rendered as HTML

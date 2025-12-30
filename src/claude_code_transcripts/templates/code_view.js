@@ -276,33 +276,23 @@ async function init() {
         }
     }
 
-    // Extract prompt number from user_html
-    function extractPromptNum(userHtml) {
-        if (!userHtml) return null;
-        const match = userHtml.match(/index-item-number">#(\d+)</);
-        return match ? parseInt(match[1]) : null;
-    }
-
     // Build maps for range colors and message numbers
+    // Uses pre-computed prompt_num and color_index from server
     function buildRangeMaps(blameRanges) {
         const colorMap = new Map();
         const msgNumMap = new Map();
-        const contextToColor = new Map();
-        let colorIndex = 0;
 
         blameRanges.forEach((range, index) => {
             if (range.msg_id) {
-                const promptNum = extractPromptNum(range.user_html);
-                if (promptNum) {
-                    msgNumMap.set(index, promptNum);
+                // Use pre-computed prompt_num from server
+                if (range.prompt_num) {
+                    msgNumMap.set(index, range.prompt_num);
                 }
 
-                const contextId = range.context_msg_id || range.msg_id;
-                if (!contextToColor.has(contextId)) {
-                    contextToColor.set(contextId, rangeColors[colorIndex % rangeColors.length]);
-                    colorIndex++;
+                // Use pre-computed color_index from server
+                if (range.color_index !== null && range.color_index !== undefined) {
+                    colorMap.set(index, rangeColors[range.color_index % rangeColors.length]);
                 }
-                colorMap.set(index, contextToColor.get(contextId));
             }
         });
         return { colorMap, msgNumMap };

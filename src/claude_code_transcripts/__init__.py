@@ -1812,13 +1812,16 @@ def generate_html(
 
     # Generate code view if requested
     if has_code_view:
-        msg_to_user_html, msg_to_context_id = build_msg_to_user_html(conversations)
+        msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
+            conversations
+        )
         generate_code_view_html(
             output_dir,
             file_operations,
             transcript_messages=all_messages_html,
             msg_to_user_html=msg_to_user_html,
             msg_to_context_id=msg_to_context_id,
+            msg_to_prompt_num=msg_to_prompt_num,
             total_pages=total_pages,
         )
         num_files = len(set(op.file_path for op in file_operations))
@@ -2401,13 +2404,16 @@ def generate_html_from_session_data(
 
     # Generate code view if requested
     if has_code_view:
-        msg_to_user_html, msg_to_context_id = build_msg_to_user_html(conversations)
+        msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
+            conversations
+        )
         generate_code_view_html(
             output_dir,
             file_operations,
             transcript_messages=all_messages_html,
             msg_to_user_html=msg_to_user_html,
             msg_to_context_id=msg_to_context_id,
+            msg_to_prompt_num=msg_to_prompt_num,
             total_pages=total_pages,
         )
         num_files = len(set(op.file_path for op in file_operations))
