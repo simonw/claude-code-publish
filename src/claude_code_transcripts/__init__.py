@@ -9,14 +9,19 @@ import shutil
 import subprocess
 import tempfile
 import webbrowser
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Tuple, Dict, Any
 
 import click
 from click_default_group import DefaultGroup
+from git import Repo
+from git.exc import InvalidGitRepositoryError
 import httpx
 from jinja2 import Environment, PackageLoader
 import markdown
+import nh3
 import questionary
 
 # Set up Jinja2 environment
@@ -47,6 +52,101 @@ PROMPTS_PER_PAGE = 5
 LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
+
+
+# Import code viewer functionality from separate module
+from claude_code_transcripts.code_view import (
+    FileOperation,
+    FileState,
+    CodeViewData,
+    BlameRange,
+    OP_WRITE,
+    OP_EDIT,
+    OP_DELETE,
+    extract_file_operations,
+    filter_deleted_files,
+    normalize_file_paths,
+    find_git_repo_root,
+    find_commit_before_timestamp,
+    build_file_history_repo,
+    get_file_blame_ranges,
+    get_file_content_from_repo,
+    build_file_tree,
+    reconstruct_file_with_blame,
+    build_file_states,
+    render_file_tree_html,
+    file_state_to_dict,
+    generate_code_view_html,
+    build_msg_to_user_html,
+)
+
+
+def extract_github_repo_from_url(url: str) -> Optional[str]:
+    """Extract 'owner/name' from various GitHub URL formats.
+
+    Handles:
+    - https://github.com/owner/repo
+    - https://github.com/owner/repo.git
+    - git@github.com:owner/repo.git
+
+    Args:
+        url: GitHub URL or git remote URL.
+
+    Returns:
+        Repository identifier as 'owner/name', or None if not found.
+    """
+    match = re.search(r"github\.com[:/]([^/]+/[^/?#.]+)", url)
+    if match:
+        repo = match.group(1)
+        return repo[:-4] if repo.endswith(".git") else repo
+    return None
+
+
+def parse_repo_value(repo: Optional[str]) -> Tuple[Optional[str], Optional[Path]]:
+    """Parse --repo value to extract GitHub repo name and/or local path.
+
+    Args:
+        repo: The --repo value (could be path, URL, or owner/name).
+
+    Returns:
+        Tuple of (github_repo, local_path):
+        - github_repo: "owner/name" string for commit links, or None
+        - local_path: Path to local git repo for file history, or None
+    """
+    if not repo:
+        return None, None
+
+    # Check if it's a local path that exists
+    repo_path = Path(repo)
+    if repo_path.exists() and (repo_path / ".git").exists():
+        # Try to extract GitHub remote URL
+        github_repo = None
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                github_repo = extract_github_repo_from_url(result.stdout.strip())
+        except Exception:
+            pass
+        return github_repo, repo_path
+
+    # Check if it's a GitHub URL
+    if is_url(repo):
+        github_repo = extract_github_repo_from_url(repo)
+        if github_repo:
+            return github_repo, None
+        # Not a GitHub URL, ignore
+        return None, None
+
+    # Assume it's owner/name format
+    if "/" in repo and not repo.startswith("/"):
+        return repo, None
+
+    return None, None
 
 
 def extract_text_from_content(content):
@@ -401,8 +501,6 @@ def _generate_project_index(project, output_dir):
         project_name=project["name"],
         sessions=sessions_data,
         session_count=len(sessions_data),
-        css=CSS,
-        js=JS,
     )
 
     output_path = output_dir / "index.html"
@@ -440,8 +538,6 @@ def _generate_master_index(projects, output_dir):
         projects=projects_data,
         total_projects=len(projects),
         total_sessions=total_sessions,
-        css=CSS,
-        js=JS,
     )
 
     output_path = output_dir / "index.html"
@@ -491,6 +587,14 @@ def _parse_jsonl_file(filepath):
                 # Preserve isCompactSummary if present
                 if obj.get("isCompactSummary"):
                     entry["isCompactSummary"] = True
+
+                # Preserve isMeta if present (skill expansions, not real user prompts)
+                if obj.get("isMeta"):
+                    entry["isMeta"] = True
+
+                # Preserve toolUseResult if present (needed for originalFile content)
+                if "toolUseResult" in obj:
+                    entry["toolUseResult"] = obj["toolUseResult"]
 
                 loglines.append(entry)
             except json.JSONDecodeError:
@@ -629,10 +733,58 @@ def format_json(obj):
         return f"<pre>{html.escape(str(obj))}</pre>"
 
 
+# Allowed HTML tags for markdown content - anything else gets escaped
+ALLOWED_TAGS = {
+    # Block elements
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "hr",
+    # Lists
+    "ul",
+    "ol",
+    "li",
+    # Inline elements
+    "a",
+    "strong",
+    "b",
+    "em",
+    "i",
+    "code",
+    "br",
+    "span",
+    # Tables
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+}
+
+ALLOWED_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "code": {"class"},  # For syntax highlighting
+    "pre": {"class"},
+    "span": {"class"},
+    "td": {"align"},
+    "th": {"align"},
+}
+
+
 def render_markdown_text(text):
     if not text:
         return ""
-    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+    raw_html = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    # Sanitize HTML to only allow safe tags - escapes everything else
+    return nh3.clean(raw_html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
 
 
 def is_json_like(text):
@@ -852,7 +1004,7 @@ def is_tool_result_message(message_data):
     )
 
 
-def render_message(log_type, message_json, timestamp):
+def render_message(log_type, message_json, timestamp, prompt_num=None):
     if not message_json:
         return ""
     try:
@@ -865,7 +1017,8 @@ def render_message(log_type, message_json, timestamp):
         if is_tool_result_message(message_data):
             role_class, role_label = "tool-reply", "Tool reply"
         else:
-            role_class, role_label = "user", "User"
+            role_class = "user"
+            role_label = f"User Prompt #{prompt_num}" if prompt_num else "User"
     elif log_type == "assistant":
         content_html = render_assistant_message(message_data)
         role_class, role_label = "assistant", "Assistant"
@@ -877,176 +1030,6 @@ def render_message(log_type, message_json, timestamp):
     return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
 
 
-CSS = """
-:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
-* { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
-.container { max-width: 800px; margin: 0 auto; }
-h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
-.header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
-.header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
-.message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
-.message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
-.tool-reply .role-label { color: #e65100; }
-.tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
-.tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-.user .role-label { color: var(--user-border); }
-time { color: var(--text-muted); font-size: 0.8rem; }
-.timestamp-link { color: inherit; text-decoration: none; }
-.timestamp-link:hover { text-decoration: underline; }
-.message:target { animation: highlight 2s ease-out; }
-@keyframes highlight { 0% { background-color: rgba(25, 118, 210, 0.2); } 100% { background-color: transparent; } }
-.message-content { padding: 16px; }
-.message-content p { margin: 0 0 12px 0; }
-.message-content p:last-child { margin-bottom: 0; }
-.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 0.9rem; color: var(--thinking-text); }
-.thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
-.thinking p { margin: 8px 0; }
-.assistant-text { margin: 8px 0; }
-.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.tool-icon { font-size: 1.1rem; }
-.tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
-.tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-result.tool-error { background: var(--tool-error-bg); }
-.file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
-.write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
-.edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
-.file-tool-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.write-header { color: #2e7d32; }
-.edit-header { color: #e65100; }
-.file-tool-icon { font-size: 1rem; }
-.file-tool-path { font-family: monospace; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 4px; }
-.file-tool-fullpath { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
-.file-content { margin: 0; }
-.edit-section { display: flex; margin: 4px 0; border-radius: 4px; overflow: hidden; }
-.edit-label { padding: 8px 12px; font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
-.edit-old { background: #fce4ec; }
-.edit-old .edit-label { color: #b71c1c; background: #f8bbd9; }
-.edit-old .edit-content { color: #880e4f; }
-.edit-new { background: #e8f5e9; }
-.edit-new .edit-label { color: #1b5e20; background: #a5d6a7; }
-.edit-new .edit-content { color: #1b5e20; }
-.edit-content { margin: 0; flex: 1; background: transparent; font-size: 0.85rem; }
-.edit-replace-all { font-size: 0.75rem; font-weight: normal; color: var(--text-muted); }
-.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #e6f4ea); }
-.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff0e5); }
-.todo-list { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border: 1px solid #81c784; border-radius: 8px; padding: 12px; margin: 12px 0; }
-.todo-header { font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.todo-items { list-style: none; margin: 0; padding: 0; }
-.todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 0.9rem; }
-.todo-item:last-child { border-bottom: none; }
-.todo-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%; }
-.todo-completed .todo-icon { color: #2e7d32; background: rgba(46, 125, 50, 0.15); }
-.todo-completed .todo-content { color: #558b2f; text-decoration: line-through; }
-.todo-in-progress .todo-icon { color: #f57c00; background: rgba(245, 124, 0, 0.15); }
-.todo-in-progress .todo-content { color: #e65100; font-weight: 500; }
-.todo-pending .todo-icon { color: #757575; background: rgba(0,0,0,0.05); }
-.todo-pending .todo-content { color: #616161; }
-pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
-pre.json { color: #e0e0e0; }
-code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-pre code { background: none; padding: 0; }
-.user-content { margin: 0; }
-.truncatable { position: relative; }
-.truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
-.truncatable.truncated::after { content: ''; position: absolute; bottom: 32px; left: 0; right: 0; height: 60px; background: linear-gradient(to bottom, transparent, var(--card-bg)); pointer-events: none; }
-.message.user .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--user-bg)); }
-.message.tool-reply .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.tool-use .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-bg)); }
-.tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-result-bg)); }
-.expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
-.expand-btn:hover { background: rgba(0,0,0,0.1); }
-.truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
-.pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
-.pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
-.pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
-.pagination a:hover { background: var(--user-bg); }
-.pagination .current { background: var(--user-border); color: white; }
-.pagination .disabled { color: var(--text-muted); border: 1px solid #ddd; }
-.pagination .index-link { background: var(--user-border); color: white; }
-details.continuation { margin-bottom: 16px; }
-details.continuation summary { cursor: pointer; padding: 12px 16px; background: var(--user-bg); border-left: 4px solid var(--user-border); border-radius: 12px; font-weight: 500; color: var(--text-muted); }
-details.continuation summary:hover { background: rgba(25, 118, 210, 0.15); }
-details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom: 0; }
-.index-item { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background: var(--user-bg); border-left: 4px solid var(--user-border); }
-.index-item a { display: block; text-decoration: none; color: inherit; }
-.index-item a:hover { background: rgba(25, 118, 210, 0.1); }
-.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.index-item-number { font-weight: 600; color: var(--user-border); }
-.index-item-content { padding: 16px; }
-.index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
-.index-item-commit { margin-top: 6px; padding: 4px 8px; background: #fff3e0; border-radius: 4px; font-size: 0.85rem; color: #e65100; }
-.index-item-commit code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; margin-right: 6px; }
-.commit-card { margin: 8px 0; padding: 10px 14px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 6px; }
-.commit-card a { text-decoration: none; color: #5d4037; display: block; }
-.commit-card a:hover { color: #e65100; }
-.commit-card-hash { font-family: monospace; color: #e65100; font-weight: 600; margin-right: 8px; }
-.index-commit { margin-bottom: 12px; padding: 10px 16px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.index-commit a { display: block; text-decoration: none; color: inherit; }
-.index-commit a:hover { background: rgba(255, 152, 0, 0.1); margin: -10px -16px; padding: 10px 16px; border-radius: 8px; }
-.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 4px; }
-.index-commit-hash { font-family: monospace; color: #e65100; font-weight: 600; }
-.index-commit-msg { color: #5d4037; }
-.index-item-long-text { margin-top: 8px; padding: 12px; background: var(--card-bg); border-radius: 8px; border-left: 3px solid var(--assistant-border); }
-.index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
-.index-item-long-text-content { color: var(--text-color); }
-#search-box { display: none; align-items: center; gap: 8px; }
-#search-box input { padding: 6px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; width: 180px; }
-#search-box button, #modal-search-btn, #modal-close-btn { background: var(--user-border); color: white; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-#search-box button:hover, #modal-search-btn:hover { background: #1565c0; }
-#modal-close-btn { background: var(--text-muted); margin-left: 8px; }
-#modal-close-btn:hover { background: #616161; }
-#search-modal[open] { border: none; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
-#search-modal::backdrop { background: rgba(0,0,0,0.5); }
-.search-modal-header { display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--assistant-border); background: var(--bg-color); border-radius: 12px 12px 0 0; }
-.search-modal-header input { flex: 1; padding: 8px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; }
-#search-status { padding: 8px 16px; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-#search-results { flex: 1; overflow-y: auto; padding: 16px; }
-.search-result { margin-bottom: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-.search-result a { display: block; text-decoration: none; color: inherit; }
-.search-result a:hover { background: rgba(25, 118, 210, 0.05); }
-.search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-.search-result-content { padding: 12px; }
-.search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
-"""
-
-JS = """
-document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
-    const timestamp = el.getAttribute('data-timestamp');
-    const date = new Date(timestamp);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    if (isToday) { el.textContent = timeStr; }
-    else { el.textContent = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + timeStr; }
-});
-document.querySelectorAll('pre.json').forEach(function(el) {
-    let text = el.textContent;
-    text = text.replace(/"([^"]+)":/g, '<span style="color: #ce93d8">"$1"</span>:');
-    text = text.replace(/: "([^"]*)"/g, ': <span style="color: #81d4fa">"$1"</span>');
-    text = text.replace(/: (\\d+)/g, ': <span style="color: #ffcc80">$1</span>');
-    text = text.replace(/: (true|false|null)/g, ': <span style="color: #f48fb1">$1</span>');
-    el.innerHTML = text;
-});
-document.querySelectorAll('.truncatable').forEach(function(wrapper) {
-    const content = wrapper.querySelector('.truncatable-content');
-    const btn = wrapper.querySelector('.expand-btn');
-    if (content.scrollHeight > 250) {
-        wrapper.classList.add('truncated');
-        btn.addEventListener('click', function() {
-            if (wrapper.classList.contains('truncated')) { wrapper.classList.remove('truncated'); wrapper.classList.add('expanded'); btn.textContent = 'Show less'; }
-            else { wrapper.classList.remove('expanded'); wrapper.classList.add('truncated'); btn.textContent = 'Show more'; }
-        });
-    }
-});
-"""
-
 # JavaScript to fix relative URLs when served via gistpreview.github.io
 GIST_PREVIEW_JS = r"""
 (function() {
@@ -1055,6 +1038,39 @@ GIST_PREVIEW_JS = r"""
     var match = window.location.search.match(/^\?([^/]+)/);
     if (!match) return;
     var gistId = match[1];
+
+    // Load CSS from gist (relative stylesheet links don't work on gistpreview)
+    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(link) {
+        var href = link.getAttribute('href');
+        if (href.startsWith('http')) return; // Already absolute
+        var cssUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + href;
+        fetch(cssUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
+            .then(function(css) {
+                var style = document.createElement('style');
+                style.textContent = css;
+                document.head.appendChild(style);
+                link.remove(); // Remove the broken link
+            })
+            .catch(function(e) { console.error('Failed to load CSS:', href, e); });
+    });
+
+    // Load JS from gist (relative script srcs don't work on gistpreview)
+    document.querySelectorAll('script[src]').forEach(function(script) {
+        var src = script.getAttribute('src');
+        if (src.startsWith('http')) return; // Already absolute
+        var jsUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + src;
+        fetch(jsUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
+            .then(function(js) {
+                var newScript = document.createElement('script');
+                newScript.textContent = js;
+                document.body.appendChild(newScript);
+            })
+            .catch(function(e) { console.error('Failed to load JS:', src, e); });
+    });
+
+    // Fix relative links for navigation
     document.querySelectorAll('a[href]').forEach(function(link) {
         var href = link.getAttribute('href');
         // Skip external links and anchors
@@ -1064,6 +1080,18 @@ GIST_PREVIEW_JS = r"""
         var filename = parts[0];
         var anchor = parts.length > 1 ? '#' + parts[1] : '';
         link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
+    });
+
+    // Execute module scripts that were injected via innerHTML
+    // (browsers don't execute scripts added via innerHTML for security)
+    document.querySelectorAll('script[type="module"]').forEach(function(script) {
+        if (script.src) return; // Already has src, skip
+        var blob = new Blob([script.textContent], { type: 'application/javascript' });
+        var url = URL.createObjectURL(blob);
+        var newScript = document.createElement('script');
+        newScript.type = 'module';
+        newScript.src = url;
+        document.body.appendChild(newScript);
     });
 
     // Handle fragment navigation after dynamic content loads
@@ -1092,12 +1120,179 @@ GIST_PREVIEW_JS = r"""
 })();
 """
 
+# JavaScript to load page content from page-data-NNN.json on gistpreview
+PAGE_DATA_LOADER_JS = r"""
+(function() {
+    function getGistDataUrl(pageNum) {
+        if (window.location.hostname !== 'gistpreview.github.io') return null;
+        var query = window.location.search.substring(1);
+        var parts = query.split('/');
+        var mainGistId = parts[0];
+        var paddedNum = String(pageNum).padStart(3, '0');
+        var filename = '/page-data-' + paddedNum + '.json';
+        var dataGistId = window.DATA_GIST_ID || mainGistId;
+        return 'https://gist.githubusercontent.com/raw/' + dataGistId + filename;
+    }
+    var pageNum = window.PAGE_NUM;
+    var dataUrl = getGistDataUrl(pageNum);
+    if (dataUrl) {
+        var container = document.getElementById('page-messages');
+        fetch(dataUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.json(); })
+            .then(function(html) {
+                container.innerHTML = html;
+                if (window.location.hash) {
+                    var el = document.querySelector(window.location.hash);
+                    if (el) el.scrollIntoView();
+                }
+            })
+            .catch(function(e) { console.error('Failed to load page data:', e); });
+    }
+})();
+"""
 
-def inject_gist_preview_js(output_dir):
-    """Inject gist preview JavaScript into all HTML files in the output directory."""
+# JavaScript to load index content from index-data.json on gistpreview
+INDEX_DATA_LOADER_JS = r"""
+(function() {
+    function getGistDataUrl() {
+        if (window.location.hostname !== 'gistpreview.github.io') return null;
+        var query = window.location.search.substring(1);
+        var parts = query.split('/');
+        var mainGistId = parts[0];
+        var dataGistId = window.DATA_GIST_ID || mainGistId;
+        return 'https://gist.githubusercontent.com/raw/' + dataGistId + '/index-data.json';
+    }
+    var dataUrl = getGistDataUrl();
+    if (dataUrl) {
+        var container = document.getElementById('index-items');
+        fetch(dataUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.json(); })
+            .then(function(html) {
+                container.innerHTML = html;
+                if (window.location.hash) {
+                    var el = document.querySelector(window.location.hash);
+                    if (el) el.scrollIntoView();
+                }
+            })
+            .catch(function(e) { console.error('Failed to load index data:', e); });
+    }
+})();
+"""
+
+
+def _strip_container_content(html: str, container_id: str) -> str:
+    """Strip content from a container div while preserving the rest of the HTML.
+
+    This uses a simple string-based approach to find the container and empty it.
+    The container is expected to be a direct child of a wrapper div.
+
+    Args:
+        html: The HTML content
+        container_id: The id of the container div to strip content from
+
+    Returns:
+        The HTML with the container's content removed
+    """
+    # Find the opening tag
+    open_tag = f'<div id="{container_id}">'
+    start_idx = html.find(open_tag)
+    if start_idx == -1:
+        return html
+
+    # Find the content start (after the opening tag)
+    content_start = start_idx + len(open_tag)
+
+    # Find the matching closing tag by counting nested divs
+    depth = 1
+    pos = content_start
+    while depth > 0 and pos < len(html):
+        next_open = html.find("<div", pos)
+        next_close = html.find("</div>", pos)
+
+        if next_close == -1:
+            # No closing tag found, return original
+            return html
+
+        if next_open != -1 and next_open < next_close:
+            # Found nested opening div
+            depth += 1
+            pos = next_open + 4
+        else:
+            # Found closing div
+            depth -= 1
+            if depth == 0:
+                # This is the matching close tag
+                content_end = next_close
+                break
+            pos = next_close + 6
+    else:
+        return html
+
+    # Replace content with empty string (preserve whitespace for formatting)
+    return html[:content_start] + "\n            " + html[content_end:]
+
+
+def inject_gist_preview_js(output_dir, data_gist_id=None):
+    """Inject gist preview JavaScript into all HTML files in the output directory.
+
+    Also removes inline CODE_DATA from code.html since gist version fetches it separately.
+
+    Args:
+        output_dir: Path to the output directory containing HTML files.
+        data_gist_id: Optional gist ID for a separate data gist. If provided,
+            code.html will fetch data from this gist instead of the main gist.
+    """
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
         content = html_file.read_text(encoding="utf-8")
+
+        # For code.html, remove the inline CODE_DATA script
+        # (gist version fetches code-data.json instead to avoid size limits)
+        if html_file.name == "code.html":
+            import re
+
+            content = re.sub(
+                r"<script>window\.CODE_DATA = .*?;</script>\s*",
+                "",
+                content,
+                flags=re.DOTALL,
+            )
+
+            # If using separate data gist, inject the data gist ID
+            if data_gist_id:
+                data_gist_script = (
+                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
+                )
+                content = content.replace("<head>", f"<head>\n{data_gist_script}")
+
+        # For index.html and page-*.html, strip content and inject data gist ID
+        # when using separate data gist (content will be loaded from JSON files)
+        if html_file.name == "index.html" or (
+            html_file.name.startswith("page-") and html_file.name.endswith(".html")
+        ):
+            if data_gist_id:
+                data_gist_script = (
+                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
+                )
+                content = content.replace("<head>", f"<head>\n{data_gist_script}")
+
+                # Strip content from HTML - gist version loads from JSON files
+                # This reduces HTML file size for gist upload
+                if html_file.name == "index.html":
+                    content = _strip_container_content(content, "index-items")
+                    # Inject the index data loader JS
+                    content = content.replace(
+                        "</body>",
+                        f"<script>{INDEX_DATA_LOADER_JS}</script>\n</body>",
+                    )
+                elif html_file.name.startswith("page-"):
+                    content = _strip_container_content(content, "page-messages")
+                    # Inject the page data loader JS
+                    content = content.replace(
+                        "</body>",
+                        f"<script>{PAGE_DATA_LOADER_JS}</script>\n</body>",
+                    )
+
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
@@ -1106,22 +1301,39 @@ def inject_gist_preview_js(output_dir):
             html_file.write_text(content, encoding="utf-8")
 
 
-def create_gist(output_dir, public=False):
-    """Create a GitHub gist from the HTML files in output_dir.
+# Size threshold for using two-gist strategy (1MB)
+# GitHub API truncates gist content at ~1MB total response size
+GIST_SIZE_THRESHOLD = 1024 * 1024
 
-    Returns the gist ID on success, or raises click.ClickException on failure.
+# Size threshold for generating page-data.json (500KB total HTML)
+# Only generate page-data.json for sessions with large page content
+PAGE_DATA_SIZE_THRESHOLD = 500 * 1024
+
+# Data files that can be split into a separate gist
+# Note: page-data-*.json files are added dynamically based on what exists
+DATA_FILES = ["code-data.json"]
+
+
+def _create_single_gist(files, public=False, description=None):
+    """Create a single gist from the given files.
+
+    Args:
+        files: List of file paths to include in the gist.
+        public: Whether to create a public gist.
+        description: Optional description for the gist.
+
+    Returns:
+        Tuple of (gist_id, gist_url).
+
+    Raises:
+        click.ClickException on failure.
     """
-    output_dir = Path(output_dir)
-    html_files = list(output_dir.glob("*.html"))
-    if not html_files:
-        raise click.ClickException("No HTML files found to upload to gist.")
-
-    # Build the gh gist create command
-    # gh gist create file1 file2 ... --public/--private
     cmd = ["gh", "gist", "create"]
-    cmd.extend(str(f) for f in sorted(html_files))
+    cmd.extend(str(f) for f in files)
     if public:
         cmd.append("--public")
+    if description:
+        cmd.extend(["--desc", description])
 
     try:
         result = subprocess.run(
@@ -1144,6 +1356,153 @@ def create_gist(output_dir, public=False):
         )
 
 
+def _add_files_to_gist(gist_id, files):
+    """Add files to an existing gist.
+
+    Adds files one at a time with retries to handle GitHub API conflicts
+    (HTTP 409) that occur with rapid successive updates.
+
+    Args:
+        gist_id: The gist ID to add files to.
+        files: List of file paths to add.
+
+    Raises:
+        click.ClickException on failure.
+    """
+    import time
+
+    for i, f in enumerate(files):
+        click.echo(f"  Adding {f.name} ({i + 1}/{len(files)})...")
+        cmd = ["gh", "gist", "edit", gist_id, "--add", str(f)]
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                break  # Success, move to next file
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr.strip() if e.stderr else str(e)
+                if "409" in error_msg and attempt < max_retries - 1:
+                    # HTTP 409 conflict - wait and retry
+                    wait_time = (attempt + 1) * 2  # 2s, 4s, 6s
+                    click.echo(
+                        f"    Conflict adding {f.name}, retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                else:
+                    raise click.ClickException(
+                        f"Failed to add {f.name} to gist: {error_msg}"
+                    )
+        # Small delay between files to avoid rate limiting
+        if i < len(files) - 1:
+            time.sleep(0.5)
+
+
+def create_gist(output_dir, public=False, description=None):
+    """Create a GitHub gist from the HTML files in output_dir.
+
+    Uses a two-gist strategy when data files exceed the size threshold:
+    1. Creates a data gist with large data files (code-data.json)
+    2. Injects data gist ID and gist preview JS into HTML files
+    3. Creates the main gist with HTML/CSS/JS files
+
+    For small files (single-gist strategy):
+    1. Injects gist preview JS into HTML files
+    2. Creates a single gist with all files
+
+    Args:
+        output_dir: Directory containing the HTML files to upload.
+        public: Whether to create a public gist.
+        description: Optional description for the gist.
+
+    Returns (gist_id, gist_url) tuple.
+    Raises click.ClickException on failure.
+
+    Note: This function calls inject_gist_preview_js internally. Caller should NOT
+    call it separately.
+    """
+    output_dir = Path(output_dir)
+    html_files = list(output_dir.glob("*.html"))
+    if not html_files:
+        raise click.ClickException("No HTML files found to upload to gist.")
+
+    # Collect main files (HTML + CSS/JS)
+    css_js_files = [
+        output_dir / f
+        for f in ["styles.css", "main.js", "search.js"]
+        if (output_dir / f).exists()
+    ]
+    main_files = sorted(html_files) + css_js_files
+
+    # Collect data files and check their total size
+    data_files = []
+    data_total_size = 0
+    for data_file in DATA_FILES:
+        data_path = output_dir / data_file
+        if data_path.exists():
+            data_files.append(data_path)
+            data_total_size += data_path.stat().st_size
+    # Also collect page-data-*.json and index-data.json files (generated for large sessions)
+    for page_data_file in sorted(output_dir.glob("page-data-*.json")):
+        data_files.append(page_data_file)
+        data_total_size += page_data_file.stat().st_size
+    index_data_file = output_dir / "index-data.json"
+    if index_data_file.exists():
+        data_files.append(index_data_file)
+        data_total_size += index_data_file.stat().st_size
+
+    # Decide whether to use two-gist strategy
+    if data_total_size > GIST_SIZE_THRESHOLD and data_files:
+        # Two-gist strategy: create data gist first
+        click.echo(f"Data files to upload: {[f.name for f in data_files]}")
+        data_desc = f"{description} (data)" if description else None
+
+        # Try creating data gist with all files at once
+        click.echo(f"Creating data gist with {len(data_files)} files...")
+        try:
+            data_gist_id, _ = _create_single_gist(
+                data_files, public=public, description=data_desc
+            )
+        except click.ClickException as e:
+            # Fall back to one-by-one upload
+            click.echo(f"Bulk upload failed, falling back to one-by-one...")
+            click.echo(f"Creating data gist with {data_files[0].name}...")
+            data_gist_id, _ = _create_single_gist(
+                [data_files[0]], public=public, description=data_desc
+            )
+            remaining_files = data_files[1:]
+            if remaining_files:
+                click.echo(f"Adding {len(remaining_files)} more files to data gist...")
+                _add_files_to_gist(data_gist_id, remaining_files)
+
+        # Inject data gist ID and gist preview JS into HTML files
+        inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
+
+        # Create main gist with all files at once
+        click.echo(f"Creating main gist with {len(main_files)} files...")
+        main_gist_id, main_gist_url = _create_single_gist(
+            main_files, public=public, description=description
+        )
+
+        return main_gist_id, main_gist_url
+    else:
+        # Single gist strategy: inject gist preview JS first
+        inject_gist_preview_js(output_dir)
+
+        # Create gist with all files at once
+        all_files = main_files + data_files
+        click.echo(f"Creating gist with {len(all_files)} files...")
+        main_gist_id, main_gist_url = _create_single_gist(
+            all_files, public=public, description=description
+        )
+
+        return main_gist_id, main_gist_url
+
+
 def generate_pagination_html(current_page, total_pages):
     return _macros.pagination(current_page, total_pages)
 
@@ -1153,7 +1512,13 @@ def generate_index_pagination_html(total_pages):
     return _macros.index_pagination(total_pages)
 
 
-def generate_html(json_path, output_dir, github_repo=None):
+def generate_html(
+    json_path,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+):
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True)
 
@@ -1182,6 +1547,7 @@ def generate_html(json_path, output_dir, github_repo=None):
         log_type = entry.get("type")
         timestamp = entry.get("timestamp", "")
         is_compact_summary = entry.get("isCompactSummary", False)
+        is_meta = entry.get("isMeta", False)
         message_data = entry.get("message", {})
         if not message_data:
             continue
@@ -1198,11 +1564,12 @@ def generate_html(json_path, output_dir, github_repo=None):
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)
+            # isMeta entries (skill expansions) are continuations, not new prompts
             current_conv = {
                 "user_text": user_text,
                 "timestamp": timestamp,
                 "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary),
+                "is_continuation": bool(is_compact_summary or is_meta),
             }
         elif current_conv:
             current_conv["messages"].append((log_type, message_json, timestamp))
@@ -1212,30 +1579,106 @@ def generate_html(json_path, output_dir, github_repo=None):
     total_convs = len(conversations)
     total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
 
+    # Determine if code view will be generated (for tab navigation)
+    has_code_view = False
+    file_operations = None
+    if code_view:
+        file_operations = extract_file_operations(loglines, conversations)
+        # Optionally filter out files that no longer exist on disk
+        if exclude_deleted_files and file_operations:
+            file_operations = filter_deleted_files(file_operations)
+        has_code_view = len(file_operations) > 0
+
+    # Collect all messages HTML for the code view transcript pane
+    all_messages_html = []
+    # Collect messages per page for potential page-data.json
+    page_messages_dict = {}
+
+    # Track prompt number across all pages
+    prompt_num = 0
+
     for page_num in range(1, total_pages + 1):
         start_idx = (page_num - 1) * PROMPTS_PER_PAGE
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
         page_convs = conversations[start_idx:end_idx]
         messages_html = []
+        # Count total messages for this page for progress display
+        total_page_messages = sum(len(c["messages"]) for c in page_convs)
+        msg_count = 0
         for conv in page_convs:
             is_first = True
             for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
+                msg_count += 1
+                if total_page_messages > 50:
+                    print(
+                        f"\rPage {page_num}/{total_pages}: rendering message {msg_count}/{total_page_messages}...",
+                        end="",
+                        flush=True,
+                    )
+                # Track prompt number for user messages (not tool results)
+                current_prompt_num = None
+                if log_type == "user" and message_json:
+                    try:
+                        message_data = json.loads(message_json)
+                        if not is_tool_result_message(message_data):
+                            prompt_num += 1
+                            current_prompt_num = prompt_num
+                    except json.JSONDecodeError:
+                        pass
+                msg_html = render_message(
+                    log_type, message_json, timestamp, current_prompt_num
+                )
                 if msg_html:
                     # Wrap continuation summaries in collapsed details
                     if is_first and conv.get("is_continuation"):
                         msg_html = f'<details class="continuation"><summary>Session continuation summary</summary>{msg_html}</details>'
                     messages_html.append(msg_html)
                 is_first = False
+        if total_page_messages > 50:
+            print("\r" + " " * 60 + "\r", end="")  # Clear the progress line
+
+        # Store messages for this page
+        page_messages_dict[str(page_num)] = "".join(messages_html)
+
+        # Collect all messages for code view transcript pane
+        all_messages_html.extend(messages_html)
+
+    # Calculate total size of all page messages to decide if page-data files are needed
+    total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
+    use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
+
+    # For large sessions, use external CSS/JS files to reduce HTML size
+    # For small sessions, inline CSS/JS for simplicity
+    use_external_assets = use_page_data_json
+    if use_external_assets:
+        templates_dir = Path(__file__).parent / "templates"
+        for static_file in ["styles.css", "main.js", "search.js"]:
+            src = templates_dir / static_file
+            if src.exists():
+                shutil.copy(src, output_dir / static_file)
+
+    if use_page_data_json:
+        # Write individual page-data-NNN.json files for gist lazy loading
+        # This allows batched uploads and avoids GitHub's gist size limits
+        for page_num_str, messages_html in page_messages_dict.items():
+            page_data_file = output_dir / f"page-data-{int(page_num_str):03d}.json"
+            page_data_file.write_text(json.dumps(messages_html), encoding="utf-8")
+
+    # Generate page HTML files
+    # Always include content in HTML for local viewing (use_page_data_json=False)
+    # JSON files are generated above for gist preview loading
+    for page_num in range(1, total_pages + 1):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
         page_content = page_template.render(
-            css=CSS,
-            js=JS,
             page_num=page_num,
             total_pages=total_pages,
             pagination_html=pagination_html,
-            messages_html="".join(messages_html),
+            messages_html=page_messages_dict[str(page_num)],
+            has_code_view=has_code_view,
+            active_tab="transcript",
+            use_page_data_json=False,  # Always include content for local viewing
+            use_external_assets=use_external_assets,
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -1307,25 +1750,79 @@ def generate_html(json_path, output_dir, github_repo=None):
     # Sort by timestamp
     timeline_items.sort(key=lambda x: x[0])
     index_items = [item[2] for item in timeline_items]
+    index_items_html = "".join(index_items)
+
+    # Write index-data.json for gist lazy loading if session is large
+    if use_page_data_json:
+        index_data_file = output_dir / "index-data.json"
+        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
 
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
+    # Always include content in HTML for local viewing (use_index_data_json=False)
+    # JSON file is generated above for gist preview loading
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
         pagination_html=index_pagination,
         prompt_num=prompt_num,
         total_messages=total_messages,
         total_tool_calls=total_tool_calls,
         total_commits=total_commits,
         total_pages=total_pages,
-        index_items_html="".join(index_items),
+        index_items_html=index_items_html,
+        has_code_view=has_code_view,
+        active_tab="transcript",
+        use_index_data_json=False,  # Always include content for local viewing
+        use_external_assets=use_external_assets,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
     print(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
+
+    # Generate code view if requested
+    if has_code_view:
+        num_ops = len(file_operations)
+        num_files = len(set(op.file_path for op in file_operations))
+
+        last_phase = [None]  # Use list to allow mutation in nested function
+
+        def code_view_progress(phase, current, total):
+            # Clear line when switching phases
+            if last_phase[0] and last_phase[0] != phase:
+                print("\r" + " " * 60 + "\r", end="", flush=True)
+            last_phase[0] = phase
+
+            if phase == "operations" and num_ops > 20:
+                print(
+                    f"\rCode view: replaying operation {current}/{total}...",
+                    end="",
+                    flush=True,
+                )
+            elif phase == "files" and num_files > 5:
+                print(
+                    f"\rCode view: processing file {current}/{total}...",
+                    end="",
+                    flush=True,
+                )
+
+        msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
+            conversations
+        )
+        generate_code_view_html(
+            output_dir,
+            file_operations,
+            transcript_messages=all_messages_html,
+            msg_to_user_html=msg_to_user_html,
+            msg_to_context_id=msg_to_context_id,
+            msg_to_prompt_num=msg_to_prompt_num,
+            total_pages=total_pages,
+            progress_callback=code_view_progress,
+        )
+        # Clear progress line
+        if num_ops > 20 or num_files > 5:
+            print("\r" + " " * 60 + "\r", end="", flush=True)
+        print(f"Generated code.html ({num_files} files)")
 
 
 @click.group(cls=DefaultGroup, default="local", default_if_no_args=True)
@@ -1350,7 +1847,7 @@ def cli():
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="Git repo: local path, GitHub URL, or owner/name. Used for commit links and code viewer file history.",
 )
 @click.option(
     "--gist",
@@ -1374,7 +1871,27 @@ def cli():
     default=10,
     help="Maximum number of sessions to show (default: 10)",
 )
-def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit):
+@click.option(
+    "--code-view",
+    is_flag=True,
+    help="Generate a code viewer tab showing files modified during the session.",
+)
+@click.option(
+    "--exclude-deleted-files",
+    is_flag=True,
+    help="Exclude files that no longer exist on disk from the code viewer.",
+)
+def local_cmd(
+    output,
+    output_auto,
+    repo,
+    gist,
+    include_json,
+    open_browser,
+    limit,
+    code_view,
+    exclude_deleted_files,
+):
     """Select and convert a local Claude Code session to HTML."""
     projects_folder = Path.home() / ".claude" / "projects"
 
@@ -1425,7 +1942,15 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         output = Path(tempfile.gettempdir()) / f"claude-session-{session_file.stem}"
 
     output = Path(output)
-    generate_html(session_file, output, github_repo=repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
+    generate_html(
+        session_file,
+        output,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+    )
 
     # Show output directory
     click.echo(f"Output: {output.resolve()}")
@@ -1439,10 +1964,10 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         click.echo(f"JSONL: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_desc = f"claude-code-transcripts local {session_file.stem}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -1507,7 +2032,7 @@ def fetch_url_to_tempfile(url):
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="Git repo: local path, GitHub URL, or owner/name. Used for commit links and code viewer file history.",
 )
 @click.option(
     "--gist",
@@ -1526,9 +2051,30 @@ def fetch_url_to_tempfile(url):
     is_flag=True,
     help="Open the generated index.html in your default browser (default if no -o specified).",
 )
-def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_browser):
+@click.option(
+    "--code-view",
+    is_flag=True,
+    help="Generate a code viewer tab showing files modified during the session.",
+)
+@click.option(
+    "--exclude-deleted-files",
+    is_flag=True,
+    help="Exclude files that no longer exist on disk from the code viewer.",
+)
+def json_cmd(
+    json_file,
+    output,
+    output_auto,
+    repo,
+    gist,
+    include_json,
+    open_browser,
+    code_view,
+    exclude_deleted_files,
+):
     """Convert a Claude Code session JSON/JSONL file or URL to HTML."""
     # Handle URL input
+    original_input = json_file
     if is_url(json_file):
         click.echo(f"Fetching {json_file}...")
         temp_file = fetch_url_to_tempfile(json_file)
@@ -1541,6 +2087,9 @@ def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_brow
         if not json_file_path.exists():
             raise click.ClickException(f"File not found: {json_file}")
         url_name = None
+
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
 
     # Determine output directory and whether to open browser
     # If no -o specified, use temp dir and open browser by default
@@ -1556,24 +2105,43 @@ def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_brow
         )
 
     output = Path(output)
-    generate_html(json_file_path, output, github_repo=repo)
+    generate_html(
+        json_file_path,
+        output,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+    )
 
     # Show output directory
     click.echo(f"Output: {output.resolve()}")
 
     # Copy JSON file to output directory if requested
-    if include_json:
+    if include_json and not is_url(original_input):
         output.mkdir(exist_ok=True)
         json_dest = output / json_file_path.name
         shutil.copy(json_file_path, json_dest)
         json_size_kb = json_dest.stat().st_size / 1024
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
+    elif include_json and is_url(original_input):
+        # For URLs, copy the temp file with a meaningful name
+        output.mkdir(exist_ok=True)
+        url_name = Path(original_input.split("?")[0]).name or "session.jsonl"
+        json_dest = output / url_name
+        shutil.copy(json_file, json_dest)
+        json_size_kb = json_dest.stat().st_size / 1024
+        click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        # Use filename/URL for description
+        if is_url(original_input):
+            input_name = Path(original_input.split("?")[0]).name or "session"
+        else:
+            input_name = Path(original_input).stem
+        gist_desc = f"claude-code-transcripts json {input_name}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -1629,7 +2197,13 @@ def format_session_for_display(session_data):
     return f"{session_id}  {created_at[:19] if created_at else 'N/A':19}  {title}"
 
 
-def generate_html_from_session_data(session_data, output_dir, github_repo=None):
+def generate_html_from_session_data(
+    session_data,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+):
     """Generate HTML from session data dict (instead of file path)."""
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -1652,6 +2226,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         log_type = entry.get("type")
         timestamp = entry.get("timestamp", "")
         is_compact_summary = entry.get("isCompactSummary", False)
+        is_meta = entry.get("isMeta", False)
         message_data = entry.get("message", {})
         if not message_data:
             continue
@@ -1668,11 +2243,12 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)
+            # isMeta entries (skill expansions) are continuations, not new prompts
             current_conv = {
                 "user_text": user_text,
                 "timestamp": timestamp,
                 "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary),
+                "is_continuation": bool(is_compact_summary or is_meta),
             }
         elif current_conv:
             current_conv["messages"].append((log_type, message_json, timestamp))
@@ -1682,30 +2258,105 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     total_convs = len(conversations)
     total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
 
+    # Determine if code view will be generated (for tab navigation)
+    has_code_view = False
+    file_operations = None
+    if code_view:
+        file_operations = extract_file_operations(loglines, conversations)
+        # Optionally filter out files that no longer exist on disk
+        if exclude_deleted_files and file_operations:
+            file_operations = filter_deleted_files(file_operations)
+        has_code_view = len(file_operations) > 0
+
+    # Collect all messages HTML for the code view transcript pane
+    all_messages_html = []
+    # Collect messages per page for potential page-data.json
+    page_messages_dict = {}
+
+    # Track prompt number across all pages
+    prompt_num = 0
+
     for page_num in range(1, total_pages + 1):
         start_idx = (page_num - 1) * PROMPTS_PER_PAGE
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
         page_convs = conversations[start_idx:end_idx]
         messages_html = []
+        # Count total messages for this page for progress display
+        total_page_messages = sum(len(c["messages"]) for c in page_convs)
+        msg_count = 0
         for conv in page_convs:
             is_first = True
             for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
+                msg_count += 1
+                if total_page_messages > 50:
+                    click.echo(
+                        f"\rPage {page_num}/{total_pages}: rendering message {msg_count}/{total_page_messages}...",
+                        nl=False,
+                    )
+                # Track prompt number for user messages (not tool results)
+                current_prompt_num = None
+                if log_type == "user" and message_json:
+                    try:
+                        message_data = json.loads(message_json)
+                        if not is_tool_result_message(message_data):
+                            prompt_num += 1
+                            current_prompt_num = prompt_num
+                    except json.JSONDecodeError:
+                        pass
+                msg_html = render_message(
+                    log_type, message_json, timestamp, current_prompt_num
+                )
                 if msg_html:
                     # Wrap continuation summaries in collapsed details
                     if is_first and conv.get("is_continuation"):
                         msg_html = f'<details class="continuation"><summary>Session continuation summary</summary>{msg_html}</details>'
                     messages_html.append(msg_html)
                 is_first = False
+        if total_page_messages > 50:
+            click.echo("\r" + " " * 60 + "\r", nl=False)  # Clear the progress line
+
+        # Store messages for this page
+        page_messages_dict[str(page_num)] = "".join(messages_html)
+
+        # Collect all messages for code view transcript pane
+        all_messages_html.extend(messages_html)
+
+    # Calculate total size of all page messages to decide if page-data files are needed
+    total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
+    use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
+
+    # For large sessions, use external CSS/JS files to reduce HTML size
+    # For small sessions, inline CSS/JS for simplicity
+    use_external_assets = use_page_data_json
+    if use_external_assets:
+        templates_dir = Path(__file__).parent / "templates"
+        for static_file in ["styles.css", "main.js", "search.js"]:
+            src = templates_dir / static_file
+            if src.exists():
+                shutil.copy(src, output_dir / static_file)
+
+    if use_page_data_json:
+        # Write individual page-data-NNN.json files for gist lazy loading
+        # This allows batched uploads and avoids GitHub's gist size limits
+        for page_num_str, messages_html in page_messages_dict.items():
+            page_data_file = output_dir / f"page-data-{int(page_num_str):03d}.json"
+            page_data_file.write_text(json.dumps(messages_html), encoding="utf-8")
+
+    # Generate page HTML files
+    # Always include content in HTML for local viewing (use_page_data_json=False)
+    # JSON files are generated above for gist preview loading
+    for page_num in range(1, total_pages + 1):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
         page_content = page_template.render(
-            css=CSS,
-            js=JS,
             page_num=page_num,
             total_pages=total_pages,
             pagination_html=pagination_html,
-            messages_html="".join(messages_html),
+            messages_html=page_messages_dict[str(page_num)],
+            has_code_view=has_code_view,
+            active_tab="transcript",
+            use_page_data_json=False,  # Always include content for local viewing
+            use_external_assets=use_external_assets,
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -1777,25 +2428,77 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     # Sort by timestamp
     timeline_items.sort(key=lambda x: x[0])
     index_items = [item[2] for item in timeline_items]
+    index_items_html = "".join(index_items)
+
+    # Write index-data.json for gist lazy loading if session is large
+    if use_page_data_json:
+        index_data_file = output_dir / "index-data.json"
+        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
 
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
+    # Always include content in HTML for local viewing (use_index_data_json=False)
+    # JSON file is generated above for gist preview loading
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
         pagination_html=index_pagination,
         prompt_num=prompt_num,
         total_messages=total_messages,
         total_tool_calls=total_tool_calls,
         total_commits=total_commits,
         total_pages=total_pages,
-        index_items_html="".join(index_items),
+        index_items_html=index_items_html,
+        has_code_view=has_code_view,
+        active_tab="transcript",
+        use_index_data_json=False,  # Always include content for local viewing
+        use_external_assets=use_external_assets,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
     click.echo(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
+
+    # Generate code view if requested
+    if has_code_view:
+        num_ops = len(file_operations)
+        num_files = len(set(op.file_path for op in file_operations))
+
+        last_phase = [None]  # Use list to allow mutation in nested function
+
+        def code_view_progress(phase, current, total):
+            # Clear line when switching phases
+            if last_phase[0] and last_phase[0] != phase:
+                click.echo("\r" + " " * 60 + "\r", nl=False)
+            last_phase[0] = phase
+
+            if phase == "operations" and num_ops > 20:
+                click.echo(
+                    f"\rCode view: replaying operation {current}/{total}...",
+                    nl=False,
+                )
+            elif phase == "files" and num_files > 5:
+                click.echo(
+                    f"\rCode view: processing file {current}/{total}...",
+                    nl=False,
+                )
+
+        msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
+            conversations
+        )
+        generate_code_view_html(
+            output_dir,
+            file_operations,
+            transcript_messages=all_messages_html,
+            msg_to_user_html=msg_to_user_html,
+            msg_to_context_id=msg_to_context_id,
+            msg_to_prompt_num=msg_to_prompt_num,
+            total_pages=total_pages,
+            progress_callback=code_view_progress,
+        )
+        # Clear progress line
+        if num_ops > 20 or num_files > 5:
+            click.echo("\r" + " " * 60 + "\r", nl=False)
+        click.echo(f"Generated code.html ({num_files} files)")
 
 
 @cli.command("web")
@@ -1818,7 +2521,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="Git repo: local path, GitHub URL, or owner/name. Used for commit links and code viewer file history.",
 )
 @click.option(
     "--gist",
@@ -1837,6 +2540,11 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     is_flag=True,
     help="Open the generated index.html in your default browser (default if no -o specified).",
 )
+@click.option(
+    "--code-view",
+    is_flag=True,
+    help="Generate a code viewer tab showing files modified during the session.",
+)
 def web_cmd(
     session_id,
     output,
@@ -1847,6 +2555,7 @@ def web_cmd(
     gist,
     include_json,
     open_browser,
+    code_view,
 ):
     """Select and convert a web session from the Claude API to HTML.
 
@@ -1918,7 +2627,14 @@ def web_cmd(
 
     output = Path(output)
     click.echo(f"Generating HTML in {output}/...")
-    generate_html_from_session_data(session_data, output, github_repo=repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
+    generate_html_from_session_data(
+        session_data,
+        output,
+        github_repo=github_repo,
+        code_view=code_view,
+    )
 
     # Show output directory
     click.echo(f"Output: {output.resolve()}")
@@ -1933,10 +2649,10 @@ def web_cmd(
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_desc = f"claude-code-transcripts web {session_id}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")

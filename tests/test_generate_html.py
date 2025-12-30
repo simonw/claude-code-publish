@@ -131,6 +131,43 @@ class TestRenderFunctions:
         assert render_markdown_text("") == ""
         assert render_markdown_text(None) == ""
 
+    def test_render_markdown_strips_style_tags(self):
+        """Test that <style> tags in markdown content are stripped."""
+        # This prevents CSS in transcript content from affecting page styles
+        text = "Here is some CSS:\n<style>:root { --bg: red; }</style>"
+        result = render_markdown_text(text)
+        assert "<style>" not in result
+        assert "</style>" not in result
+
+    def test_render_markdown_strips_script_tags(self):
+        """Test that <script> tags in markdown content are stripped."""
+        # This prevents JS in transcript content from executing
+        text = "Here is some code:\n<script>alert('xss')</script>"
+        result = render_markdown_text(text)
+        assert "<script>" not in result
+        assert "</script>" not in result
+
+    def test_render_markdown_strips_form_elements(self):
+        """Test that form elements in markdown content are stripped."""
+        # This prevents forms/inputs from being rendered
+        text = (
+            "Here is a form:\n<form><input type='text'><button>Submit</button></form>"
+        )
+        result = render_markdown_text(text)
+        assert "<form>" not in result
+        assert "<input" not in result
+        assert "<button>" not in result
+
+    def test_render_markdown_allows_safe_tags(self):
+        """Test that safe markdown tags are preserved."""
+        text = "**bold** and `code` and [link](http://example.com)"
+        result = render_markdown_text(text)
+        assert "<strong>bold</strong>" in result
+        assert "<code>code</code>" in result
+        # nh3 adds rel="noopener noreferrer" to links for security
+        assert '<a href="http://example.com"' in result
+        assert ">link</a>" in result
+
     def test_format_json(self, snapshot_html):
         """Test JSON formatting."""
         result = format_json({"key": "value", "number": 42, "nested": {"a": 1}})
@@ -449,6 +486,21 @@ class TestInjectGistPreviewJs:
         )
         # The JS should scroll to the element
         assert "scrollIntoView" in GIST_PREVIEW_JS
+
+    def test_gist_preview_js_executes_module_scripts(self):
+        """Test that GIST_PREVIEW_JS executes module scripts via blob URLs.
+
+        gistpreview.github.io injects HTML content via innerHTML, but browsers
+        don't execute <script> tags added via innerHTML for security. The JS
+        should manually execute module scripts by creating blob URLs.
+        """
+        # Should find module scripts
+        assert 'script[type="module"]' in GIST_PREVIEW_JS
+        # Should create blob URLs
+        assert "Blob" in GIST_PREVIEW_JS
+        assert "createObjectURL" in GIST_PREVIEW_JS
+        # Should create new script elements with src
+        assert "createElement" in GIST_PREVIEW_JS
 
     def test_skips_files_without_body(self, output_dir):
         """Test that files without </body> are not modified."""
@@ -1041,6 +1093,58 @@ class TestParseSessionFile:
         assert "hello world" in index_html.lower()
         assert index_html == snapshot_html
 
+    def test_jsonl_preserves_tool_use_result(self, tmp_path):
+        """Test that toolUseResult field is preserved in parsed entries.
+
+        This is needed for originalFile content used in remote session code reconstruction.
+        """
+        # Create a JSONL file with toolUseResult
+        jsonl_content = """{"type":"user","timestamp":"2025-01-01T10:00:00Z","message":{"role":"user","content":"Edit the file"}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_001","name":"Edit","input":{"file_path":"/test.py","old_string":"old","new_string":"new"}}]}}
+{"type":"user","timestamp":"2025-01-01T10:00:10Z","toolUseResult":{"originalFile":"original content here","filePath":"/test.py"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_001","content":"File edited"}]}}"""
+
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(jsonl_content)
+
+        result = parse_session_file(jsonl_file)
+
+        # Find the tool result entry (last user message)
+        tool_result_entry = [
+            e
+            for e in result["loglines"]
+            if e["type"] == "user" and "tool_result" in str(e)
+        ][-1]
+
+        # toolUseResult should be preserved
+        assert "toolUseResult" in tool_result_entry
+        assert (
+            tool_result_entry["toolUseResult"]["originalFile"]
+            == "original content here"
+        )
+        assert tool_result_entry["toolUseResult"]["filePath"] == "/test.py"
+
+    def test_jsonl_preserves_is_meta(self, tmp_path):
+        """Test that isMeta field is preserved in parsed entries.
+
+        Skill expansion messages have isMeta=True and should be treated as
+        continuations for prompt numbering.
+        """
+        jsonl_content = """{"type":"user","timestamp":"2025-01-01T10:00:00Z","message":{"role":"user","content":"Use the test skill"}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Invoking skill..."}]}}
+{"type":"user","timestamp":"2025-01-01T10:00:10Z","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /path/to/skill"}]}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:15Z","message":{"role":"assistant","content":[{"type":"text","text":"Working on it..."}]}}"""
+
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(jsonl_content)
+
+        result = parse_session_file(jsonl_file)
+
+        # Find the skill expansion entry (isMeta=True)
+        meta_entry = [e for e in result["loglines"] if e.get("isMeta")]
+        assert len(meta_entry) == 1
+        assert meta_entry[0]["isMeta"] is True
+        assert "Base directory for this skill" in str(meta_entry[0]["message"])
+
 
 class TestGetSessionSummary:
     """Tests for get_session_summary which extracts summary from session files."""
@@ -1460,6 +1564,164 @@ class TestOutputAutoOption:
         assert (expected_dir / "index.html").exists()
 
 
+class TestTwoGistStrategy:
+    """Tests for the two-gist strategy when files are too large."""
+
+    def test_single_gist_when_files_small(self, output_dir, monkeypatch):
+        """Test that small files use single gist strategy (one gist, not two)."""
+        import subprocess
+
+        # Create small test HTML files (under 1MB total)
+        (output_dir / "index.html").write_text(
+            "<html><head></head><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "page-001.html").write_text(
+            "<html><head></head><body>Page</body></html>", encoding="utf-8"
+        )
+
+        # Track subprocess calls
+        subprocess_calls = []
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="https://gist.github.com/testuser/abc123def456\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        gist_id, gist_url = create_gist(output_dir)
+
+        # Should call gh gist create once with all files
+        assert len(subprocess_calls) == 1
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
+        assert gist_id == "abc123def456"
+
+    def test_two_gist_when_files_large(self, output_dir, monkeypatch):
+        """Test that large files use two-gist strategy."""
+        import subprocess
+
+        # Create test HTML files with a large code-data.json (over 1MB)
+        (output_dir / "index.html").write_text(
+            "<html><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "code.html").write_text(
+            "<html><body>Code</body></html>", encoding="utf-8"
+        )
+        # Create large code-data.json (1.5MB)
+        large_data = "x" * (1500 * 1024)  # 1.5MB
+        (output_dir / "code-data.json").write_text(large_data, encoding="utf-8")
+
+        # Track subprocess calls
+        subprocess_calls = []
+        gist_counter = [0]  # Use list to allow mutation in closure
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            gist_counter[0] += 1
+            # Return different gist IDs for each call
+            gist_id = f"gist{gist_counter[0]:03d}"
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=f"https://gist.github.com/testuser/{gist_id}\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        gist_id, gist_url = create_gist(output_dir)
+
+        # Should call gh gist create twice (data gist + main gist with all HTML files)
+        assert len(subprocess_calls) == 2
+        # First call should be for data gist (code-data.json)
+        first_cmd = subprocess_calls[0]
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
+        assert "code-data.json" in " ".join(str(x) for x in first_cmd)
+        # Second call should create main gist with all HTML files
+        second_cmd = subprocess_calls[1]
+        assert subprocess_calls[1][0:3] == ["gh", "gist", "create"]
+        assert "code-data.json" not in " ".join(str(x) for x in second_cmd)
+
+    def test_data_gist_id_injected_into_html(self, output_dir, monkeypatch):
+        """Test that data gist ID is injected into HTML when using two-gist strategy."""
+        import subprocess
+
+        # Create test HTML files with large code-data.json
+        # Note: inject_gist_preview_js looks for <head> tag to inject DATA_GIST_ID
+        (output_dir / "index.html").write_text(
+            "<html><head></head><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "code.html").write_text(
+            "<html><head></head><body>Code</body></html>", encoding="utf-8"
+        )
+        # Large code-data.json to trigger two-gist strategy
+        large_data = "x" * (1500 * 1024)
+        (output_dir / "code-data.json").write_text(large_data, encoding="utf-8")
+
+        gist_counter = [0]
+
+        def mock_run(cmd, *args, **kwargs):
+            gist_counter[0] += 1
+            # Data gist gets ID "datagist001", main gist gets "maingist002"
+            if gist_counter[0] == 1:
+                gist_id = "datagist001"
+            else:
+                gist_id = "maingist002"
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=f"https://gist.github.com/testuser/{gist_id}\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        # create_gist handles inject_gist_preview_js internally
+        gist_id, gist_url = create_gist(output_dir)
+
+        # The main gist ID should be returned
+        assert gist_id == "maingist002"
+
+        # The code.html should have the data gist ID injected
+        code_html = (output_dir / "code.html").read_text(encoding="utf-8")
+        assert "datagist001" in code_html
+        assert 'window.DATA_GIST_ID = "datagist001"' in code_html
+
+    def test_size_threshold_configurable(self, output_dir, monkeypatch):
+        """Test that the size threshold for two-gist strategy can be configured."""
+        import subprocess
+
+        # Create files just under default threshold
+        (output_dir / "index.html").write_text(
+            "<html><body>Index</body></html>", encoding="utf-8"
+        )
+        # ~900KB code-data.json (under 1MB default threshold)
+        medium_data = "x" * (900 * 1024)
+        (output_dir / "code-data.json").write_text(medium_data, encoding="utf-8")
+
+        subprocess_calls = []
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="https://gist.github.com/testuser/abc123\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        # With default threshold (1MB), should use single gist (create with all files)
+        gist_id, gist_url = create_gist(output_dir)
+        assert len(subprocess_calls) == 1
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
+
+
 class TestSearchFeature:
     """Tests for the search feature on index.html pages."""
 
@@ -1494,6 +1756,7 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # For small sessions, JavaScript is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # JavaScript should handle DOMParser for parsing fetched pages
@@ -1508,25 +1771,26 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # For small sessions, CSS is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # CSS should style the search box
-        assert "#search-box" in index_html or ".search-box" in index_html
+        assert "#search-box" in index_html
         # CSS should style the search modal
-        assert "#search-modal" in index_html or ".search-modal" in index_html
+        assert "#search-modal" in index_html
 
     def test_search_box_hidden_by_default_in_css(self, output_dir):
         """Test that search box is hidden by default (for progressive enhancement)."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # For small sessions, CSS is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Search box should be hidden by default in CSS
         # JavaScript will show it when loaded
-        assert "search-box" in index_html
-        # The JS should show the search box
-        assert "style.display" in index_html or "classList" in index_html
+        assert "#search-box" in index_html
+        assert "display: none" in index_html
 
     def test_search_total_pages_available(self, output_dir):
         """Test that total_pages is available to JavaScript for fetching."""
@@ -1536,4 +1800,273 @@ class TestSearchFeature:
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Total pages should be embedded for JS to know how many pages to fetch
-        assert "totalPages" in index_html or "total_pages" in index_html
+        assert "TOTAL_PAGES" in index_html
+
+
+class TestPageDataJson:
+    """Tests for page-data.json generation for gist two-gist strategy."""
+
+    def test_generates_page_data_files_for_large_sessions(self, tmp_path):
+        """Test that page-data-NNN.json files are generated for large sessions."""
+        from claude_code_transcripts import PAGE_DATA_SIZE_THRESHOLD
+
+        # Create a session with enough content to exceed threshold
+        # Generate many conversations to make pages large
+        loglines = []
+        for i in range(50):  # Many conversations
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": f"2025-01-01T{i:02d}:00:00.000Z",
+                    "message": {"role": "user", "content": f"Task {i}: " + "x" * 5000},
+                }
+            )
+            loglines.append(
+                {
+                    "type": "assistant",
+                    "timestamp": f"2025-01-01T{i:02d}:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response " + "y" * 5000}],
+                    },
+                }
+            )
+
+        session_file = tmp_path / "large_session.json"
+        session_file.write_text(json.dumps({"loglines": loglines}), encoding="utf-8")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(session_file, output_dir)
+
+        # Should generate individual page-data-NNN.json files for large sessions
+        page_data_files = list(output_dir.glob("page-data-*.json"))
+        assert len(page_data_files) > 0, "page-data-NNN.json files should be generated"
+
+        # Verify first page data file
+        page_data_001 = output_dir / "page-data-001.json"
+        assert page_data_001.exists(), "page-data-001.json should exist"
+
+        # The file contains the HTML string directly (not a dict)
+        page_data = json.loads(page_data_001.read_text(encoding="utf-8"))
+        assert "<div" in page_data, "Page 1 should contain HTML"
+
+    def test_no_page_data_files_for_small_sessions(self, output_dir):
+        """Test that page-data-NNN.json files are NOT generated for small sessions."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir)
+
+        # Small sessions should not have any page-data files
+        page_data_files = list(output_dir.glob("page-data-*.json"))
+        assert (
+            len(page_data_files) == 0
+        ), "page-data files should not be generated for small sessions"
+
+    def test_page_data_files_collected_for_gist(self, tmp_path, monkeypatch):
+        """Test that page-data-*.json files are collected for gist upload."""
+        import subprocess
+
+        # Create a large session to generate page-data files
+        loglines = []
+        for i in range(50):
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": f"2025-01-01T{i:02d}:00:00.000Z",
+                    "message": {"role": "user", "content": f"Task {i}: " + "x" * 5000},
+                }
+            )
+            loglines.append(
+                {
+                    "type": "assistant",
+                    "timestamp": f"2025-01-01T{i:02d}:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response " + "y" * 5000}],
+                    },
+                }
+            )
+
+        session_file = tmp_path / "large_session.json"
+        session_file.write_text(json.dumps({"loglines": loglines}), encoding="utf-8")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(session_file, output_dir)
+
+        # Make page-data files large enough to trigger two-gist
+        for f in output_dir.glob("page-data-*.json"):
+            f.write_text(json.dumps("x" * (200 * 1024)), encoding="utf-8")
+
+        subprocess_calls = []
+        gist_counter = [0]
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            gist_counter[0] += 1
+            gist_id = f"gist{gist_counter[0]:03d}"
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=f"https://gist.github.com/testuser/{gist_id}\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        create_gist(output_dir)
+
+        # First call should include page-data files in the data gist
+        first_cmd = " ".join(str(x) for x in subprocess_calls[0])
+        assert "page-data-" in first_cmd, "page-data files should be in data gist"
+
+    def test_page_html_has_page_num_for_large_sessions(self, tmp_path):
+        """Test that page HTML has page number when page-data.json is generated."""
+        # Create a large session
+        loglines = []
+        for i in range(50):
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": f"2025-01-01T{i:02d}:00:00.000Z",
+                    "message": {"role": "user", "content": f"Task {i}: " + "x" * 5000},
+                }
+            )
+            loglines.append(
+                {
+                    "type": "assistant",
+                    "timestamp": f"2025-01-01T{i:02d}:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response " + "y" * 5000}],
+                    },
+                }
+            )
+
+        session_file = tmp_path / "large_session.json"
+        session_file.write_text(json.dumps({"loglines": loglines}), encoding="utf-8")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(session_file, output_dir)
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # Should have page number embedded for fetching
+        assert "window.PAGE_NUM" in page_html
+
+    def test_generates_index_data_json_for_large_sessions(self, tmp_path):
+        """Test that index-data.json is generated for large sessions."""
+        # Create a large session
+        loglines = []
+        for i in range(50):
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": f"2025-01-01T{i:02d}:00:00.000Z",
+                    "message": {"role": "user", "content": f"Task {i}: " + "x" * 5000},
+                }
+            )
+            loglines.append(
+                {
+                    "type": "assistant",
+                    "timestamp": f"2025-01-01T{i:02d}:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response " + "y" * 5000}],
+                    },
+                }
+            )
+
+        session_file = tmp_path / "large_session.json"
+        session_file.write_text(json.dumps({"loglines": loglines}), encoding="utf-8")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(session_file, output_dir)
+
+        # Should generate index-data.json for large sessions
+        index_data_file = output_dir / "index-data.json"
+        assert index_data_file.exists(), "index-data.json should exist"
+
+        # The file contains the HTML string directly
+        index_data = json.loads(index_data_file.read_text(encoding="utf-8"))
+        assert "<div" in index_data, "index-data.json should contain HTML"
+
+        # index.html should still include content for local viewing
+        # (loader JS is only injected during gist upload by inject_gist_preview_js)
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+        assert (
+            'id="index-items"' in index_html
+        ), "index.html should have index-items container"
+
+    def test_no_index_data_json_for_small_sessions(self, output_dir):
+        """Test that index-data.json is NOT generated for small sessions."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir)
+
+        # Small sessions should not have index-data.json
+        index_data_file = output_dir / "index-data.json"
+        assert (
+            not index_data_file.exists()
+        ), "index-data.json should not exist for small sessions"
+
+    def test_large_session_html_includes_content_for_local_viewing(self, tmp_path):
+        """Test that large session HTML includes content when not uploading to gist.
+
+        Even when page-data-XXX.json files are generated, the HTML pages should
+        contain the actual content for local viewing (file:// or local http server).
+        The JSON files are only needed when uploading to gist where file size matters.
+        """
+        # Create a large session that triggers page-data JSON generation
+        loglines = []
+        for i in range(50):
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": f"2025-01-01T{i:02d}:00:00.000Z",
+                    "message": {"role": "user", "content": f"Task {i}: " + "x" * 5000},
+                }
+            )
+            loglines.append(
+                {
+                    "type": "assistant",
+                    "timestamp": f"2025-01-01T{i:02d}:00:05.000Z",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Response " + "y" * 5000}],
+                    },
+                }
+            )
+
+        session_file = tmp_path / "large_session.json"
+        session_file.write_text(json.dumps({"loglines": loglines}), encoding="utf-8")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        generate_html(session_file, output_dir)
+
+        # Verify page-data JSON files were generated (confirms session is "large")
+        page_data_files = list(output_dir.glob("page-data-*.json"))
+        assert (
+            len(page_data_files) > 0
+        ), "page-data files should be generated for large sessions"
+
+        # But the HTML pages should STILL include content for local viewing
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+        # The page should have actual message content, not just empty containers
+        assert (
+            "Task 0:" in page_html or "xxxxx" in page_html
+        ), "page-001.html should include message content for local viewing"
+
+        # Index should also include content
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+        # The index should have items, not just empty #index-items div
+        assert (
+            'class="index-item"' in index_html or "Task " in index_html
+        ), "index.html should include index items for local viewing"

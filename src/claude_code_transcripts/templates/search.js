@@ -1,5 +1,5 @@
 (function() {
-    var totalPages = {{ total_pages }};
+    var totalPages = window.TOTAL_PAGES || 1;
     var searchBox = document.getElementById('search-box');
     var searchInput = document.getElementById('search-input');
     var searchBtn = document.getElementById('search-btn');
@@ -23,6 +23,9 @@
     var gistId = null;
     var gistOwner = null;
     var gistInfoLoaded = false;
+
+    // Check if we're using page-data JSON files (large session mode)
+    var usePageDataJson = !!window.DATA_GIST_ID;
 
     if (isGistPreview) {
         // Extract gist ID from URL query string like ?78a436a8a9e7a2e603738b8193b95410/index.html
@@ -52,6 +55,19 @@
             return 'https://gist.githubusercontent.com/' + gistOwner + '/' + gistId + '/raw/' + pageFile;
         }
         return pageFile;
+    }
+
+    function getPageDataFetchUrl(pageNum) {
+        // Get URL for page-data-XXX.json
+        var paddedNum = String(pageNum).padStart(3, '0');
+        var filename = 'page-data-' + paddedNum + '.json';
+
+        if (!isGistPreview) {
+            return filename;
+        }
+
+        var dataGistId = window.DATA_GIST_ID || gistId;
+        return 'https://gist.githubusercontent.com/raw/' + dataGistId + '/' + filename;
     }
 
     function getPageLinkUrl(pageFile) {
@@ -138,7 +154,7 @@
         });
     }
 
-    function processPage(pageFile, html, query) {
+    function processPageHtml(pageFile, html, query) {
         var parser = new DOMParser();
         var doc = parser.parseFromString(html, 'text/html');
         var resultsFromPage = 0;
@@ -174,6 +190,25 @@
         return resultsFromPage;
     }
 
+    async function fetchPageContent(pageNum) {
+        var pageFile = 'page-' + String(pageNum).padStart(3, '0') + '.html';
+
+        if (usePageDataJson && isGistPreview) {
+            // Fetch from page-data-XXX.json (large session mode on gist)
+            var url = getPageDataFetchUrl(pageNum);
+            var response = await fetch(url);
+            if (!response.ok) throw new Error('Failed to fetch');
+            var html = await response.json(); // JSON contains HTML string
+            return { pageFile: pageFile, html: html };
+        } else {
+            // Fetch from page-XXX.html (small session or local server)
+            var response = await fetch(getPageFetchUrl(pageFile));
+            if (!response.ok) throw new Error('Failed to fetch');
+            var html = await response.text();
+            return { pageFile: pageFile, html: html };
+        }
+    }
+
     async function performSearch(query) {
         if (!query.trim()) {
             searchStatus.textContent = 'Enter a search term';
@@ -185,7 +220,8 @@
         searchStatus.textContent = 'Searching...';
 
         // Load gist info if on gistpreview (needed for constructing URLs)
-        if (isGistPreview && !gistInfoLoaded) {
+        if (isGistPreview && !gistInfoLoaded && !usePageDataJson) {
+            // Only need gist info for HTML fetching (not for JSON which uses raw URLs)
             searchStatus.textContent = 'Loading gist info...';
             await loadGistInfo();
             if (!gistOwner) {
@@ -197,29 +233,22 @@
         var resultsFound = 0;
         var pagesSearched = 0;
 
-        // Build list of pages to fetch
-        var pagesToFetch = [];
-        for (var i = 1; i <= totalPages; i++) {
-            pagesToFetch.push('page-' + String(i).padStart(3, '0') + '.html');
-        }
-
         searchStatus.textContent = 'Searching...';
 
         // Process pages in batches of 3, but show results immediately as each completes
         var batchSize = 3;
-        for (var i = 0; i < pagesToFetch.length; i += batchSize) {
-            var batch = pagesToFetch.slice(i, i + batchSize);
+        for (var i = 1; i <= totalPages; i += batchSize) {
+            var batch = [];
+            for (var j = i; j < i + batchSize && j <= totalPages; j++) {
+                batch.push(j);
+            }
 
             // Create promises that process results immediately when each fetch completes
-            var promises = batch.map(function(pageFile) {
-                return fetch(getPageFetchUrl(pageFile))
-                    .then(function(response) {
-                        if (!response.ok) throw new Error('Failed to fetch');
-                        return response.text();
-                    })
-                    .then(function(html) {
+            var promises = batch.map(function(pageNum) {
+                return fetchPageContent(pageNum)
+                    .then(function(result) {
                         // Process and display results immediately
-                        var count = processPage(pageFile, html, query);
+                        var count = processPageHtml(result.pageFile, result.html, query);
                         resultsFound += count;
                         pagesSearched++;
                         searchStatus.textContent = 'Found ' + resultsFound + ' result(s) in ' + pagesSearched + '/' + totalPages + ' pages...';
