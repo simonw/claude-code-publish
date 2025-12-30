@@ -454,13 +454,10 @@ async function init() {
                 if (target.closest('.cm-line')) {
                     const line = target.closest('.cm-line');
                     const rangeIndex = line.getAttribute('data-range-index');
-                    const msgId = line.getAttribute('data-msg-id');
                     if (rangeIndex !== null) {
                         highlightRange(parseInt(rangeIndex), blameRanges, view);
-                        if (msgId) {
-                            scrollToMessage(msgId);
-                        }
-                        // Update URL hash for deep-linking
+                        // Update URL hash for deep-linking (don't scroll transcript -
+                        // that would render thousands of messages and hang the browser)
                         const range = blameRanges[parseInt(rangeIndex)];
                         if (range) {
                             updateLineHash(range.start);
@@ -563,12 +560,12 @@ async function init() {
         });
     }
 
-    // Render messages to the transcript panel
-    function renderMessagesUpTo(targetIndex) {
+    // Render a single chunk of messages (synchronous)
+    function renderChunk(startIdx, endIdx) {
         const transcriptContent = document.getElementById('transcript-content');
-        const startIndex = renderedCount;
+        const initialCount = renderedCount;
 
-        while (renderedCount <= targetIndex && renderedCount < messagesData.length) {
+        while (renderedCount <= endIdx && renderedCount < messagesData.length) {
             const msg = messagesData[renderedCount];
             const div = document.createElement('div');
             div.innerHTML = msg.html;
@@ -578,10 +575,43 @@ async function init() {
             renderedCount++;
         }
 
-        if (renderedCount > startIndex) {
+        if (renderedCount > initialCount) {
             initTruncation(transcriptContent);
             formatTimestamps(transcriptContent);
         }
+    }
+
+    // Render messages up to targetIndex synchronously (for small jumps)
+    function renderMessagesUpTo(targetIndex) {
+        if (targetIndex < renderedCount) return;
+        renderChunk(renderedCount, targetIndex);
+    }
+
+    // Render messages progressively with UI breaks (for large jumps)
+    // Returns a promise that resolves when rendering is complete
+    function renderMessagesProgressively(targetIndex) {
+        return new Promise((resolve) => {
+            if (targetIndex < renderedCount) {
+                resolve();
+                return;
+            }
+
+            const PROGRESSIVE_CHUNK_SIZE = 200; // Larger chunks for speed, with breaks between
+
+            function renderNextBatch() {
+                const batchEnd = Math.min(renderedCount + PROGRESSIVE_CHUNK_SIZE - 1, targetIndex);
+                renderChunk(renderedCount, batchEnd);
+
+                if (renderedCount <= targetIndex && renderedCount < messagesData.length) {
+                    // Use setTimeout to yield to the browser for UI updates
+                    setTimeout(renderNextBatch, 0);
+                } else {
+                    resolve();
+                }
+            }
+
+            renderNextBatch();
+        });
     }
 
     function renderNextChunk() {
@@ -603,14 +633,15 @@ async function init() {
         return offset + 8;
     }
 
-    // Scroll to a message in the transcript
-    function scrollToMessage(msgId) {
+    // Scroll to a message in the transcript (async for progressive rendering)
+    async function scrollToMessage(msgId) {
         const transcriptContent = document.getElementById('transcript-content');
         const transcriptPanel = document.getElementById('transcript-panel');
 
         const msgIndex = msgIdToIndex.get(msgId);
         if (msgIndex !== undefined && msgIndex >= renderedCount) {
-            renderMessagesUpTo(msgIndex);
+            // Use progressive rendering for large jumps to keep UI responsive
+            await renderMessagesProgressively(msgIndex);
         }
 
         const message = transcriptContent.querySelector(`#${msgId}`);
@@ -665,10 +696,14 @@ async function init() {
             currentBlameRanges = fileInfo.blame_ranges || [];
             createEditor(codeContent, content, currentBlameRanges, path);
 
-            const firstOpRange = currentBlameRanges.find(r => r.msg_id);
-            if (firstOpRange) {
-                scrollToMessage(firstOpRange.msg_id);
+            // Auto-select the first blame range: highlight in editor only
+            // Don't auto-scroll transcript - that would render thousands of messages
+            // User can click the blame range to navigate to the message
+            const firstOpIndex = currentBlameRanges.findIndex(r => r.msg_id);
+            if (firstOpIndex >= 0) {
+                const firstOpRange = currentBlameRanges[firstOpIndex];
                 scrollEditorToLine(firstOpRange.start);
+                highlightRange(firstOpIndex, currentBlameRanges, currentEditor);
             }
         }, 10);
     }
@@ -779,7 +814,8 @@ async function init() {
                     highlightRange(idx, currentBlameRanges, currentEditor);
                 }
             }
-            scrollToMessage(msgId);
+            // Don't auto-scroll transcript - user is already viewing it and
+            // scrolling to a distant message would render thousands of DOM nodes
         });
 
         return true;

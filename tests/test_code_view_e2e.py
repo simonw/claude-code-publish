@@ -211,18 +211,16 @@ class TestBlameInteraction:
             active = code_view_page.locator(".cm-active-range")
             expect(active.first).to_be_visible()
 
-    def test_clicking_blame_scrolls_transcript(self, code_view_page: Page):
-        """Test that clicking a blame block scrolls to the message in transcript."""
-        blame_lines = code_view_page.locator(".cm-line[data-msg-id]")
+    def test_clicking_blame_updates_url_hash(self, code_view_page: Page):
+        """Test that clicking a blame block updates the URL hash for deep-linking."""
+        blame_lines = code_view_page.locator(".cm-line[data-range-index]")
         if blame_lines.count() > 0:
             first_blame = blame_lines.first
-            msg_id = first_blame.get_attribute("data-msg-id")
-
             first_blame.click()
 
-            # Check that the message is highlighted in transcript
-            highlighted = code_view_page.locator(f"#{msg_id}.highlighted")
-            expect(highlighted).to_be_visible()
+            # Check that the URL hash was updated with a line number
+            url = code_view_page.url
+            assert ":L" in url, f"Expected URL to contain line hash, got: {url}"
 
     def test_hovering_blame_shows_tooltip(self, code_view_page: Page):
         """Test that hovering over blame line shows tooltip."""
@@ -274,10 +272,6 @@ class TestTranscriptPanel:
 
     def test_clicking_message_navigates_to_code(self, code_view_page: Page):
         """Test that clicking a transcript message navigates to code."""
-        # Get initial file selection
-        initial_selected = code_view_page.locator(".tree-file.selected")
-        initial_path = initial_selected.get_attribute("data-path")
-
         # Find a message that should have an associated edit
         messages = code_view_page.locator("#transcript-content .message")
         if messages.count() > 1:
@@ -287,11 +281,9 @@ class TestTranscriptPanel:
             # Give it time to navigate
             code_view_page.wait_for_timeout(200)
 
-            # Check that a message is now highlighted
-            highlighted = code_view_page.locator(
-                "#transcript-content .message.highlighted"
-            )
-            expect(highlighted).to_be_visible()
+            # Check that a code range is highlighted (navigation happened)
+            active_range = code_view_page.locator(".cm-active-range")
+            expect(active_range.first).to_be_visible()
 
     def test_pinned_user_message_on_scroll(self, code_view_page: Page):
         """Test that scrolling shows pinned user message with correct content."""
@@ -560,22 +552,19 @@ class TestChunkedRendering:
         # Should have at least some messages rendered
         assert messages.count() > 0, "No messages rendered in transcript"
 
-    def test_clicking_blame_renders_target_message(self, code_view_page: Page):
-        """Test that clicking a blame block ensures target message is rendered."""
+    def test_clicking_blame_highlights_code_range(self, code_view_page: Page):
+        """Test that clicking a blame block highlights the code range."""
         blame_lines = code_view_page.locator(".cm-line[data-msg-id]")
 
         if blame_lines.count() > 0:
-            # Get the msg-id from the blame line
-            msg_id = blame_lines.first.get_attribute("data-msg-id")
-
             # Click the blame line
             blame_lines.first.click()
             code_view_page.wait_for_timeout(200)
 
-            # The target message should now be in the DOM and highlighted
-            target_msg = code_view_page.locator(f"#{msg_id}")
-            expect(target_msg).to_be_attached()
-            expect(target_msg).to_have_class(re.compile(r"highlighted"))
+            # The code range should be highlighted (not the transcript message,
+            # as that would require rendering thousands of DOM nodes for large transcripts)
+            active_range = code_view_page.locator(".cm-active-range")
+            expect(active_range.first).to_be_visible()
 
     def test_intersection_observer_setup(self, code_view_page: Page):
         """Test that IntersectionObserver is set up for lazy loading."""
