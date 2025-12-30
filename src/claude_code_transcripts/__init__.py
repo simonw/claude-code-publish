@@ -1831,7 +1831,14 @@ def generate_html(
         num_ops = len(file_operations)
         num_files = len(set(op.file_path for op in file_operations))
 
+        last_phase = [None]  # Use list to allow mutation in nested function
+
         def code_view_progress(phase, current, total):
+            # Clear line when switching phases
+            if last_phase[0] and last_phase[0] != phase:
+                print("\r" + " " * 60 + "\r", end="", flush=True)
+            last_phase[0] = phase
+
             if phase == "operations" and num_ops > 20:
                 print(
                     f"\rCode view: replaying operation {current}/{total}...",
@@ -2458,7 +2465,14 @@ def generate_html_from_session_data(
         num_ops = len(file_operations)
         num_files = len(set(op.file_path for op in file_operations))
 
+        last_phase = [None]  # Use list to allow mutation in nested function
+
         def code_view_progress(phase, current, total):
+            # Clear line when switching phases
+            if last_phase[0] and last_phase[0] != phase:
+                click.echo("\r" + " " * 60 + "\r", nl=False)
+            last_phase[0] = phase
+
             if phase == "operations" and num_ops > 20:
                 click.echo(
                     f"\rCode view: replaying operation {current}/{total}...",
