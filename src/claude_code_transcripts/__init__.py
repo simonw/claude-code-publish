@@ -757,6 +757,66 @@ def render_user_message_content(message_data):
     return f"<p>{html.escape(str(content))}</p>"
 
 
+def filter_tool_result_blocks(content, paired_tool_ids):
+    if not isinstance(content, list):
+        return content
+    filtered = []
+    for block in content:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "tool_result"
+            and block.get("tool_use_id") in paired_tool_ids
+        ):
+            continue
+        filtered.append(block)
+    return filtered
+
+
+def is_tool_result_content(content):
+    if not isinstance(content, list) or not content:
+        return False
+    return all(
+        isinstance(block, dict) and block.get("type") == "tool_result"
+        for block in content
+    )
+
+
+def render_user_message_content_with_tool_pairs(message_data, paired_tool_ids):
+    content = message_data.get("content", "")
+    if isinstance(content, str):
+        return render_user_message_content(message_data)
+    if isinstance(content, list):
+        filtered = filter_tool_result_blocks(content, paired_tool_ids)
+        if not filtered:
+            return ""
+        return "".join(render_content_block(block) for block in filtered)
+    return f"<p>{html.escape(str(content))}</p>"
+
+
+def render_assistant_message_with_tool_pairs(
+    message_data, tool_result_lookup, paired_tool_ids
+):
+    content = message_data.get("content", [])
+    if not isinstance(content, list):
+        return f"<p>{html.escape(str(content))}</p>"
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            parts.append(f"<p>{html.escape(str(block))}</p>")
+            continue
+        if block.get("type") == "tool_use":
+            tool_id = block.get("id", "")
+            tool_result = tool_result_lookup.get(tool_id)
+            if tool_result:
+                paired_tool_ids.add(tool_id)
+                tool_use_html = render_content_block(block)
+                tool_result_html = render_content_block(tool_result)
+                parts.append(_macros.tool_pair(tool_use_html, tool_result_html))
+                continue
+        parts.append(render_content_block(block))
+    return "".join(parts)
+
+
 def render_assistant_message(message_data):
     content = message_data.get("content", [])
     if not isinstance(content, list):
@@ -877,6 +937,34 @@ def render_message(log_type, message_json, timestamp):
     return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
 
 
+def render_message_with_tool_pairs(
+    log_type, message_data, timestamp, tool_result_lookup, paired_tool_ids
+):
+    if log_type == "user":
+        content = message_data.get("content", "")
+        filtered = filter_tool_result_blocks(content, paired_tool_ids)
+        content_html = render_user_message_content_with_tool_pairs(
+            message_data, paired_tool_ids
+        )
+        if not content_html.strip():
+            return ""
+        if is_tool_result_content(filtered):
+            role_class, role_label = "tool-reply", "Tool reply"
+        else:
+            role_class, role_label = "user", "User"
+    elif log_type == "assistant":
+        content_html = render_assistant_message_with_tool_pairs(
+            message_data, tool_result_lookup, paired_tool_ids
+        )
+        role_class, role_label = "assistant", "Assistant"
+    else:
+        return ""
+    if not content_html.strip():
+        return ""
+    msg_id = make_msg_id(timestamp)
+    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
+
+
 CSS = """
 :root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
 * { box-sizing: border-box; }
@@ -913,6 +1001,8 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
 .tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-result.tool-error { background: var(--tool-error-bg); }
+.tool-pair { border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px; margin: 12px 0; background: rgba(156, 39, 176, 0.06); }
+.tool-pair .tool-use, .tool-pair .tool-result { margin: 8px 0; }
 .file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
 .write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
 .edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
@@ -1219,8 +1309,32 @@ def generate_html(json_path, output_dir, github_repo=None):
         messages_html = []
         for conv in page_convs:
             is_first = True
+            parsed_messages = []
             for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
+                try:
+                    message_data = json.loads(message_json)
+                except json.JSONDecodeError:
+                    continue
+                parsed_messages.append((log_type, message_data, timestamp))
+            tool_result_lookup = {}
+            for log_type, message_data, _ in parsed_messages:
+                content = message_data.get("content", [])
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "tool_result"
+                        and block.get("tool_use_id")
+                    ):
+                        tool_id = block.get("tool_use_id")
+                        if tool_id not in tool_result_lookup:
+                            tool_result_lookup[tool_id] = block
+            paired_tool_ids = set()
+            for log_type, message_data, timestamp in parsed_messages:
+                msg_html = render_message_with_tool_pairs(
+                    log_type, message_data, timestamp, tool_result_lookup, paired_tool_ids
+                )
                 if msg_html:
                     # Wrap continuation summaries in collapsed details
                     if is_first and conv.get("is_continuation"):
@@ -1689,8 +1803,32 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         messages_html = []
         for conv in page_convs:
             is_first = True
+            parsed_messages = []
             for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
+                try:
+                    message_data = json.loads(message_json)
+                except json.JSONDecodeError:
+                    continue
+                parsed_messages.append((log_type, message_data, timestamp))
+            tool_result_lookup = {}
+            for log_type, message_data, _ in parsed_messages:
+                content = message_data.get("content", [])
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "tool_result"
+                        and block.get("tool_use_id")
+                    ):
+                        tool_id = block.get("tool_use_id")
+                        if tool_id not in tool_result_lookup:
+                            tool_result_lookup[tool_id] = block
+            paired_tool_ids = set()
+            for log_type, message_data, timestamp in parsed_messages:
+                msg_html = render_message_with_tool_pairs(
+                    log_type, message_data, timestamp, tool_result_lookup, paired_tool_ids
+                )
                 if msg_html:
                     # Wrap continuation summaries in collapsed details
                     if is_first and conv.get("is_continuation"):

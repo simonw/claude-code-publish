@@ -77,6 +77,14 @@ class TestGenerateHtml:
         page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
         assert page_html == snapshot_html
 
+    def test_pairs_tool_use_and_result(self, output_dir):
+        """Test that tool_use blocks are grouped with tool_result blocks."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+        assert 'class="tool-pair"' in page_html
+
     def test_generates_page_002_html(self, output_dir, snapshot_html):
         """Test page-002.html generation (continuation page)."""
         fixture_path = Path(__file__).parent / "sample_session.json"

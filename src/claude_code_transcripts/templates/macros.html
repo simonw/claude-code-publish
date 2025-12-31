@@ -116,6 +116,11 @@
 <div class="tool-result{{ error_class }}"><div class="truncatable"><div class="truncatable-content">{{ content_html|safe }}</div><button class="expand-btn">Show more</button></div></div>
 {%- endmacro %}
 
+{# Tool pair wrapper - tool_use_html/tool_result_html are pre-rendered #}
+{% macro tool_pair(tool_use_html, tool_result_html) %}
+<div class="tool-pair">{{ tool_use_html|safe }}{{ tool_result_html|safe }}</div>
+{%- endmacro %}
+
 {# Thinking block - content_html is pre-rendered markdown so needs |safe #}
 {% macro thinking(content_html) %}
 <div class="thinking"><div class="thinking-label">Thinking</div>{{ content_html|safe }}</div>
