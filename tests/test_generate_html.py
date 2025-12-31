@@ -335,6 +335,39 @@ class TestRenderContentBlock:
         assert '"type": "text"' not in result
         assert result == snapshot_html
 
+    def test_tool_result_content_block_array_with_image(self, snapshot_html):
+        """Test that image blocks inside tool_result arrays render correctly."""
+        block = {
+            "type": "tool_result",
+            "content": (
+                '[{"type": "image", "source": {"type": "base64",'
+                ' "media_type": "image/gif", "data": "R0lGODlhAQABAIAAAAUEBA=="}}]'
+            ),
+            "is_error": False,
+        }
+        result = render_content_block(block)
+        assert 'src="data:image/gif;base64,' in result
+        assert "image-block" in result
+        assert '"type": "image"' not in result
+        assert result == snapshot_html
+
+    def test_tool_result_content_block_array_with_tool_use(self, snapshot_html):
+        """Test that tool_use blocks inside tool_result arrays render correctly."""
+        block = {
+            "type": "tool_result",
+            "content": (
+                '[{"type": "tool_use", "id": "toolu_123", "name": "Bash",'
+                ' "input": {"command": "ls -la", "description": "List files"}}]'
+            ),
+            "is_error": False,
+        }
+        result = render_content_block(block)
+        assert "tool-use" in result
+        assert "bash-tool" in result
+        assert "List files" in result
+        assert '"type": "tool_use"' not in result
+        assert result == snapshot_html
+
 
 class TestAnalyzeConversation:
     """Tests for conversation analysis."""

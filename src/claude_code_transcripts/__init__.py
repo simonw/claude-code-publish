@@ -108,21 +108,7 @@ def render_content_block_array(blocks):
     """
     parts = []
     for block in blocks:
-        if not isinstance(block, dict):
-            continue
-        block_type = block.get("type", "")
-        if block_type == "text":
-            text = block.get("text", "")
-            # Render as markdown
-            parts.append(render_markdown_text(text))
-        elif block_type == "thinking":
-            thinking = block.get("thinking", "")
-            parts.append(render_markdown_text(thinking))
-        else:
-            # For other types, just show as formatted text
-            text = block.get("text", block.get("content", ""))
-            if text:
-                parts.append(f"<pre>{html.escape(str(text))}</pre>")
+        parts.append(render_content_block(block))
     return "".join(parts) if parts else None
 
 
