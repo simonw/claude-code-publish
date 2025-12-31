@@ -18,6 +18,7 @@ from claude_code_transcripts import (
     render_edit_tool,
     render_bash_tool,
     render_content_block,
+    strip_ansi,
     analyze_conversation,
     format_tool_stats,
     is_tool_result_message,
@@ -284,6 +285,21 @@ class TestRenderContentBlock:
         result = render_content_block(block)
         assert result == snapshot_html
 
+    def test_tool_result_with_ansi_codes(self):
+        """Test that ANSI escape codes are stripped from tool results."""
+        block = {
+            "type": "tool_result",
+            "content": "\x1b[38;2;166;172;186mTests passed:\x1b[0m \x1b[32m✓\x1b[0m All 5 tests passed\n\x1b[1;31mError:\x1b[0m None",
+            "is_error": False,
+        }
+        result = render_content_block(block)
+        assert "\x1b[" not in result
+        assert "[38;2;" not in result
+        assert "[32m" not in result
+        assert "[0m" not in result
+        assert "Tests passed:" in result
+        assert "All 5 tests passed" in result
+
     def test_tool_result_with_commit(self, snapshot_html):
         """Test tool result with git commit output."""
         # Need to set the global _github_repo for commit link rendering
@@ -302,6 +318,21 @@ class TestRenderContentBlock:
         finally:
             claude_code_transcripts._github_repo = old_repo
 
+
+class TestStripAnsi:
+    """Tests for ANSI escape stripping."""
+
+    def test_strips_csi_sequences(self):
+        text = "start\x1b[?25hend\x1b[2Jdone"
+        assert strip_ansi(text) == "startenddone"
+
+    def test_strips_osc_sequences(self):
+        text = "title\x1b]0;My Title\x07end"
+        assert strip_ansi(text) == "titleend"
+
+    def test_strips_osc_st_terminator(self):
+        text = "name\x1b]0;Title\x1b\\end"
+        assert strip_ansi(text) == "nameend"
 
 class TestAnalyzeConversation:
     """Tests for conversation analysis."""

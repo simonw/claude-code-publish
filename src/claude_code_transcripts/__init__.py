@@ -48,6 +48,23 @@ LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
 
+# Regex to strip ANSI escape sequences from terminal output
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"""
+    \x1b(?:\].*?(?:\x07|\x1b\\)  # OSC sequences
+    |\[[0-?]*[ -/]*[@-~]         # CSI sequences
+    |[@-Z\\-_])                  # 7-bit C1 control codes
+    """,
+    re.VERBOSE | re.DOTALL,
+)
+
+
+def strip_ansi(text):
+    """Strip ANSI escape sequences from terminal output."""
+    if not text:
+        return text
+    return ANSI_ESCAPE_PATTERN.sub("", text)
+
 
 def extract_text_from_content(content):
     """Extract plain text from message content.
@@ -711,6 +728,7 @@ def render_content_block(block):
 
         # Check for git commits and render with styled cards
         if isinstance(content, str):
+            content = strip_ansi(content)
             commits_found = list(COMMIT_PATTERN.finditer(content))
             if commits_found:
                 # Build commit cards + remaining content
@@ -2071,4 +2089,5 @@ def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
 
 
 def main():
+    # print("RUNNING LOCAL VERSION!!")
     cli()
