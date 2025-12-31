@@ -53,18 +53,18 @@ LONG_TEXT_THRESHOLD = (
 )
 
 # Regex to strip ANSI escape sequences from terminal output
-ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"""
+    \x1b(?:\].*?(?:\x07|\x1b\\)  # OSC sequences
+    |\[[0-?]*[ -/]*[@-~]         # CSI sequences
+    |[@-Z\\-_])                  # 7-bit C1 control codes
+    """,
+    re.VERBOSE | re.DOTALL,
+)
 
 
 def strip_ansi(text):
-    """Strip ANSI escape sequences from terminal output.
-
-    Args:
-        text: String that may contain ANSI escape codes.
-
-    Returns:
-        The text with all ANSI escape sequences removed.
-    """
+    """Strip ANSI escape sequences from terminal output."""
     if not text:
         return text
     return ANSI_ESCAPE_PATTERN.sub("", text)
@@ -2246,4 +2246,5 @@ def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
 
 
 def main():
+    # print("RUNNING LOCAL VERSION!!")
     cli()
