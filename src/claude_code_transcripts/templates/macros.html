@@ -67,25 +67,25 @@
 </ul></div>
 {%- endmacro %}
 
-{# Write tool #}
+{# Write tool - content is pre-highlighted so needs |safe #}
 {% macro write_tool(file_path, content, tool_id) %}
 {%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
 <div class="file-tool write-tool" data-tool-id="{{ tool_id }}">
 <div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{{ filename }}</span></div>
 <div class="file-tool-fullpath">{{ file_path }}</div>
-<div class="truncatable"><div class="truncatable-content"><pre class="file-content">{{ content }}</pre></div><button class="expand-btn">Show more</button></div>
+<div class="truncatable"><div class="truncatable-content"><pre class="file-content highlight">{{ content|safe }}</pre></div><button class="expand-btn">Show more</button></div>
 </div>
 {%- endmacro %}
 
-{# Edit tool #}
+{# Edit tool - old/new strings are pre-highlighted so need |safe #}
 {% macro edit_tool(file_path, old_string, new_string, replace_all, tool_id) %}
 {%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
 <div class="file-tool edit-tool" data-tool-id="{{ tool_id }}">
 <div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{{ filename }}</span>{% if replace_all %} <span class="edit-replace-all">(replace all)</span>{% endif %}</div>
 <div class="file-tool-fullpath">{{ file_path }}</div>
 <div class="truncatable"><div class="truncatable-content">
-<div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content">{{ old_string }}</pre></div>
-<div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content">{{ new_string }}</pre></div>
+<div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content highlight">{{ old_string|safe }}</pre></div>
+<div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content highlight">{{ new_string|safe }}</pre></div>
 </div><button class="expand-btn">Show more</button></div>
 </div>
 {%- endmacro %}

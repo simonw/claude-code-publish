@@ -14,6 +14,7 @@ dependencies = [
     "httpx",
     "jinja2",
     "markdown",
+    "pygments>=2.17.0",
     "questionary",
 ]
 

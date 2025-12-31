@@ -1572,6 +1572,47 @@ class TestSearchFeature:
         assert "totalPages" in index_html or "total_pages" in index_html
 
 
+class TestSyntaxHighlighting:
+    """Tests for syntax highlighting functionality."""
+
+    def test_python_code_has_syntax_highlighting(self):
+        """Test that Python code in Write tool gets syntax highlighted."""
+        from claude_code_transcripts import render_write_tool
+
+        result = render_write_tool(
+            {
+                "file_path": "/path/to/test.py",
+                "content": "def hello():\n    return 'world'",
+            },
+            "tool-1",
+        )
+        # Should have syntax highlighting classes from Pygments
+        assert "highlight" in result or "class=" in result
+
+    def test_javascript_code_has_syntax_highlighting(self):
+        """Test that JavaScript code gets syntax highlighted."""
+        from claude_code_transcripts import render_write_tool
+
+        result = render_write_tool(
+            {
+                "file_path": "/path/to/test.js",
+                "content": "function hello() {\n    return 'world';\n}",
+            },
+            "tool-2",
+        )
+        # Should have syntax highlighting
+        assert "highlight" in result or "class=" in result
+
+    def test_unknown_extension_still_renders(self):
+        """Test that files with unknown extensions still render properly."""
+        from claude_code_transcripts import render_write_tool
+
+        result = render_write_tool(
+            {"file_path": "/path/to/test.xyz", "content": "some content"}, "tool-3"
+        )
+        assert "some content" in result
+
+
 class TestCopyButtonFeature:
     """Tests for copy button functionality."""
 

@@ -17,6 +17,10 @@ from click_default_group import DefaultGroup
 import httpx
 from jinja2 import Environment, PackageLoader
 import markdown
+from pygments import highlight
+from pygments.lexers import get_lexer_for_filename, get_lexer_by_name, TextLexer
+from pygments.formatters import HtmlFormatter
+from pygments.util import ClassNotFound
 import questionary
 
 # Set up Jinja2 environment
@@ -120,6 +124,35 @@ def render_content_block_array(blocks):
             if text:
                 parts.append(f"<pre>{html.escape(str(text))}</pre>")
     return "".join(parts) if parts else None
+
+
+def highlight_code(code, filename=None, language=None):
+    """Apply syntax highlighting to code using Pygments.
+
+    Args:
+        code: The source code to highlight.
+        filename: Optional filename to detect language from extension.
+        language: Optional explicit language name.
+
+    Returns:
+        HTML string with syntax highlighting, or escaped plain text if highlighting fails.
+    """
+    if not code:
+        return ""
+
+    try:
+        if language:
+            lexer = get_lexer_by_name(language)
+        elif filename:
+            lexer = get_lexer_for_filename(filename)
+        else:
+            lexer = TextLexer()
+    except ClassNotFound:
+        lexer = TextLexer()
+
+    formatter = HtmlFormatter(nowrap=True, cssclass="highlight")
+    highlighted = highlight(code, lexer, formatter)
+    return highlighted
 
 
 def extract_text_from_content(content):
@@ -728,7 +761,9 @@ def render_write_tool(tool_input, tool_id):
     """Render Write tool calls with file path header and content preview."""
     file_path = tool_input.get("file_path", "Unknown file")
     content = tool_input.get("content", "")
-    return _macros.write_tool(file_path, content, tool_id)
+    # Apply syntax highlighting based on file extension
+    highlighted_content = highlight_code(content, filename=file_path)
+    return _macros.write_tool(file_path, highlighted_content, tool_id)
 
 
 def render_edit_tool(tool_input, tool_id):
@@ -737,7 +772,12 @@ def render_edit_tool(tool_input, tool_id):
     old_string = tool_input.get("old_string", "")
     new_string = tool_input.get("new_string", "")
     replace_all = tool_input.get("replace_all", False)
-    return _macros.edit_tool(file_path, old_string, new_string, replace_all, tool_id)
+    # Apply syntax highlighting based on file extension
+    highlighted_old = highlight_code(old_string, filename=file_path)
+    highlighted_new = highlight_code(new_string, filename=file_path)
+    return _macros.edit_tool(
+        file_path, highlighted_old, highlighted_new, replace_all, tool_id
+    )
 
 
 def render_bash_tool(tool_input, tool_id):
@@ -1037,8 +1077,37 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .todo-pending .todo-content { color: #616161; }
 pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
 pre.json { color: #e0e0e0; }
+pre.highlight { color: #e0e0e0; }
 code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 pre code { background: none; padding: 0; }
+.highlight .hll { background-color: #49483e }
+.highlight .c { color: #75715e } /* Comment */
+.highlight .err { color: #f92672 } /* Error */
+.highlight .k { color: #66d9ef } /* Keyword */
+.highlight .l { color: #ae81ff } /* Literal */
+.highlight .n { color: #e0e0e0 } /* Name */
+.highlight .o { color: #f92672 } /* Operator */
+.highlight .p { color: #e0e0e0 } /* Punctuation */
+.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #75715e } /* Comments */
+.highlight .gd { color: #f92672 } /* Generic.Deleted */
+.highlight .gi { color: #a6e22e } /* Generic.Inserted */
+.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #66d9ef } /* Keywords */
+.highlight .ld { color: #e6db74 } /* Literal.Date */
+.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #ae81ff } /* Numbers */
+.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #e6db74 } /* Strings */
+.highlight .na { color: #a6e22e } /* Name.Attribute */
+.highlight .nb { color: #e0e0e0 } /* Name.Builtin */
+.highlight .nc { color: #a6e22e } /* Name.Class */
+.highlight .no { color: #66d9ef } /* Name.Constant */
+.highlight .nd { color: #a6e22e } /* Name.Decorator */
+.highlight .ne { color: #a6e22e } /* Name.Exception */
+.highlight .nf { color: #a6e22e } /* Name.Function */
+.highlight .nl { color: #e0e0e0 } /* Name.Label */
+.highlight .nn { color: #e0e0e0 } /* Name.Namespace */
+.highlight .nt { color: #f92672 } /* Name.Tag */
+.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #e0e0e0 } /* Variables */
+.highlight .ow { color: #f92672 } /* Operator.Word */
+.highlight .w { color: #e0e0e0 } /* Text.Whitespace */
 .user-content { margin: 0; }
 .truncatable { position: relative; }
 .truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
