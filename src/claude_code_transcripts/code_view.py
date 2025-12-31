@@ -1305,7 +1305,9 @@ def generate_code_view_html(
         if msg_id and msg_id in msg_to_prompt_num:
             current_prompt_num = msg_to_prompt_num[msg_id]
         # Every message gets the current prompt number (not just user prompts)
-        messages_data.append({"id": msg_id, "html": msg_html, "prompt_num": current_prompt_num})
+        messages_data.append(
+            {"id": msg_id, "html": msg_html, "prompt_num": current_prompt_num}
+        )
 
     # Build temp git repo with file history
     if progress_callback:

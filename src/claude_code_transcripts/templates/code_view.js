@@ -57,7 +57,7 @@ function formatTimestamps(container) {
     });
 }
 
-// Get the URL for fetching code-data.json on gistpreview
+// Get the URL for fetching code-data.json on gisthost/gistpreview
 function getGistDataUrl() {
     // Check if we have a separate data gist (for large files)
     // window.DATA_GIST_ID is injected by inject_gist_preview_js when two-gist strategy is used
@@ -65,7 +65,7 @@ function getGistDataUrl() {
         return `https://gist.githubusercontent.com/raw/${window.DATA_GIST_ID}/code-data.json`;
     }
 
-    // URL format: https://gistpreview.github.io/?GIST_ID/code.html
+    // URL format: https://gisthost.github.io/?GIST_ID/code.html
     const match = window.location.search.match(/^\?([^/]+)/);
     if (match) {
         const gistId = match[1];

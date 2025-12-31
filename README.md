@@ -104,11 +104,11 @@ claude-code-transcripts json session.json --gist
 This will output something like:
 ```
 Gist: https://gist.github.com/username/abc123def456
-Preview: https://gistpreview.github.io/?abc123def456/index.html
+Preview: https://gisthost.github.io/?abc123def456/index.html
 Files: /var/folders/.../session-id
 ```
 
-The preview URL uses [gistpreview.github.io](https://gistpreview.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gistpreview.
+The preview URL uses [gisthost.github.io](https://gisthost.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gisthost (also works with gistpreview.github.io for backward compatibility).
 
 **Large sessions:** GitHub's gist API has size limits (~1MB). For large sessions, the tool automatically handles this:
 

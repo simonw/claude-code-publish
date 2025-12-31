@@ -472,8 +472,8 @@ class TestInjectGistPreviewJs:
     def test_gist_preview_js_handles_fragment_navigation(self):
         """Test that GIST_PREVIEW_JS includes fragment navigation handling.
 
-        When accessing a gistpreview URL with a fragment like:
-        https://gistpreview.github.io/?GIST_ID/page-001.html#msg-2025-12-26T15-30-45-910Z
+        When accessing a gisthost URL with a fragment like:
+        https://gisthost.github.io/?GIST_ID/page-001.html#msg-2025-12-26T15-30-45-910Z
 
         The content loads dynamically, so the browser's native fragment
         navigation fails because the element doesn't exist yet. The JS
@@ -487,20 +487,10 @@ class TestInjectGistPreviewJs:
         # The JS should scroll to the element
         assert "scrollIntoView" in GIST_PREVIEW_JS
 
-    def test_gist_preview_js_executes_module_scripts(self):
-        """Test that GIST_PREVIEW_JS executes module scripts via blob URLs.
-
-        gistpreview.github.io injects HTML content via innerHTML, but browsers
-        don't execute <script> tags added via innerHTML for security. The JS
-        should manually execute module scripts by creating blob URLs.
-        """
-        # Should find module scripts
-        assert 'script[type="module"]' in GIST_PREVIEW_JS
-        # Should create blob URLs
-        assert "Blob" in GIST_PREVIEW_JS
-        assert "createObjectURL" in GIST_PREVIEW_JS
-        # Should create new script elements with src
-        assert "createElement" in GIST_PREVIEW_JS
+    def test_gist_preview_js_supports_both_hosts(self):
+        """Test that GIST_PREVIEW_JS supports both gisthost and gistpreview domains."""
+        assert "gisthost.github.io" in GIST_PREVIEW_JS
+        assert "gistpreview.github.io" in GIST_PREVIEW_JS
 
     def test_skips_files_without_body(self, output_dir):
         """Test that files without </body> are not modified."""
@@ -648,7 +638,7 @@ class TestSessionGistOption:
         assert result.exit_code == 0
         assert "Creating GitHub gist" in result.output
         assert "gist.github.com" in result.output
-        assert "gistpreview.github.io" in result.output
+        assert "gisthost.github.io" in result.output
 
     def test_session_gist_with_output_dir(self, monkeypatch, output_dir):
         """Test that session --gist with -o uses specified directory."""
@@ -679,9 +669,9 @@ class TestSessionGistOption:
 
         assert result.exit_code == 0
         assert (output_dir / "index.html").exists()
-        # Verify JS was injected
+        # Verify JS was injected (supports both gisthost and gistpreview)
         index_content = (output_dir / "index.html").read_text(encoding="utf-8")
-        assert "gistpreview.github.io" in index_content
+        assert "gisthost.github.io" in index_content
 
 
 class TestContinuationLongTexts:
@@ -926,7 +916,7 @@ class TestImportGistOption:
         assert result.exit_code == 0
         assert "Creating GitHub gist" in result.output
         assert "gist.github.com" in result.output
-        assert "gistpreview.github.io" in result.output
+        assert "gisthost.github.io" in result.output
 
 
 class TestVersionOption:

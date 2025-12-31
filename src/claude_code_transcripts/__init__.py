@@ -1030,72 +1030,75 @@ def render_message(log_type, message_json, timestamp, prompt_num=None):
     return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
 
 
-# JavaScript to fix relative URLs when served via gistpreview.github.io
+# JavaScript to fix relative URLs when served via gisthost.github.io or gistpreview.github.io
+# Fixes issue #26: Pagination links broken on gisthost.github.io
 GIST_PREVIEW_JS = r"""
 (function() {
-    if (window.location.hostname !== 'gistpreview.github.io') return;
-    // URL format: https://gistpreview.github.io/?GIST_ID/filename.html
+    var hostname = window.location.hostname;
+    if (hostname !== 'gisthost.github.io' && hostname !== 'gistpreview.github.io') return;
+    // URL format: https://gisthost.github.io/?GIST_ID/filename.html
     var match = window.location.search.match(/^\?([^/]+)/);
     if (!match) return;
     var gistId = match[1];
 
-    // Load CSS from gist (relative stylesheet links don't work on gistpreview)
-    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(link) {
-        var href = link.getAttribute('href');
-        if (href.startsWith('http')) return; // Already absolute
-        var cssUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + href;
-        fetch(cssUrl)
-            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
-            .then(function(css) {
-                var style = document.createElement('style');
-                style.textContent = css;
-                document.head.appendChild(style);
-                link.remove(); // Remove the broken link
-            })
-            .catch(function(e) { console.error('Failed to load CSS:', href, e); });
+    function rewriteLinks(root) {
+        (root || document).querySelectorAll('a[href]').forEach(function(link) {
+            var href = link.getAttribute('href');
+            // Skip already-rewritten links (issue #26 fix)
+            if (href.startsWith('?')) return;
+            // Skip external links and anchors
+            if (href.startsWith('http') || href.startsWith('#') || href.startsWith('//')) return;
+            // Handle anchor in relative URL (e.g., page-001.html#msg-123)
+            var parts = href.split('#');
+            var filename = parts[0];
+            var anchor = parts.length > 1 ? '#' + parts[1] : '';
+            link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
+        });
+    }
+
+    // Run immediately
+    rewriteLinks();
+
+    // Also run on DOMContentLoaded in case DOM isn't ready yet
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { rewriteLinks(); });
+    }
+
+    // Use MutationObserver to catch dynamically added content
+    // gisthost/gistpreview may add content after initial load
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1) { // Element node
+                    rewriteLinks(node);
+                    // Also check if the node itself is a link
+                    if (node.tagName === 'A' && node.getAttribute('href')) {
+                        var href = node.getAttribute('href');
+                        if (!href.startsWith('?') && !href.startsWith('http') &&
+                            !href.startsWith('#') && !href.startsWith('//')) {
+                            var parts = href.split('#');
+                            var filename = parts[0];
+                            var anchor = parts.length > 1 ? '#' + parts[1] : '';
+                            node.setAttribute('href', '?' + gistId + '/' + filename + anchor);
+                        }
+                    }
+                }
+            });
+        });
     });
 
-    // Load JS from gist (relative script srcs don't work on gistpreview)
-    document.querySelectorAll('script[src]').forEach(function(script) {
-        var src = script.getAttribute('src');
-        if (src.startsWith('http')) return; // Already absolute
-        var jsUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + src;
-        fetch(jsUrl)
-            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
-            .then(function(js) {
-                var newScript = document.createElement('script');
-                newScript.textContent = js;
-                document.body.appendChild(newScript);
-            })
-            .catch(function(e) { console.error('Failed to load JS:', src, e); });
-    });
-
-    // Fix relative links for navigation
-    document.querySelectorAll('a[href]').forEach(function(link) {
-        var href = link.getAttribute('href');
-        // Skip external links and anchors
-        if (href.startsWith('http') || href.startsWith('#') || href.startsWith('//')) return;
-        // Handle anchor in relative URL (e.g., page-001.html#msg-123)
-        var parts = href.split('#');
-        var filename = parts[0];
-        var anchor = parts.length > 1 ? '#' + parts[1] : '';
-        link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
-    });
-
-    // Execute module scripts that were injected via innerHTML
-    // (browsers don't execute scripts added via innerHTML for security)
-    document.querySelectorAll('script[type="module"]').forEach(function(script) {
-        if (script.src) return; // Already has src, skip
-        var blob = new Blob([script.textContent], { type: 'application/javascript' });
-        var url = URL.createObjectURL(blob);
-        var newScript = document.createElement('script');
-        newScript.type = 'module';
-        newScript.src = url;
-        document.body.appendChild(newScript);
-    });
+    // Start observing once body exists
+    function startObserving() {
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true });
+        } else {
+            setTimeout(startObserving, 10);
+        }
+    }
+    startObserving();
 
     // Handle fragment navigation after dynamic content loads
-    // gistpreview.github.io loads content dynamically, so the browser's
+    // gisthost/gistpreview loads content dynamically, so the browser's
     // native fragment navigation fails because the element doesn't exist yet
     function scrollToFragment() {
         var hash = window.location.hash;
@@ -1120,11 +1123,12 @@ GIST_PREVIEW_JS = r"""
 })();
 """
 
-# JavaScript to load page content from page-data-NNN.json on gistpreview
+# JavaScript to load page content from page-data-NNN.json on gisthost/gistpreview
 PAGE_DATA_LOADER_JS = r"""
 (function() {
     function getGistDataUrl(pageNum) {
-        if (window.location.hostname !== 'gistpreview.github.io') return null;
+        var hostname = window.location.hostname;
+        if (hostname !== 'gisthost.github.io' && hostname !== 'gistpreview.github.io') return null;
         var query = window.location.search.substring(1);
         var parts = query.split('/');
         var mainGistId = parts[0];
@@ -1151,11 +1155,12 @@ PAGE_DATA_LOADER_JS = r"""
 })();
 """
 
-# JavaScript to load index content from index-data.json on gistpreview
+# JavaScript to load index content from index-data.json on gisthost/gistpreview
 INDEX_DATA_LOADER_JS = r"""
 (function() {
     function getGistDataUrl() {
-        if (window.location.hostname !== 'gistpreview.github.io') return null;
+        var hostname = window.location.hostname;
+        if (hostname !== 'gisthost.github.io' && hostname !== 'gistpreview.github.io') return null;
         var query = window.location.search.substring(1);
         var parts = query.split('/');
         var mainGistId = parts[0];
@@ -1852,7 +1857,7 @@ def cli():
 @click.option(
     "--gist",
     is_flag=True,
-    help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
+    help="Upload to GitHub Gist and output a gisthost.github.io URL.",
 )
 @click.option(
     "--json",
@@ -1968,7 +1973,7 @@ def local_cmd(
         click.echo("Creating GitHub gist...")
         gist_desc = f"claude-code-transcripts local {session_file.stem}"
         gist_id, gist_url = create_gist(output, description=gist_desc)
-        preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
+        preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
 
@@ -2037,7 +2042,7 @@ def fetch_url_to_tempfile(url):
 @click.option(
     "--gist",
     is_flag=True,
-    help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
+    help="Upload to GitHub Gist and output a gisthost.github.io URL.",
 )
 @click.option(
     "--json",
@@ -2142,7 +2147,7 @@ def json_cmd(
             input_name = Path(original_input).stem
         gist_desc = f"claude-code-transcripts json {input_name}"
         gist_id, gist_url = create_gist(output, description=gist_desc)
-        preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
+        preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
 
@@ -2526,7 +2531,7 @@ def generate_html_from_session_data(
 @click.option(
     "--gist",
     is_flag=True,
-    help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
+    help="Upload to GitHub Gist and output a gisthost.github.io URL.",
 )
 @click.option(
     "--json",
@@ -2653,7 +2658,7 @@ def web_cmd(
         click.echo("Creating GitHub gist...")
         gist_desc = f"claude-code-transcripts web {session_id}"
         gist_id, gist_url = create_gist(output, description=gist_desc)
-        preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
+        preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
 

@@ -750,7 +750,9 @@ class TestPromptNumberConsistency:
         client doesn't need to search backwards to find the current prompt number.
         """
         # Get messagesData from the page
-        messages_data = code_view_page.evaluate("() => window.codeViewData?.messagesData")
+        messages_data = code_view_page.evaluate(
+            "() => window.codeViewData?.messagesData"
+        )
 
         if not messages_data or len(messages_data) == 0:
             pytest.skip("No messagesData found")
@@ -768,9 +770,9 @@ class TestPromptNumberConsistency:
         # All messages after the first user prompt should have prompt_num set
         for i in range(first_prompt_idx, len(messages_data)):
             msg = messages_data[i]
-            assert msg.get("prompt_num") is not None, (
-                f"Message at index {i} (id={msg.get('id')}) should have prompt_num set"
-            )
+            assert (
+                msg.get("prompt_num") is not None
+            ), f"Message at index {i} (id={msg.get('id')}) should have prompt_num set"
 
         # Verify prompt_num is monotonically non-decreasing
         prev_num = 0
