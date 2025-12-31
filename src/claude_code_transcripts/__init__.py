@@ -48,6 +48,79 @@ LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
 
+# Regex to strip ANSI escape sequences from terminal output
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def strip_ansi(text):
+    """Strip ANSI escape sequences from terminal output.
+
+    Args:
+        text: String that may contain ANSI escape codes.
+
+    Returns:
+        The text with all ANSI escape sequences removed.
+    """
+    if not text:
+        return text
+    return ANSI_ESCAPE_PATTERN.sub("", text)
+
+
+def is_content_block_array(text):
+    """Check if a string is a JSON array of content blocks.
+
+    Args:
+        text: String to check.
+
+    Returns:
+        True if the string is a valid JSON array of content blocks.
+    """
+    if not text or not isinstance(text, str):
+        return False
+    text = text.strip()
+    if not (text.startswith("[") and text.endswith("]")):
+        return False
+    try:
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            return False
+        # Check if items look like content blocks
+        for item in parsed:
+            if isinstance(item, dict) and "type" in item:
+                return True
+        return False
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+def render_content_block_array(blocks):
+    """Render an array of content blocks.
+
+    Args:
+        blocks: List of content block dicts.
+
+    Returns:
+        HTML string with all blocks rendered.
+    """
+    parts = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type", "")
+        if block_type == "text":
+            text = block.get("text", "")
+            # Render as markdown
+            parts.append(render_markdown_text(text))
+        elif block_type == "thinking":
+            thinking = block.get("thinking", "")
+            parts.append(render_markdown_text(thinking))
+        else:
+            # For other types, just show as formatted text
+            text = block.get("text", block.get("content", ""))
+            if text:
+                parts.append(f"<pre>{html.escape(str(text))}</pre>")
+    return "".join(parts) if parts else None
+
 
 def extract_text_from_content(content):
     """Extract plain text from message content.
@@ -711,32 +784,47 @@ def render_content_block(block):
 
         # Check for git commits and render with styled cards
         if isinstance(content, str):
-            commits_found = list(COMMIT_PATTERN.finditer(content))
-            if commits_found:
-                # Build commit cards + remaining content
-                parts = []
-                last_end = 0
-                for match in commits_found:
-                    # Add any content before this commit
-                    before = content[last_end : match.start()].strip()
-                    if before:
-                        parts.append(f"<pre>{html.escape(before)}</pre>")
-
-                    commit_hash = match.group(1)
-                    commit_msg = match.group(2)
-                    parts.append(
-                        _macros.commit_card(commit_hash, commit_msg, _github_repo)
-                    )
-                    last_end = match.end()
-
-                # Add any remaining content after last commit
-                after = content[last_end:].strip()
-                if after:
-                    parts.append(f"<pre>{html.escape(after)}</pre>")
-
-                content_html = "".join(parts)
+            # First, check if content is a JSON array of content blocks
+            if is_content_block_array(content):
+                try:
+                    parsed_blocks = json.loads(content)
+                    rendered = render_content_block_array(parsed_blocks)
+                    if rendered:
+                        content_html = rendered
+                    else:
+                        content_html = format_json(content)
+                except (json.JSONDecodeError, TypeError):
+                    content_html = format_json(content)
             else:
-                content_html = f"<pre>{html.escape(content)}</pre>"
+                # Strip ANSI escape sequences from terminal output
+                content = strip_ansi(content)
+
+                commits_found = list(COMMIT_PATTERN.finditer(content))
+                if commits_found:
+                    # Build commit cards + remaining content
+                    parts = []
+                    last_end = 0
+                    for match in commits_found:
+                        # Add any content before this commit
+                        before = content[last_end : match.start()].strip()
+                        if before:
+                            parts.append(f"<pre>{html.escape(before)}</pre>")
+
+                        commit_hash = match.group(1)
+                        commit_msg = match.group(2)
+                        parts.append(
+                            _macros.commit_card(commit_hash, commit_msg, _github_repo)
+                        )
+                        last_end = match.end()
+
+                    # Add any remaining content after last commit
+                    after = content[last_end:].strip()
+                    if after:
+                        parts.append(f"<pre>{html.escape(after)}</pre>")
+
+                    content_html = "".join(parts)
+                else:
+                    content_html = f"<pre>{html.escape(content)}</pre>"
         elif isinstance(content, list) or is_json_like(content):
             content_html = format_json(content)
         else:

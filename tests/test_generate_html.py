@@ -302,6 +302,39 @@ class TestRenderContentBlock:
         finally:
             claude_code_transcripts._github_repo = old_repo
 
+    def test_tool_result_with_ansi_codes(self, snapshot_html):
+        """Test that ANSI escape codes are stripped from tool results."""
+        block = {
+            "type": "tool_result",
+            "content": "\x1b[38;2;166;172;186mTests passed:\x1b[0m \x1b[32m✓\x1b[0m All 5 tests passed\n\x1b[1;31mError:\x1b[0m None",
+            "is_error": False,
+        }
+        result = render_content_block(block)
+        # ANSI codes should be stripped
+        assert "\x1b[" not in result
+        assert "[38;2;" not in result
+        assert "[32m" not in result
+        assert "[0m" not in result
+        # Content should still be present
+        assert "Tests passed:" in result
+        assert "All 5 tests passed" in result
+        assert result == snapshot_html
+
+    def test_tool_result_content_block_array(self, snapshot_html):
+        """Test that tool_result with content-block array is rendered properly."""
+        block = {
+            "type": "tool_result",
+            "content": '[{"type": "text", "text": "Here is the file content:\\n\\nLine 1\\nLine 2"}]',
+            "is_error": False,
+        }
+        result = render_content_block(block)
+        # Should render as text, not raw JSON
+        assert "Here is the file content" in result
+        assert "Line 1" in result
+        # Should not show raw JSON structure
+        assert '"type": "text"' not in result
+        assert result == snapshot_html
+
 
 class TestAnalyzeConversation:
     """Tests for conversation analysis."""
