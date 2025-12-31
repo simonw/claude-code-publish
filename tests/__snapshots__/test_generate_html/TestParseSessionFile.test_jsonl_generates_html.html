@@ -89,6 +89,11 @@ pre code { background: none; padding: 0; }
 .expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
 .expand-btn:hover { background: rgba(0,0,0,0.1); }
 .truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
+.copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 8px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.2); border-radius: 4px; cursor: pointer; font-size: 0.75rem; color: var(--text-muted); opacity: 0; transition: opacity 0.2s; z-index: 10; }
+.copy-btn:hover { background: white; color: var(--text-color); }
+.copy-btn.copied { background: #c8e6c9; color: #2e7d32; }
+pre:hover .copy-btn, .tool-result:hover .copy-btn, .truncatable:hover .copy-btn { opacity: 1; }
+.code-container { position: relative; }
 .pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
 .pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
 .pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
@@ -499,6 +504,33 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
             else { wrapper.classList.remove('expanded'); wrapper.classList.add('truncated'); btn.textContent = 'Show more'; }
         });
     }
+});
+// Add copy buttons to pre elements and tool results
+document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command').forEach(function(el) {
+    // Skip if already has a copy button
+    if (el.querySelector('.copy-btn')) return;
+    // Make container relative if needed
+    if (getComputedStyle(el).position === 'static') {
+        el.style.position = 'relative';
+    }
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const textToCopy = el.textContent.replace(/^Copy$/, '').trim();
+        navigator.clipboard.writeText(textToCopy).then(function() {
+            copyBtn.textContent = 'Copied!';
+            copyBtn.classList.add('copied');
+            setTimeout(function() {
+                copyBtn.textContent = 'Copy';
+                copyBtn.classList.remove('copied');
+            }, 2000);
+        }).catch(function(err) {
+            console.error('Failed to copy:', err);
+        });
+    });
+    el.appendChild(copyBtn);
 });
 </script>
 </body>

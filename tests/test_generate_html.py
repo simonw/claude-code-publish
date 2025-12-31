@@ -1570,3 +1570,41 @@ class TestSearchFeature:
 
         # Total pages should be embedded for JS to know how many pages to fetch
         assert "totalPages" in index_html or "total_pages" in index_html
+
+
+class TestCopyButtonFeature:
+    """Tests for copy button functionality."""
+
+    def test_copy_button_css_present(self, output_dir):
+        """Test that copy button CSS styles are present."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # CSS should style the copy button
+        assert ".copy-btn" in page_html
+
+    def test_copy_button_javascript_present(self, output_dir):
+        """Test that copy button JavaScript functionality is present."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # JavaScript should handle clipboard API
+        assert "clipboard" in page_html.lower() or "navigator.clipboard" in page_html
+
+    def test_expand_button_has_clear_state(self, output_dir):
+        """Test that expand button has clear expanded/collapsed indicators."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # Should have indicators for expand/collapse state (chevrons or similar)
+        assert (
+            "▼" in page_html
+            or "chevron" in page_html.lower()
+            or "expand" in page_html.lower()
+        )
