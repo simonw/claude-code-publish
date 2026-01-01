@@ -1030,72 +1030,75 @@ def render_message(log_type, message_json, timestamp, prompt_num=None):
     return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
 
 
-# JavaScript to fix relative URLs when served via gistpreview.github.io
+# JavaScript to fix relative URLs when served via gisthost.github.io or gistpreview.github.io
+# Fixes issue #26: Pagination links broken on gisthost.github.io
 GIST_PREVIEW_JS = r"""
 (function() {
-    if (window.location.hostname !== 'gistpreview.github.io') return;
-    // URL format: https://gistpreview.github.io/?GIST_ID/filename.html
+    var hostname = window.location.hostname;
+    if (hostname !== 'gisthost.github.io' && hostname !== 'gistpreview.github.io') return;
+    // URL format: https://gisthost.github.io/?GIST_ID/filename.html
     var match = window.location.search.match(/^\?([^/]+)/);
     if (!match) return;
     var gistId = match[1];
 
-    // Load CSS from gist (relative stylesheet links don't work on gistpreview)
-    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(link) {
-        var href = link.getAttribute('href');
-        if (href.startsWith('http')) return; // Already absolute
-        var cssUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + href;
-        fetch(cssUrl)
-            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
-            .then(function(css) {
-                var style = document.createElement('style');
-                style.textContent = css;
-                document.head.appendChild(style);
-                link.remove(); // Remove the broken link
-            })
-            .catch(function(e) { console.error('Failed to load CSS:', href, e); });
+    function rewriteLinks(root) {
+        (root || document).querySelectorAll('a[href]').forEach(function(link) {
+            var href = link.getAttribute('href');
+            // Skip already-rewritten links (issue #26 fix)
+            if (href.startsWith('?')) return;
+            // Skip external links and anchors
+            if (href.startsWith('http') || href.startsWith('#') || href.startsWith('//')) return;
+            // Handle anchor in relative URL (e.g., page-001.html#msg-123)
+            var parts = href.split('#');
+            var filename = parts[0];
+            var anchor = parts.length > 1 ? '#' + parts[1] : '';
+            link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
+        });
+    }
+
+    // Run immediately
+    rewriteLinks();
+
+    // Also run on DOMContentLoaded in case DOM isn't ready yet
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { rewriteLinks(); });
+    }
+
+    // Use MutationObserver to catch dynamically added content
+    // gisthost/gistpreview may add content after initial load
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1) { // Element node
+                    rewriteLinks(node);
+                    // Also check if the node itself is a link
+                    if (node.tagName === 'A' && node.getAttribute('href')) {
+                        var href = node.getAttribute('href');
+                        if (!href.startsWith('?') && !href.startsWith('http') &&
+                            !href.startsWith('#') && !href.startsWith('//')) {
+                            var parts = href.split('#');
+                            var filename = parts[0];
+                            var anchor = parts.length > 1 ? '#' + parts[1] : '';
+                            node.setAttribute('href', '?' + gistId + '/' + filename + anchor);
+                        }
+                    }
+                }
+            });
+        });
     });
 
-    // Load JS from gist (relative script srcs don't work on gistpreview)
-    document.querySelectorAll('script[src]').forEach(function(script) {
-        var src = script.getAttribute('src');
-        if (src.startsWith('http')) return; // Already absolute
-        var jsUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + src;
-        fetch(jsUrl)
-            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
-            .then(function(js) {
-                var newScript = document.createElement('script');
-                newScript.textContent = js;
-                document.body.appendChild(newScript);
-            })
-            .catch(function(e) { console.error('Failed to load JS:', src, e); });
-    });
-
-    // Fix relative links for navigation
-    document.querySelectorAll('a[href]').forEach(function(link) {
-        var href = link.getAttribute('href');
-        // Skip external links and anchors
-        if (href.startsWith('http') || href.startsWith('#') || href.startsWith('//')) return;
-        // Handle anchor in relative URL (e.g., page-001.html#msg-123)
-        var parts = href.split('#');
-        var filename = parts[0];
-        var anchor = parts.length > 1 ? '#' + parts[1] : '';
-        link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
-    });
-
-    // Execute module scripts that were injected via innerHTML
-    // (browsers don't execute scripts added via innerHTML for security)
-    document.querySelectorAll('script[type="module"]').forEach(function(script) {
-        if (script.src) return; // Already has src, skip
-        var blob = new Blob([script.textContent], { type: 'application/javascript' });
-        var url = URL.createObjectURL(blob);
-        var newScript = document.createElement('script');
-        newScript.type = 'module';
-        newScript.src = url;
-        document.body.appendChild(newScript);
-    });
+    // Start observing once body exists
+    function startObserving() {
+        if (document.body) {
+            observer.observe(document.body, { childList: true, subtree: true });
+        } else {
+            setTimeout(startObserving, 10);
+        }
+    }
+    startObserving();
 
     // Handle fragment navigation after dynamic content loads
-    // gistpreview.github.io loads content dynamically, so the browser's
+    // gisthost/gistpreview loads content dynamically, so the browser's
     // native fragment navigation fails because the element doesn't exist yet
     function scrollToFragment() {
         var hash = window.location.hash;
@@ -1120,134 +1123,21 @@ GIST_PREVIEW_JS = r"""
 })();
 """
 
-# JavaScript to load page content from page-data-NNN.json on gistpreview
-PAGE_DATA_LOADER_JS = r"""
-(function() {
-    function getGistDataUrl(pageNum) {
-        if (window.location.hostname !== 'gistpreview.github.io') return null;
-        var query = window.location.search.substring(1);
-        var parts = query.split('/');
-        var mainGistId = parts[0];
-        var paddedNum = String(pageNum).padStart(3, '0');
-        var filename = '/page-data-' + paddedNum + '.json';
-        var dataGistId = window.DATA_GIST_ID || mainGistId;
-        return 'https://gist.githubusercontent.com/raw/' + dataGistId + filename;
-    }
-    var pageNum = window.PAGE_NUM;
-    var dataUrl = getGistDataUrl(pageNum);
-    if (dataUrl) {
-        var container = document.getElementById('page-messages');
-        fetch(dataUrl)
-            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.json(); })
-            .then(function(html) {
-                container.innerHTML = html;
-                if (window.location.hash) {
-                    var el = document.querySelector(window.location.hash);
-                    if (el) el.scrollIntoView();
-                }
-            })
-            .catch(function(e) { console.error('Failed to load page data:', e); });
-    }
-})();
-"""
 
-# JavaScript to load index content from index-data.json on gistpreview
-INDEX_DATA_LOADER_JS = r"""
-(function() {
-    function getGistDataUrl() {
-        if (window.location.hostname !== 'gistpreview.github.io') return null;
-        var query = window.location.search.substring(1);
-        var parts = query.split('/');
-        var mainGistId = parts[0];
-        var dataGistId = window.DATA_GIST_ID || mainGistId;
-        return 'https://gist.githubusercontent.com/raw/' + dataGistId + '/index-data.json';
-    }
-    var dataUrl = getGistDataUrl();
-    if (dataUrl) {
-        var container = document.getElementById('index-items');
-        fetch(dataUrl)
-            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.json(); })
-            .then(function(html) {
-                container.innerHTML = html;
-                if (window.location.hash) {
-                    var el = document.querySelector(window.location.hash);
-                    if (el) el.scrollIntoView();
-                }
-            })
-            .catch(function(e) { console.error('Failed to load index data:', e); });
-    }
-})();
-"""
-
-
-def _strip_container_content(html: str, container_id: str) -> str:
-    """Strip content from a container div while preserving the rest of the HTML.
-
-    This uses a simple string-based approach to find the container and empty it.
-    The container is expected to be a direct child of a wrapper div.
-
-    Args:
-        html: The HTML content
-        container_id: The id of the container div to strip content from
-
-    Returns:
-        The HTML with the container's content removed
-    """
-    # Find the opening tag
-    open_tag = f'<div id="{container_id}">'
-    start_idx = html.find(open_tag)
-    if start_idx == -1:
-        return html
-
-    # Find the content start (after the opening tag)
-    content_start = start_idx + len(open_tag)
-
-    # Find the matching closing tag by counting nested divs
-    depth = 1
-    pos = content_start
-    while depth > 0 and pos < len(html):
-        next_open = html.find("<div", pos)
-        next_close = html.find("</div>", pos)
-
-        if next_close == -1:
-            # No closing tag found, return original
-            return html
-
-        if next_open != -1 and next_open < next_close:
-            # Found nested opening div
-            depth += 1
-            pos = next_open + 4
-        else:
-            # Found closing div
-            depth -= 1
-            if depth == 0:
-                # This is the matching close tag
-                content_end = next_close
-                break
-            pos = next_close + 6
-    else:
-        return html
-
-    # Replace content with empty string (preserve whitespace for formatting)
-    return html[:content_start] + "\n            " + html[content_end:]
-
-
-def inject_gist_preview_js(output_dir, data_gist_id=None):
+def inject_gist_preview_js(output_dir):
     """Inject gist preview JavaScript into all HTML files in the output directory.
 
     Also removes inline CODE_DATA from code.html since gist version fetches it separately.
 
     Args:
         output_dir: Path to the output directory containing HTML files.
-        data_gist_id: Optional gist ID for a separate data gist. If provided,
-            code.html will fetch data from this gist instead of the main gist.
     """
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
         content = html_file.read_text(encoding="utf-8")
 
         # For code.html, remove the inline CODE_DATA script
-        # (gist version fetches code-data.json instead to avoid size limits)
+        # (gist version fetches code-data.json instead)
         if html_file.name == "code.html":
             import re
 
@@ -1258,41 +1148,6 @@ def inject_gist_preview_js(output_dir, data_gist_id=None):
                 flags=re.DOTALL,
             )
 
-            # If using separate data gist, inject the data gist ID
-            if data_gist_id:
-                data_gist_script = (
-                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
-                )
-                content = content.replace("<head>", f"<head>\n{data_gist_script}")
-
-        # For index.html and page-*.html, strip content and inject data gist ID
-        # when using separate data gist (content will be loaded from JSON files)
-        if html_file.name == "index.html" or (
-            html_file.name.startswith("page-") and html_file.name.endswith(".html")
-        ):
-            if data_gist_id:
-                data_gist_script = (
-                    f'<script>window.DATA_GIST_ID = "{data_gist_id}";</script>\n'
-                )
-                content = content.replace("<head>", f"<head>\n{data_gist_script}")
-
-                # Strip content from HTML - gist version loads from JSON files
-                # This reduces HTML file size for gist upload
-                if html_file.name == "index.html":
-                    content = _strip_container_content(content, "index-items")
-                    # Inject the index data loader JS
-                    content = content.replace(
-                        "</body>",
-                        f"<script>{INDEX_DATA_LOADER_JS}</script>\n</body>",
-                    )
-                elif html_file.name.startswith("page-"):
-                    content = _strip_container_content(content, "page-messages")
-                    # Inject the page data loader JS
-                    content = content.replace(
-                        "</body>",
-                        f"<script>{PAGE_DATA_LOADER_JS}</script>\n</body>",
-                    )
-
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
@@ -1301,35 +1156,45 @@ def inject_gist_preview_js(output_dir, data_gist_id=None):
             html_file.write_text(content, encoding="utf-8")
 
 
-# Size threshold for using two-gist strategy (1MB)
-# GitHub API truncates gist content at ~1MB total response size
-GIST_SIZE_THRESHOLD = 1024 * 1024
-
-# Size threshold for generating page-data.json (500KB total HTML)
-# Only generate page-data.json for sessions with large page content
-PAGE_DATA_SIZE_THRESHOLD = 500 * 1024
-
-# Data files that can be split into a separate gist
-# Note: page-data-*.json files are added dynamically based on what exists
-DATA_FILES = ["code-data.json"]
-
-
-def _create_single_gist(files, public=False, description=None):
-    """Create a single gist from the given files.
+def create_gist(output_dir, public=False, description=None):
+    """Create a GitHub gist from the HTML files in output_dir.
 
     Args:
-        files: List of file paths to include in the gist.
+        output_dir: Directory containing the HTML files to upload.
         public: Whether to create a public gist.
         description: Optional description for the gist.
 
-    Returns:
-        Tuple of (gist_id, gist_url).
+    Returns (gist_id, gist_url) tuple.
+    Raises click.ClickException on failure.
 
-    Raises:
-        click.ClickException on failure.
+    Note: This function calls inject_gist_preview_js internally. Caller should NOT
+    call it separately.
     """
+    output_dir = Path(output_dir)
+    html_files = list(output_dir.glob("*.html"))
+    if not html_files:
+        raise click.ClickException("No HTML files found to upload to gist.")
+
+    # Collect all files (HTML + CSS/JS + data)
+    css_js_files = [
+        output_dir / f
+        for f in ["styles.css", "main.js", "search.js"]
+        if (output_dir / f).exists()
+    ]
+    data_files = []
+    code_data = output_dir / "code-data.json"
+    if code_data.exists():
+        data_files.append(code_data)
+
+    all_files = sorted(html_files) + css_js_files + data_files
+
+    # Inject gist preview JS into HTML files
+    inject_gist_preview_js(output_dir)
+
+    # Create gist with all files
+    click.echo(f"Creating gist with {len(all_files)} files...")
     cmd = ["gh", "gist", "create"]
-    cmd.extend(str(f) for f in files)
+    cmd.extend(str(f) for f in all_files)
     if public:
         cmd.append("--public")
     if description:
@@ -1354,153 +1219,6 @@ def _create_single_gist(files, public=False, description=None):
         raise click.ClickException(
             "gh CLI not found. Install it from https://cli.github.com/ and run 'gh auth login'."
         )
-
-
-def _add_files_to_gist(gist_id, files):
-    """Add files to an existing gist.
-
-    Adds files one at a time with retries to handle GitHub API conflicts
-    (HTTP 409) that occur with rapid successive updates.
-
-    Args:
-        gist_id: The gist ID to add files to.
-        files: List of file paths to add.
-
-    Raises:
-        click.ClickException on failure.
-    """
-    import time
-
-    for i, f in enumerate(files):
-        click.echo(f"  Adding {f.name} ({i + 1}/{len(files)})...")
-        cmd = ["gh", "gist", "edit", gist_id, "--add", str(f)]
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                break  # Success, move to next file
-            except subprocess.CalledProcessError as e:
-                error_msg = e.stderr.strip() if e.stderr else str(e)
-                if "409" in error_msg and attempt < max_retries - 1:
-                    # HTTP 409 conflict - wait and retry
-                    wait_time = (attempt + 1) * 2  # 2s, 4s, 6s
-                    click.echo(
-                        f"    Conflict adding {f.name}, retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                else:
-                    raise click.ClickException(
-                        f"Failed to add {f.name} to gist: {error_msg}"
-                    )
-        # Small delay between files to avoid rate limiting
-        if i < len(files) - 1:
-            time.sleep(0.5)
-
-
-def create_gist(output_dir, public=False, description=None):
-    """Create a GitHub gist from the HTML files in output_dir.
-
-    Uses a two-gist strategy when data files exceed the size threshold:
-    1. Creates a data gist with large data files (code-data.json)
-    2. Injects data gist ID and gist preview JS into HTML files
-    3. Creates the main gist with HTML/CSS/JS files
-
-    For small files (single-gist strategy):
-    1. Injects gist preview JS into HTML files
-    2. Creates a single gist with all files
-
-    Args:
-        output_dir: Directory containing the HTML files to upload.
-        public: Whether to create a public gist.
-        description: Optional description for the gist.
-
-    Returns (gist_id, gist_url) tuple.
-    Raises click.ClickException on failure.
-
-    Note: This function calls inject_gist_preview_js internally. Caller should NOT
-    call it separately.
-    """
-    output_dir = Path(output_dir)
-    html_files = list(output_dir.glob("*.html"))
-    if not html_files:
-        raise click.ClickException("No HTML files found to upload to gist.")
-
-    # Collect main files (HTML + CSS/JS)
-    css_js_files = [
-        output_dir / f
-        for f in ["styles.css", "main.js", "search.js"]
-        if (output_dir / f).exists()
-    ]
-    main_files = sorted(html_files) + css_js_files
-
-    # Collect data files and check their total size
-    data_files = []
-    data_total_size = 0
-    for data_file in DATA_FILES:
-        data_path = output_dir / data_file
-        if data_path.exists():
-            data_files.append(data_path)
-            data_total_size += data_path.stat().st_size
-    # Also collect page-data-*.json and index-data.json files (generated for large sessions)
-    for page_data_file in sorted(output_dir.glob("page-data-*.json")):
-        data_files.append(page_data_file)
-        data_total_size += page_data_file.stat().st_size
-    index_data_file = output_dir / "index-data.json"
-    if index_data_file.exists():
-        data_files.append(index_data_file)
-        data_total_size += index_data_file.stat().st_size
-
-    # Decide whether to use two-gist strategy
-    if data_total_size > GIST_SIZE_THRESHOLD and data_files:
-        # Two-gist strategy: create data gist first
-        click.echo(f"Data files to upload: {[f.name for f in data_files]}")
-        data_desc = f"{description} (data)" if description else None
-
-        # Try creating data gist with all files at once
-        click.echo(f"Creating data gist with {len(data_files)} files...")
-        try:
-            data_gist_id, _ = _create_single_gist(
-                data_files, public=public, description=data_desc
-            )
-        except click.ClickException as e:
-            # Fall back to one-by-one upload
-            click.echo(f"Bulk upload failed, falling back to one-by-one...")
-            click.echo(f"Creating data gist with {data_files[0].name}...")
-            data_gist_id, _ = _create_single_gist(
-                [data_files[0]], public=public, description=data_desc
-            )
-            remaining_files = data_files[1:]
-            if remaining_files:
-                click.echo(f"Adding {len(remaining_files)} more files to data gist...")
-                _add_files_to_gist(data_gist_id, remaining_files)
-
-        # Inject data gist ID and gist preview JS into HTML files
-        inject_gist_preview_js(output_dir, data_gist_id=data_gist_id)
-
-        # Create main gist with all files at once
-        click.echo(f"Creating main gist with {len(main_files)} files...")
-        main_gist_id, main_gist_url = _create_single_gist(
-            main_files, public=public, description=description
-        )
-
-        return main_gist_id, main_gist_url
-    else:
-        # Single gist strategy: inject gist preview JS first
-        inject_gist_preview_js(output_dir)
-
-        # Create gist with all files at once
-        all_files = main_files + data_files
-        click.echo(f"Creating gist with {len(all_files)} files...")
-        main_gist_id, main_gist_url = _create_single_gist(
-            all_files, public=public, description=description
-        )
-
-        return main_gist_id, main_gist_url
 
 
 def generate_pagination_html(current_page, total_pages):
@@ -1643,30 +1361,7 @@ def generate_html(
         # Collect all messages for code view transcript pane
         all_messages_html.extend(messages_html)
 
-    # Calculate total size of all page messages to decide if page-data files are needed
-    total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
-    use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
-
-    # For large sessions, use external CSS/JS files to reduce HTML size
-    # For small sessions, inline CSS/JS for simplicity
-    use_external_assets = use_page_data_json
-    if use_external_assets:
-        templates_dir = Path(__file__).parent / "templates"
-        for static_file in ["styles.css", "main.js", "search.js"]:
-            src = templates_dir / static_file
-            if src.exists():
-                shutil.copy(src, output_dir / static_file)
-
-    if use_page_data_json:
-        # Write individual page-data-NNN.json files for gist lazy loading
-        # This allows batched uploads and avoids GitHub's gist size limits
-        for page_num_str, messages_html in page_messages_dict.items():
-            page_data_file = output_dir / f"page-data-{int(page_num_str):03d}.json"
-            page_data_file.write_text(json.dumps(messages_html), encoding="utf-8")
-
     # Generate page HTML files
-    # Always include content in HTML for local viewing (use_page_data_json=False)
-    # JSON files are generated above for gist preview loading
     for page_num in range(1, total_pages + 1):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
@@ -1677,8 +1372,8 @@ def generate_html(
             messages_html=page_messages_dict[str(page_num)],
             has_code_view=has_code_view,
             active_tab="transcript",
-            use_page_data_json=False,  # Always include content for local viewing
-            use_external_assets=use_external_assets,
+            use_page_data_json=False,
+            use_external_assets=False,
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -1752,15 +1447,8 @@ def generate_html(
     index_items = [item[2] for item in timeline_items]
     index_items_html = "".join(index_items)
 
-    # Write index-data.json for gist lazy loading if session is large
-    if use_page_data_json:
-        index_data_file = output_dir / "index-data.json"
-        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
-
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
-    # Always include content in HTML for local viewing (use_index_data_json=False)
-    # JSON file is generated above for gist preview loading
     index_content = index_template.render(
         pagination_html=index_pagination,
         prompt_num=prompt_num,
@@ -1771,8 +1459,8 @@ def generate_html(
         index_items_html=index_items_html,
         has_code_view=has_code_view,
         active_tab="transcript",
-        use_index_data_json=False,  # Always include content for local viewing
-        use_external_assets=use_external_assets,
+        use_index_data_json=False,
+        use_external_assets=False,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
@@ -1852,7 +1540,7 @@ def cli():
 @click.option(
     "--gist",
     is_flag=True,
-    help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
+    help="Upload to GitHub Gist and output a gisthost.github.io URL.",
 )
 @click.option(
     "--json",
@@ -1968,7 +1656,7 @@ def local_cmd(
         click.echo("Creating GitHub gist...")
         gist_desc = f"claude-code-transcripts local {session_file.stem}"
         gist_id, gist_url = create_gist(output, description=gist_desc)
-        preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
+        preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
 
@@ -2037,7 +1725,7 @@ def fetch_url_to_tempfile(url):
 @click.option(
     "--gist",
     is_flag=True,
-    help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
+    help="Upload to GitHub Gist and output a gisthost.github.io URL.",
 )
 @click.option(
     "--json",
@@ -2142,7 +1830,7 @@ def json_cmd(
             input_name = Path(original_input).stem
         gist_desc = f"claude-code-transcripts json {input_name}"
         gist_id, gist_url = create_gist(output, description=gist_desc)
-        preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
+        preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
 
@@ -2321,30 +2009,7 @@ def generate_html_from_session_data(
         # Collect all messages for code view transcript pane
         all_messages_html.extend(messages_html)
 
-    # Calculate total size of all page messages to decide if page-data files are needed
-    total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
-    use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
-
-    # For large sessions, use external CSS/JS files to reduce HTML size
-    # For small sessions, inline CSS/JS for simplicity
-    use_external_assets = use_page_data_json
-    if use_external_assets:
-        templates_dir = Path(__file__).parent / "templates"
-        for static_file in ["styles.css", "main.js", "search.js"]:
-            src = templates_dir / static_file
-            if src.exists():
-                shutil.copy(src, output_dir / static_file)
-
-    if use_page_data_json:
-        # Write individual page-data-NNN.json files for gist lazy loading
-        # This allows batched uploads and avoids GitHub's gist size limits
-        for page_num_str, messages_html in page_messages_dict.items():
-            page_data_file = output_dir / f"page-data-{int(page_num_str):03d}.json"
-            page_data_file.write_text(json.dumps(messages_html), encoding="utf-8")
-
     # Generate page HTML files
-    # Always include content in HTML for local viewing (use_page_data_json=False)
-    # JSON files are generated above for gist preview loading
     for page_num in range(1, total_pages + 1):
         pagination_html = generate_pagination_html(page_num, total_pages)
         page_template = get_template("page.html")
@@ -2355,8 +2020,8 @@ def generate_html_from_session_data(
             messages_html=page_messages_dict[str(page_num)],
             has_code_view=has_code_view,
             active_tab="transcript",
-            use_page_data_json=False,  # Always include content for local viewing
-            use_external_assets=use_external_assets,
+            use_page_data_json=False,
+            use_external_assets=False,
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -2430,15 +2095,8 @@ def generate_html_from_session_data(
     index_items = [item[2] for item in timeline_items]
     index_items_html = "".join(index_items)
 
-    # Write index-data.json for gist lazy loading if session is large
-    if use_page_data_json:
-        index_data_file = output_dir / "index-data.json"
-        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
-
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
-    # Always include content in HTML for local viewing (use_index_data_json=False)
-    # JSON file is generated above for gist preview loading
     index_content = index_template.render(
         pagination_html=index_pagination,
         prompt_num=prompt_num,
@@ -2449,8 +2107,8 @@ def generate_html_from_session_data(
         index_items_html=index_items_html,
         has_code_view=has_code_view,
         active_tab="transcript",
-        use_index_data_json=False,  # Always include content for local viewing
-        use_external_assets=use_external_assets,
+        use_index_data_json=False,
+        use_external_assets=False,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
@@ -2526,7 +2184,7 @@ def generate_html_from_session_data(
 @click.option(
     "--gist",
     is_flag=True,
-    help="Upload to GitHub Gist and output a gistpreview.github.io URL.",
+    help="Upload to GitHub Gist and output a gisthost.github.io URL.",
 )
 @click.option(
     "--json",
@@ -2653,7 +2311,7 @@ def web_cmd(
         click.echo("Creating GitHub gist...")
         gist_desc = f"claude-code-transcripts web {session_id}"
         gist_id, gist_url = create_gist(output, description=gist_desc)
-        preview_url = f"https://gistpreview.github.io/?{gist_id}/index.html"
+        preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
 

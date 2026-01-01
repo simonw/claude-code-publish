@@ -104,23 +104,11 @@ claude-code-transcripts json session.json --gist
 This will output something like:
 ```
 Gist: https://gist.github.com/username/abc123def456
-Preview: https://gistpreview.github.io/?abc123def456/index.html
+Preview: https://gisthost.github.io/?abc123def456/index.html
 Files: /var/folders/.../session-id
 ```
 
-The preview URL uses [gistpreview.github.io](https://gistpreview.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gistpreview.
-
-**Large sessions:** GitHub's gist API has size limits (~1MB). For large sessions, the tool automatically handles this:
-
-- **Page content**: When total page content exceeds 500KB, the tool generates separate `page-data-NNN.json` files for each page. The HTML pages are stripped of their inline content when uploaded, and JavaScript fetches the content from the JSON files on demand. This keeps each file small while preserving full functionality.
-
-- **Code viewer**: When using `--code-view`, large sessions may have a `code-data.json` file that also needs separate handling.
-
-- **Two-gist strategy**: When data files exceed 1MB total, they're uploaded to a separate "data gist", and the main gist's HTML files reference it.
-
-- **Batched uploads**: If files are still too large, they're automatically batched into multiple gists.
-
-All of this happens transparently and requires no additional options. Search continues to work by fetching from the JSON files instead of HTML.
+The preview URL uses [gisthost.github.io](https://gisthost.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gisthost (also works with gistpreview.github.io for backward compatibility).
 
 Combine with `-o` to keep a local copy:
 

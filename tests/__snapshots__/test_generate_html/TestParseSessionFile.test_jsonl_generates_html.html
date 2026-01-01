@@ -435,14 +435,12 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
     // Show search box (progressive enhancement)
     searchBox.style.display = 'flex';
 
-    // Gist preview support - detect if we're on gistpreview.github.io
-    var isGistPreview = window.location.hostname === 'gistpreview.github.io';
+    // Gist preview support - detect if we're on gisthost.github.io or gistpreview.github.io
+    var hostname = window.location.hostname;
+    var isGistPreview = hostname === 'gisthost.github.io' || hostname === 'gistpreview.github.io';
     var gistId = null;
     var gistOwner = null;
     var gistInfoLoaded = false;
-
-    // Check if we're using page-data JSON files (large session mode)
-    var usePageDataJson = !!window.DATA_GIST_ID;
 
     if (isGistPreview) {
         // Extract gist ID from URL query string like ?78a436a8a9e7a2e603738b8193b95410/index.html
@@ -474,22 +472,9 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         return pageFile;
     }
 
-    function getPageDataFetchUrl(pageNum) {
-        // Get URL for page-data-XXX.json
-        var paddedNum = String(pageNum).padStart(3, '0');
-        var filename = 'page-data-' + paddedNum + '.json';
-
-        if (!isGistPreview) {
-            return filename;
-        }
-
-        var dataGistId = window.DATA_GIST_ID || gistId;
-        return 'https://gist.githubusercontent.com/raw/' + dataGistId + '/' + filename;
-    }
-
     function getPageLinkUrl(pageFile) {
         if (isGistPreview && gistId) {
-            // Use gistpreview URL format for navigation links
+            // Use gisthost/gistpreview URL format for navigation links
             return '?' + gistId + '/' + pageFile;
         }
         return pageFile;
@@ -609,21 +594,10 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
 
     async function fetchPageContent(pageNum) {
         var pageFile = 'page-' + String(pageNum).padStart(3, '0') + '.html';
-
-        if (usePageDataJson && isGistPreview) {
-            // Fetch from page-data-XXX.json (large session mode on gist)
-            var url = getPageDataFetchUrl(pageNum);
-            var response = await fetch(url);
-            if (!response.ok) throw new Error('Failed to fetch');
-            var html = await response.json(); // JSON contains HTML string
-            return { pageFile: pageFile, html: html };
-        } else {
-            // Fetch from page-XXX.html (small session or local server)
-            var response = await fetch(getPageFetchUrl(pageFile));
-            if (!response.ok) throw new Error('Failed to fetch');
-            var html = await response.text();
-            return { pageFile: pageFile, html: html };
-        }
+        var response = await fetch(getPageFetchUrl(pageFile));
+        if (!response.ok) throw new Error('Failed to fetch');
+        var html = await response.text();
+        return { pageFile: pageFile, html: html };
     }
 
     async function performSearch(query) {
@@ -636,9 +610,8 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         searchResults.innerHTML = '';
         searchStatus.textContent = 'Searching...';
 
-        // Load gist info if on gistpreview (needed for constructing URLs)
-        if (isGistPreview && !gistInfoLoaded && !usePageDataJson) {
-            // Only need gist info for HTML fetching (not for JSON which uses raw URLs)
+        // Load gist info if on gisthost/gistpreview (needed for constructing URLs)
+        if (isGistPreview && !gistInfoLoaded) {
             searchStatus.textContent = 'Loading gist info...';
             await loadGistInfo();
             if (!gistOwner) {

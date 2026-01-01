@@ -14,7 +14,7 @@ dependencies = [
     "gitpython",
     "httpx",
     "jinja2",
-    "markdown @ file:///Users/btucker/projects/python-markdown",
+    "markdown",
     "nh3>=0.3.2",
     "questionary",
 ]
