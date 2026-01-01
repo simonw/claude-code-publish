@@ -19,6 +19,8 @@ from claude_code_transcripts import (
     render_edit_tool,
     render_bash_tool,
     render_content_block,
+    render_assistant_message,
+    group_blocks_by_type,
     strip_ansi,
     analyze_conversation,
     format_tool_stats,
@@ -256,6 +258,72 @@ class TestRenderFunctions:
         assert "json-number" in result
         assert "json-bool" in result
         assert "json-null" in result
+
+
+class TestCellStructure:
+    """Tests for collapsible cell structure in assistant messages."""
+
+    def test_group_blocks_by_type(self):
+        """Test that blocks are correctly grouped by type."""
+        blocks = [
+            {"type": "thinking", "thinking": "planning..."},
+            {"type": "text", "text": "Hello!"},
+            {"type": "tool_use", "name": "Bash", "input": {}, "id": "tool-1"},
+            {"type": "text", "text": "More text"},
+            {"type": "thinking", "thinking": "more planning"},
+        ]
+        groups = group_blocks_by_type(blocks)
+        assert len(groups["thinking"]) == 2
+        assert len(groups["text"]) == 2
+        assert len(groups["tools"]) == 1
+
+    def test_cell_structure_in_assistant_message(self):
+        """Test that assistant messages contain cell structure."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Let me think..."},
+                {"type": "text", "text": "Here is my response."},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert "thinking-cell" in result
+        assert "response-cell" in result
+        assert '<details class="cell thinking-cell">' in result
+        assert '<details class="cell response-cell" open>' in result
+
+    def test_thinking_cell_closed_by_default(self):
+        """Test that thinking cell is closed by default."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Private thoughts"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert '<details class="cell thinking-cell">' in result
+        assert "open" not in result.split("thinking-cell")[1].split(">")[0]
+
+    def test_response_cell_open_by_default(self):
+        """Test that response cell is open by default."""
+        message_data = {
+            "content": [
+                {"type": "text", "text": "Hello!"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert '<details class="cell response-cell" open>' in result
+
+    def test_tools_cell_shows_count(self):
+        """Test that tools cell shows tool count."""
+        message_data = {
+            "content": [
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t1"},
+                {"type": "tool_use", "name": "Read", "input": {}, "id": "t2"},
+                {"type": "tool_use", "name": "Glob", "input": {}, "id": "t3"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert "tools-cell" in result
+        assert "Tool Calls (3)" in result
 
 
 class TestRenderContentBlock:

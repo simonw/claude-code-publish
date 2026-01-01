@@ -966,35 +966,109 @@ def render_user_message_content_with_tool_pairs(message_data, paired_tool_ids):
     return f"<p>{html.escape(str(content))}</p>"
 
 
+def group_blocks_by_type(content_blocks):
+    """Group content blocks into thinking, text, and tool sections.
+
+    Returns a dict with 'thinking', 'text', and 'tools' keys,
+    each containing a list of blocks of that type.
+    """
+    thinking_blocks = []
+    text_blocks = []
+    tool_blocks = []
+
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type", "")
+        if block_type == "thinking":
+            thinking_blocks.append(block)
+        elif block_type == "text":
+            text_blocks.append(block)
+        elif block_type in ("tool_use", "tool_result"):
+            tool_blocks.append(block)
+
+    return {"thinking": thinking_blocks, "text": text_blocks, "tools": tool_blocks}
+
+
 def render_assistant_message_with_tool_pairs(
     message_data, tool_result_lookup, paired_tool_ids
 ):
+    """Render assistant message with tool_use/tool_result pairing and collapsible cells."""
     content = message_data.get("content", [])
     if not isinstance(content, list):
         return f"<p>{html.escape(str(content))}</p>"
-    parts = []
-    for block in content:
-        if not isinstance(block, dict):
-            parts.append(f"<p>{html.escape(str(block))}</p>")
-            continue
-        if block.get("type") == "tool_use":
-            tool_id = block.get("id", "")
-            tool_result = tool_result_lookup.get(tool_id)
-            if tool_result:
-                paired_tool_ids.add(tool_id)
-                tool_use_html = render_content_block(block)
-                tool_result_html = render_content_block(tool_result)
-                parts.append(_macros.tool_pair(tool_use_html, tool_result_html))
+
+    # Group blocks by type
+    groups = group_blocks_by_type(content)
+    cells = []
+
+    # Render thinking cell (closed by default)
+    if groups["thinking"]:
+        thinking_html = "".join(
+            render_content_block(block) for block in groups["thinking"]
+        )
+        cells.append(_macros.cell("thinking", "Thinking", thinking_html, False, 0))
+
+    # Render response cell (open by default)
+    if groups["text"]:
+        text_html = "".join(render_content_block(block) for block in groups["text"])
+        cells.append(_macros.cell("response", "Response", text_html, True, 0))
+
+    # Render tools cell with pairing (closed by default)
+    if groups["tools"]:
+        tool_parts = []
+        for block in groups["tools"]:
+            if not isinstance(block, dict):
+                tool_parts.append(f"<p>{html.escape(str(block))}</p>")
                 continue
-        parts.append(render_content_block(block))
-    return "".join(parts)
+            if block.get("type") == "tool_use":
+                tool_id = block.get("id", "")
+                tool_result = tool_result_lookup.get(tool_id)
+                if tool_result:
+                    paired_tool_ids.add(tool_id)
+                    tool_use_html = render_content_block(block)
+                    tool_result_html = render_content_block(tool_result)
+                    tool_parts.append(
+                        _macros.tool_pair(tool_use_html, tool_result_html)
+                    )
+                    continue
+            tool_parts.append(render_content_block(block))
+        tools_html = "".join(tool_parts)
+        tool_count = len([b for b in groups["tools"] if b.get("type") == "tool_use"])
+        cells.append(_macros.cell("tools", "Tool Calls", tools_html, False, tool_count))
+
+    return "".join(cells)
 
 
 def render_assistant_message(message_data):
+    """Render assistant message with collapsible cells for thinking/response/tools."""
     content = message_data.get("content", [])
     if not isinstance(content, list):
         return f"<p>{html.escape(str(content))}</p>"
-    return "".join(render_content_block(block) for block in content)
+
+    # Group blocks by type
+    groups = group_blocks_by_type(content)
+    cells = []
+
+    # Render thinking cell (closed by default)
+    if groups["thinking"]:
+        thinking_html = "".join(
+            render_content_block(block) for block in groups["thinking"]
+        )
+        cells.append(_macros.cell("thinking", "Thinking", thinking_html, False, 0))
+
+    # Render response cell (open by default)
+    if groups["text"]:
+        text_html = "".join(render_content_block(block) for block in groups["text"])
+        cells.append(_macros.cell("response", "Response", text_html, True, 0))
+
+    # Render tools cell (closed by default)
+    if groups["tools"]:
+        tools_html = "".join(render_content_block(block) for block in groups["tools"])
+        tool_count = len([b for b in groups["tools"] if b.get("type") == "tool_use"])
+        cells.append(_macros.cell("tools", "Tool Calls", tools_html, False, tool_count))
+
+    return "".join(cells)
 
 
 def make_msg_id(timestamp):
@@ -1168,6 +1242,20 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
+.cell { margin: 8px 0; border-radius: 8px; overflow: hidden; }
+.cell summary { cursor: pointer; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9rem; list-style: none; }
+.cell summary::-webkit-details-marker { display: none; }
+.cell summary::before { content: '▶'; font-size: 0.7rem; margin-right: 8px; transition: transform 0.2s; }
+.cell[open] summary::before { transform: rotate(90deg); }
+.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: #f57c00; border-radius: 8px; }
+.thinking-cell[open] summary { border-radius: 8px 8px 0 0; }
+.response-cell summary { background: rgba(0,0,0,0.03); border: 1px solid var(--assistant-border); color: var(--text-color); border-radius: 8px; }
+.response-cell[open] summary { border-radius: 8px 8px 0 0; }
+.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--tool-border); border-radius: 8px; }
+.tools-cell[open] summary { border-radius: 8px 8px 0 0; }
+.cell-content { padding: 12px 16px; border: 1px solid rgba(0,0,0,0.1); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg); }
+.thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
+.tools-cell .cell-content { background: rgba(243, 229, 245, 0.3); border-color: var(--tool-border); }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .tool-icon { font-size: 1.1rem; }

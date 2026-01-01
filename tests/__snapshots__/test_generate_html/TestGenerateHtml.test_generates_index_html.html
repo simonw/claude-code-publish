@@ -34,6 +34,20 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
+.cell { margin: 8px 0; border-radius: 8px; overflow: hidden; }
+.cell summary { cursor: pointer; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9rem; list-style: none; }
+.cell summary::-webkit-details-marker { display: none; }
+.cell summary::before { content: '▶'; font-size: 0.7rem; margin-right: 8px; transition: transform 0.2s; }
+.cell[open] summary::before { transform: rotate(90deg); }
+.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: #f57c00; border-radius: 8px; }
+.thinking-cell[open] summary { border-radius: 8px 8px 0 0; }
+.response-cell summary { background: rgba(0,0,0,0.03); border: 1px solid var(--assistant-border); color: var(--text-color); border-radius: 8px; }
+.response-cell[open] summary { border-radius: 8px 8px 0 0; }
+.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--tool-border); border-radius: 8px; }
+.tools-cell[open] summary { border-radius: 8px 8px 0 0; }
+.cell-content { padding: 12px 16px; border: 1px solid rgba(0,0,0,0.1); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg); }
+.thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
+.tools-cell .cell-content { background: rgba(243, 229, 245, 0.3); border-color: var(--tool-border); }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .tool-icon { font-size: 1.1rem; }

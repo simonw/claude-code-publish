@@ -121,6 +121,16 @@
 <div class="tool-pair">{{ tool_use_html|safe }}{{ tool_result_html|safe }}</div>
 {%- endmacro %}
 
+{# Collapsible cell wrapper for message sections #}
+{% macro cell(cell_type, label, content_html, open_by_default=false, count=0) %}
+<details class="cell {{ cell_type }}-cell"{% if open_by_default %} open{% endif %}>
+<summary class="cell-header">
+<span class="cell-label">{{ label }}{% if count %} ({{ count }}){% endif %}</span>
+</summary>
+<div class="cell-content">{{ content_html|safe }}</div>
+</details>
+{%- endmacro %}
+
 {# Thinking block - content_html is pre-rendered markdown so needs |safe #}
 {% macro thinking(content_html) %}
 <div class="thinking"><div class="thinking-label">Thinking</div>{{ content_html|safe }}</div>
