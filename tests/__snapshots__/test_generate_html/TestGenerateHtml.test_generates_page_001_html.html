@@ -160,9 +160,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <div class="message user" id="msg-2025-12-24T10-00-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-00-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:00.000Z" data-timestamp="2025-12-24T10:00:00.000Z">2025-12-24T10:00:00.000Z</time></a></div><div class="message-content">
 <div class="user-content"><p>Create a simple Python function to add two numbers</p></div></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-00-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:05.000Z" data-timestamp="2025-12-24T10:00:05.000Z">2025-12-24T10:00:05.000Z</time></a></div><div class="message-content">
-<div class="thinking"><div class="thinking-label">Thinking</div><p>The user wants a simple addition function. I should:
-1. Create the function
-2. Add a basic test</p>
+<div class="thinking"><div class="thinking-label">Thinking</div><p>The user wants a simple addition function. I should:</p>
+<ol>
+<li>Create the function</li>
+<li>Add a basic test</li>
+</ol>
 <p>This is straightforward.</p></div>
 <div class="assistant-text"><p>I'll create a simple Python function for you. Let me write it now.</p></div><div class="file-tool write-tool" data-tool-id="toolu_write_001">
 <div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">math_utils.py</span></div>
@@ -252,10 +254,12 @@ def subtract(a: int, b: int) -&gt; int:
 test_subtract - AssertionError: expected 5 but got None</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-02-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-02-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:15.000Z" data-timestamp="2025-12-24T10:02:15.000Z">2025-12-24T10:02:15.000Z</time></a></div><div class="message-content">
 <div class="assistant-text"><p>There's a test failure. I need to check the test file and fix it.</p>
-<p>Here's some <strong>markdown</strong> content with:
-- A bullet list
-- <code>inline code</code>
-- A <a href="https://example.com">link</a></p>
+<p>Here's some <strong>markdown</strong> content with:</p>
+<ul>
+<li>A bullet list</li>
+<li><code>inline code</code></li>
+<li>A <a href="https://example.com">link</a></li>
+</ul>
 <pre><code class="language-python">def example():
     return 42
 </code></pre></div></div></div>
