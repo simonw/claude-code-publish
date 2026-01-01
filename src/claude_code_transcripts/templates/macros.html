@@ -126,6 +126,7 @@
 <details class="cell {{ cell_type }}-cell"{% if open_by_default %} open{% endif %}>
 <summary class="cell-header">
 <span class="cell-label">{{ label }}{% if count %} ({{ count }}){% endif %}</span>
+<button class="cell-copy-btn" aria-label="Copy {{ label }}" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">{{ content_html|safe }}</div>
 </details>

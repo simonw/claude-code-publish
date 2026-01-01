@@ -325,6 +325,31 @@ class TestCellStructure:
         assert "tools-cell" in result
         assert "Tool Calls (3)" in result
 
+    def test_cell_has_copy_button(self):
+        """Test that each cell has a copy button."""
+        message_data = {
+            "content": [
+                {"type": "text", "text": "Hello!"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert 'class="cell-copy-btn"' in result
+        assert 'aria-label="Copy Response"' in result
+
+    def test_cell_copy_button_aria_label(self):
+        """Test that cell copy buttons have appropriate ARIA labels."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Planning..."},
+                {"type": "text", "text": "Hello!"},
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t1"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert 'aria-label="Copy Thinking"' in result
+        assert 'aria-label="Copy Response"' in result
+        assert 'aria-label="Copy Tool Calls"' in result
+
 
 class TestRenderContentBlock:
     """Tests for render_content_block function."""

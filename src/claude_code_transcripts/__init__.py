@@ -1256,6 +1256,10 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .cell-content { padding: 12px 16px; border: 1px solid rgba(0,0,0,0.1); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg); }
 .thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
 .tools-cell .cell-content { background: rgba(243, 229, 245, 0.3); border-color: var(--tool-border); }
+.cell-copy-btn { padding: 4px 10px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.15); border-radius: 4px; cursor: pointer; font-size: 0.75rem; color: var(--text-muted); transition: all 0.2s; margin-left: auto; }
+.cell-copy-btn:hover { background: white; color: var(--text-color); border-color: rgba(0,0,0,0.3); }
+.cell-copy-btn:focus { outline: 2px solid var(--user-border); outline-offset: 2px; }
+.cell-copy-btn.copied { background: #c8e6c9; color: #2e7d32; border-color: #a5d6a7; }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .tool-icon { font-size: 1.1rem; }
@@ -1468,6 +1472,33 @@ document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command
         });
     });
     el.appendChild(copyBtn);
+});
+// Add copy functionality to cell headers
+document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        const cell = btn.closest('.cell');
+        const content = cell.querySelector('.cell-content');
+        const textToCopy = content.textContent.trim();
+        navigator.clipboard.writeText(textToCopy).then(function() {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(function(err) {
+            console.error('Failed to copy cell:', err);
+        });
+    });
+    // Keyboard accessibility
+    btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.click();
+        }
+    });
 });
 """
 

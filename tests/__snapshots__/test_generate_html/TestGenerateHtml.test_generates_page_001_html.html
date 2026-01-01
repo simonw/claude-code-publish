@@ -48,6 +48,10 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .cell-content { padding: 12px 16px; border: 1px solid rgba(0,0,0,0.1); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg); }
 .thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
 .tools-cell .cell-content { background: rgba(243, 229, 245, 0.3); border-color: var(--tool-border); }
+.cell-copy-btn { padding: 4px 10px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.15); border-radius: 4px; cursor: pointer; font-size: 0.75rem; color: var(--text-muted); transition: all 0.2s; margin-left: auto; }
+.cell-copy-btn:hover { background: white; color: var(--text-color); border-color: rgba(0,0,0,0.3); }
+.cell-copy-btn:focus { outline: 2px solid var(--user-border); outline-offset: 2px; }
+.cell-copy-btn.copied { background: #c8e6c9; color: #2e7d32; border-color: #a5d6a7; }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .tool-icon { font-size: 1.1rem; }
@@ -225,6 +229,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell thinking-cell">
 <summary class="cell-header">
 <span class="cell-label">Thinking</span>
+<button class="cell-copy-btn" aria-label="Copy Thinking" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="thinking"><div class="thinking-label">Thinking</div><p>The user wants a simple addition function. I should:
@@ -235,6 +240,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>I'll create a simple Python function for you. Let me write it now.</p></div></div>
@@ -242,6 +248,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair"><div class="file-tool write-tool" data-tool-id="toolu_write_001">
@@ -257,6 +264,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>I've created the <code>add</code> function. Now let me run the tests.</p></div></div>
@@ -264,6 +272,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -281,6 +290,7 @@ tests/test_math.py ..  [100%]
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>All tests pass. Let me update the todo list and make a commit.</p></div></div>
@@ -288,6 +298,7 @@ tests/test_math.py ..  [100%]
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -297,6 +308,7 @@ tests/test_math.py ..  [100%]
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -309,6 +321,7 @@ tests/test_math.py ..  [100%]
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>Committed! Now pushing to remote.</p></div></div>
@@ -316,6 +329,7 @@ tests/test_math.py ..  [100%]
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -335,6 +349,7 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -348,6 +363,7 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair"><div class="file-tool edit-tool" data-tool-id="toolu_edit_001">
@@ -370,6 +386,7 @@ To github.com:example/project.git
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>Added the subtract function. Let me verify with grep.</p></div></div>
@@ -377,6 +394,7 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -392,6 +410,7 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -406,6 +425,7 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>There's a test failure. I need to check the test file and fix it.</p>
@@ -423,6 +443,7 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair"><div class="file-tool edit-tool" data-tool-id="toolu_edit_002">
@@ -440,6 +461,7 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
@@ -452,6 +474,7 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>Done! The subtract function is now working and committed.</p></div></div>
@@ -524,6 +547,33 @@ document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command
         });
     });
     el.appendChild(copyBtn);
+});
+// Add copy functionality to cell headers
+document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        const cell = btn.closest('.cell');
+        const content = cell.querySelector('.cell-content');
+        const textToCopy = content.textContent.trim();
+        navigator.clipboard.writeText(textToCopy).then(function() {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(function(err) {
+            console.error('Failed to copy cell:', err);
+        });
+    });
+    // Keyboard accessibility
+    btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.click();
+        }
+    });
 });
 </script>
 </body>
