@@ -143,7 +143,7 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .cell-copy-btn.copied { background: var(--accent-green-bg); color: var(--accent-green); border-color: var(--accent-green); }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
 .tool-header { font-weight: 600; color: var(--accent-purple); margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: var(--spacing-sm); position: sticky; top: calc(var(--sticky-level-0) + var(--sticky-level-1)); z-index: 10; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: var(--spacing-xs) 0; flex-wrap: wrap; }
-.tool-icon { font-size: var(--font-size-lg); }
+.tool-icon { font-size: var(--font-size-lg); min-width: 1.5em; text-align: center; }
 .tool-description { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: var(--spacing-sm); font-style: italic; }
 .tool-description p { margin: 0; }
 .tool-input-rendered { font-family: monospace; white-space: pre-wrap; font-size: var(--font-size-sm); line-height: 1.5; }
@@ -312,6 +312,16 @@ details.continuation[open] summary { border-radius: var(--border-radius-lg) var(
 .search-result-page { padding: var(--spacing-sm) var(--spacing-md); background: var(--border-light); font-size: var(--font-size-xs); color: var(--text-muted); border-bottom: 1px solid var(--border-light); }
 .search-result-content { padding: var(--spacing-md); }
 .search-result mark { background: rgba(245, 158, 11, 0.3); padding: 1px 2px; border-radius: 2px; }
+/* Metadata subsection */
+.message-metadata { margin: 0; border-radius: var(--border-radius-sm); font-size: var(--font-size-xs); }
+.message-metadata summary { cursor: pointer; padding: var(--spacing-xs) var(--spacing-sm); color: var(--text-muted); list-style: none; display: flex; align-items: center; gap: var(--spacing-xs); }
+.message-metadata summary::-webkit-details-marker { display: none; }
+.message-metadata summary::before { content: 'i'; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 10px; font-weight: 600; font-style: italic; font-family: Georgia, serif; background: var(--border-light); border-radius: 50%; color: var(--text-muted); }
+.message-metadata[open] summary { border-bottom: 1px solid var(--border-light); }
+.metadata-content { padding: var(--spacing-sm); background: var(--bg-secondary); border-radius: 0 0 var(--border-radius-sm) var(--border-radius-sm); display: flex; flex-wrap: wrap; gap: var(--spacing-sm) var(--spacing-md); }
+.metadata-item { display: flex; align-items: center; gap: var(--spacing-xs); }
+.metadata-label { color: var(--text-muted); font-weight: 500; }
+.metadata-value { color: var(--text-secondary); font-family: monospace; }
 @media (max-width: 600px) { body { padding: var(--spacing-sm); } .message, .index-item { border-radius: var(--border-radius-md); } .message-content, .index-item-content { padding: var(--spacing-md); } pre { font-size: var(--font-size-xs); padding: var(--spacing-sm); } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 </style>
 </head>
@@ -329,7 +339,14 @@ details.continuation[open] summary { border-radius: var(--border-radius-lg) var(
 </div>
 
         
-<div class="message user" id="msg-2025-12-24T10-05-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-05-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:00.000Z" data-timestamp="2025-12-24T10:05:00.000Z">2025-12-24T10:05:00.000Z</time></a></div><div class="message-content">
+<div class="message user" id="msg-2025-12-24T10-05-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-05-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:00.000Z" data-timestamp="2025-12-24T10:05:00.000Z">2025-12-24T10:05:00.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">27</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~6</span></div>
+</div>
+</details><div class="message-content">
 <details class="cell user-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Message</span>
@@ -338,7 +355,15 @@ details.continuation[open] summary { border-radius: var(--border-radius-lg) var(
 </summary>
 <div class="cell-content"><p>Add a multiply function too</p></div>
 </details></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-05-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-05-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:05.000Z" data-timestamp="2025-12-24T10:05:05.000Z">2025-12-24T10:05:05.000Z</time></a></div><div class="message-content">
+<div class="message assistant" id="msg-2025-12-24T10-05-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-05-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:05.000Z" data-timestamp="2025-12-24T10:05:05.000Z">2025-12-24T10:05:05.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">210</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~52</span></div>
+<div class="metadata-item"><span class="metadata-label">Edit:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
@@ -389,7 +414,14 @@ File edited successfully">Copy</button>
 </div>
 </div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File edited successfully</p></div><div class="view-json"><pre>File edited successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-05-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-05-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:15.000Z" data-timestamp="2025-12-24T10:05:15.000Z">2025-12-24T10:05:15.000Z</time></a></div><div class="message-content">
+<div class="message assistant" id="msg-2025-12-24T10-05-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-05-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:05:15.000Z" data-timestamp="2025-12-24T10:05:15.000Z">2025-12-24T10:05:15.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">24</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~6</span></div>
+</div>
+</details><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>

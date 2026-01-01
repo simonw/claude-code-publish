@@ -31,6 +31,7 @@ from claude_code_transcripts import (
     parse_session_file,
     get_session_summary,
     find_local_sessions,
+    calculate_message_metadata,
 )
 
 
@@ -349,6 +350,84 @@ class TestCellStructure:
         assert 'aria-label="Copy Thinking"' in result
         assert 'aria-label="Copy Response"' in result
         assert 'aria-label="Copy Tool Calls"' in result
+
+
+class TestMessageMetadata:
+    """Tests for message metadata calculation and rendering."""
+
+    def test_calculate_metadata_string_content(self):
+        """Test metadata calculation for string content."""
+        message_data = {"content": "Hello, world!"}
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 13
+        assert metadata["token_estimate"] == 3  # 13 // 4 = 3
+        assert metadata["tool_counts"] == {}
+
+    def test_calculate_metadata_text_blocks(self):
+        """Test metadata calculation for text blocks."""
+        message_data = {
+            "content": [
+                {"type": "text", "text": "Hello!"},  # 6 chars
+                {"type": "text", "text": "World!"},  # 6 chars
+            ]
+        }
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 12
+        assert metadata["token_estimate"] == 3  # 12 // 4 = 3
+        assert metadata["tool_counts"] == {}
+
+    def test_calculate_metadata_thinking_blocks(self):
+        """Test metadata includes thinking block content."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Let me think..."},  # 15 chars
+            ]
+        }
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 15
+        assert metadata["token_estimate"] == 3  # 15 // 4 = 3
+
+    def test_calculate_metadata_tool_counts(self):
+        """Test tool counting in metadata."""
+        message_data = {
+            "content": [
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t1"},
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t2"},
+                {"type": "tool_use", "name": "Read", "input": {}, "id": "t3"},
+            ]
+        }
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["tool_counts"] == {"Bash": 2, "Read": 1}
+
+    def test_calculate_metadata_empty_content(self):
+        """Test metadata for empty content."""
+        message_data = {"content": ""}
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 0
+        assert metadata["token_estimate"] == 0
+        assert metadata["tool_counts"] == {}
+
+    def test_metadata_in_rendered_message(self, output_dir):
+        """Test that metadata section appears in rendered messages."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+        assert 'class="message-metadata"' in page_html
+        assert 'class="metadata-content"' in page_html
+        assert 'class="metadata-label"' in page_html
+        assert 'class="metadata-value"' in page_html
+
+    def test_metadata_css_present(self, output_dir):
+        """Test that metadata CSS classes are defined."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+        assert ".message-metadata" in page_html
+        assert ".metadata-item" in page_html
+        assert ".metadata-label" in page_html
+        assert ".metadata-value" in page_html
 
 
 class TestRenderContentBlock:

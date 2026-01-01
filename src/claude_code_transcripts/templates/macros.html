@@ -145,8 +145,8 @@
 {%- endmacro %}
 
 {# Generic tool use - description_html, input_markdown_html, input_json_html are pre-rendered so need |safe #}
-{% macro tool_use(tool_name, description_html, input_markdown_html, input_json_html, tool_id) %}
-<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">⚙</span> {{ tool_name }}<div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div>
+{% macro tool_use(tool_name, tool_icon, description_html, input_markdown_html, input_json_html, tool_id) %}
+<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">{{ tool_icon }}</span> {{ tool_name }}<div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div>
 {%- if description_html -%}
 <div class="tool-description">{{ description_html|safe }}</div>
 {%- endif -%}
@@ -211,9 +211,25 @@
 {%- endif %}
 {%- endmacro %}
 
-{# Message wrapper - content_html is pre-rendered so needs |safe #}
-{% macro message(role_class, role_label, msg_id, timestamp, content_html) %}
-<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></div><div class="message-content">{{ content_html|safe }}</div></div>
+{# Message metadata subsection #}
+{% macro metadata(char_count, token_estimate, tool_counts) %}
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">{{ char_count }}</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~{{ token_estimate }}</span></div>
+{%- if tool_counts %}
+{%- for tool_name, count in tool_counts.items() %}
+<div class="metadata-item"><span class="metadata-label">{{ tool_name }}:</span><span class="metadata-value">{{ count }}</span></div>
+{%- endfor %}
+{%- endif %}
+</div>
+</details>
+{%- endmacro %}
+
+{# Message wrapper - content_html is pre-rendered so needs |safe, metadata_html is optional #}
+{% macro message(role_class, role_label, msg_id, timestamp, content_html, metadata_html="") %}
+<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></div>{{ metadata_html|safe }}<div class="message-content">{{ content_html|safe }}</div></div>
 {%- endmacro %}
 
 {# Continuation wrapper - content_html is pre-rendered so needs |safe #}

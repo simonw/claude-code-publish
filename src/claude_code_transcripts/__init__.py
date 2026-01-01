@@ -52,6 +52,45 @@ LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
 
+# Tool type icons for display in tool headers
+TOOL_ICONS = {
+    # File operations
+    "Read": "📖",
+    "Write": "📝",
+    "Edit": "✏️",
+    "NotebookEdit": "📓",
+    # Search/find operations
+    "Glob": "🔍",
+    "Grep": "🔎",
+    # Terminal operations
+    "Bash": "$",
+    # Web operations
+    "WebFetch": "🌐",
+    "WebSearch": "🔎",
+    # Task management
+    "TodoWrite": "☰",
+    "Task": "📋",
+    # Other tools
+    "Skill": "⚡",
+    "Agent": "🤖",
+}
+
+# Default icon for tools not in the mapping
+DEFAULT_TOOL_ICON = "⚙"
+
+
+def get_tool_icon(tool_name):
+    """Get the appropriate icon for a tool name.
+
+    Args:
+        tool_name: The name of the tool.
+
+    Returns:
+        The icon string for the tool.
+    """
+    return TOOL_ICONS.get(tool_name, DEFAULT_TOOL_ICON)
+
+
 # Regex to strip ANSI escape sequences from terminal output
 ANSI_ESCAPE_PATTERN = re.compile(
     r"""
@@ -139,6 +178,61 @@ def highlight_code(code, filename=None, language=None):
     formatter = HtmlFormatter(nowrap=True, cssclass="highlight")
     highlighted = highlight(code, lexer, formatter)
     return highlighted
+
+
+def calculate_message_metadata(message_data):
+    """Calculate metadata for a message.
+
+    Args:
+        message_data: Parsed message JSON data.
+
+    Returns:
+        Dict with char_count, token_estimate, and tool_counts.
+    """
+    content = message_data.get("content", "")
+
+    # Calculate character count from all text content
+    if isinstance(content, str):
+        char_count = len(content)
+    elif isinstance(content, list):
+        char_count = 0
+        for block in content:
+            if isinstance(block, dict):
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    char_count += len(block.get("text", ""))
+                elif block_type == "thinking":
+                    char_count += len(block.get("thinking", ""))
+                elif block_type == "tool_use":
+                    # Count the input JSON as text
+                    char_count += len(json.dumps(block.get("input", {})))
+                elif block_type == "tool_result":
+                    result_content = block.get("content", "")
+                    if isinstance(result_content, str):
+                        char_count += len(result_content)
+                    elif isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                char_count += len(item.get("text", ""))
+    else:
+        char_count = len(str(content))
+
+    # Token estimate (approximately 4 characters per token)
+    token_estimate = char_count // 4
+
+    # Count tool calls
+    tool_counts = {}
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_name = block.get("name", "Unknown")
+                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+
+    return {
+        "char_count": char_count,
+        "token_estimate": token_estimate,
+        "tool_counts": tool_counts,
+    }
 
 
 def extract_text_from_content(content):
@@ -872,8 +966,14 @@ def render_content_block(block):
         display_input = {k: v for k, v in tool_input.items() if k != "description"}
         input_markdown_html = render_json_with_markdown(display_input)
         input_json_html = format_json(display_input)
+        tool_icon = get_tool_icon(tool_name)
         return _macros.tool_use(
-            tool_name, description_html, input_markdown_html, input_json_html, tool_id
+            tool_name,
+            tool_icon,
+            description_html,
+            input_markdown_html,
+            input_json_html,
+            tool_id,
         )
     elif block_type == "tool_result":
         content = block.get("content", "")
@@ -1290,7 +1390,14 @@ def render_message(log_type, message_json, timestamp):
     if not content_html.strip():
         return ""
     msg_id = make_msg_id(timestamp)
-    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
+    # Calculate and render metadata
+    metadata = calculate_message_metadata(message_data)
+    metadata_html = _macros.metadata(
+        metadata["char_count"], metadata["token_estimate"], metadata["tool_counts"]
+    )
+    return _macros.message(
+        role_class, role_label, msg_id, timestamp, content_html, metadata_html
+    )
 
 
 def render_message_with_tool_pairs(
@@ -1318,7 +1425,14 @@ def render_message_with_tool_pairs(
     if not content_html.strip():
         return ""
     msg_id = make_msg_id(timestamp)
-    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
+    # Calculate and render metadata
+    metadata = calculate_message_metadata(message_data)
+    metadata_html = _macros.metadata(
+        metadata["char_count"], metadata["token_estimate"], metadata["tool_counts"]
+    )
+    return _macros.message(
+        role_class, role_label, msg_id, timestamp, content_html, metadata_html
+    )
 
 
 CSS = """
@@ -1460,7 +1574,7 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .cell-copy-btn.copied { background: var(--accent-green-bg); color: var(--accent-green); border-color: var(--accent-green); }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
 .tool-header { font-weight: 600; color: var(--accent-purple); margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: var(--spacing-sm); position: sticky; top: calc(var(--sticky-level-0) + var(--sticky-level-1)); z-index: 10; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: var(--spacing-xs) 0; flex-wrap: wrap; }
-.tool-icon { font-size: var(--font-size-lg); }
+.tool-icon { font-size: var(--font-size-lg); min-width: 1.5em; text-align: center; }
 .tool-description { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: var(--spacing-sm); font-style: italic; }
 .tool-description p { margin: 0; }
 .tool-input-rendered { font-family: monospace; white-space: pre-wrap; font-size: var(--font-size-sm); line-height: 1.5; }
@@ -1629,6 +1743,16 @@ details.continuation[open] summary { border-radius: var(--border-radius-lg) var(
 .search-result-page { padding: var(--spacing-sm) var(--spacing-md); background: var(--border-light); font-size: var(--font-size-xs); color: var(--text-muted); border-bottom: 1px solid var(--border-light); }
 .search-result-content { padding: var(--spacing-md); }
 .search-result mark { background: rgba(245, 158, 11, 0.3); padding: 1px 2px; border-radius: 2px; }
+/* Metadata subsection */
+.message-metadata { margin: 0; border-radius: var(--border-radius-sm); font-size: var(--font-size-xs); }
+.message-metadata summary { cursor: pointer; padding: var(--spacing-xs) var(--spacing-sm); color: var(--text-muted); list-style: none; display: flex; align-items: center; gap: var(--spacing-xs); }
+.message-metadata summary::-webkit-details-marker { display: none; }
+.message-metadata summary::before { content: 'i'; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 10px; font-weight: 600; font-style: italic; font-family: Georgia, serif; background: var(--border-light); border-radius: 50%; color: var(--text-muted); }
+.message-metadata[open] summary { border-bottom: 1px solid var(--border-light); }
+.metadata-content { padding: var(--spacing-sm); background: var(--bg-secondary); border-radius: 0 0 var(--border-radius-sm) var(--border-radius-sm); display: flex; flex-wrap: wrap; gap: var(--spacing-sm) var(--spacing-md); }
+.metadata-item { display: flex; align-items: center; gap: var(--spacing-xs); }
+.metadata-label { color: var(--text-muted); font-weight: 500; }
+.metadata-value { color: var(--text-secondary); font-family: monospace; }
 @media (max-width: 600px) { body { padding: var(--spacing-sm); } .message, .index-item { border-radius: var(--border-radius-md); } .message-content, .index-item-content { padding: var(--spacing-md); } pre { font-size: var(--font-size-xs); padding: var(--spacing-sm); } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 """
 
