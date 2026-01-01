@@ -861,12 +861,23 @@ def render_content_block(block):
         description = tool_input.get("description", "")
         description_html = render_markdown_text(description) if description else ""
         display_input = {k: v for k, v in tool_input.items() if k != "description"}
-        input_html = render_json_with_markdown(display_input)
-        return _macros.tool_use(tool_name, description_html, input_html, tool_id)
+        input_markdown_html = render_json_with_markdown(display_input)
+        input_json_html = format_json(display_input)
+        return _macros.tool_use(
+            tool_name, description_html, input_markdown_html, input_json_html, tool_id
+        )
     elif block_type == "tool_result":
         content = block.get("content", "")
         is_error = block.get("is_error", False)
 
+        # Strip ANSI escape sequences from string content for both views
+        if isinstance(content, str) and not is_content_block_array(content):
+            content = strip_ansi(content)
+
+        # Generate JSON view (raw content as JSON)
+        content_json_html = format_json(content)
+
+        # Generate Markdown view (rendered content)
         # Check for git commits and render with styled cards
         if isinstance(content, str):
             # First, check if content is a JSON array of content blocks
@@ -875,14 +886,12 @@ def render_content_block(block):
                     parsed_blocks = json.loads(content)
                     rendered = render_content_block_array(parsed_blocks)
                     if rendered:
-                        content_html = rendered
+                        content_markdown_html = rendered
                     else:
-                        content_html = format_json(content)
+                        content_markdown_html = format_json(content)
                 except (json.JSONDecodeError, TypeError):
-                    content_html = format_json(content)
+                    content_markdown_html = format_json(content)
             else:
-                # Strip ANSI escape sequences from terminal output
-                content = strip_ansi(content)
 
                 commits_found = list(COMMIT_PATTERN.finditer(content))
                 if commits_found:
@@ -907,14 +916,19 @@ def render_content_block(block):
                     if after:
                         parts.append(f"<pre>{html.escape(after)}</pre>")
 
-                    content_html = "".join(parts)
+                    content_markdown_html = "".join(parts)
                 else:
-                    content_html = f"<pre>{html.escape(content)}</pre>"
+                    # Check if content looks like JSON - if so, format as JSON
+                    # Otherwise render as markdown
+                    if is_json_like(content):
+                        content_markdown_html = format_json(content)
+                    else:
+                        content_markdown_html = render_markdown_text(content)
         elif isinstance(content, list) or is_json_like(content):
-            content_html = format_json(content)
+            content_markdown_html = format_json(content)
         else:
-            content_html = format_json(content)
-        return _macros.tool_result(content_html, is_error)
+            content_markdown_html = format_json(content)
+        return _macros.tool_result(content_markdown_html, content_json_html, is_error)
     else:
         return format_json(block)
 
@@ -1007,22 +1021,34 @@ def render_assistant_message_with_tool_pairs(
         thinking_html = "".join(
             render_content_block(block) for block in groups["thinking"]
         )
-        cells.append(_macros.cell("thinking", "Thinking", thinking_html, False, 0))
+        # Extract raw thinking text for copy functionality
+        raw_thinking = "\n\n".join(
+            block.get("thinking", "") for block in groups["thinking"]
+        )
+        cells.append(
+            _macros.cell("thinking", "Thinking", thinking_html, False, 0, raw_thinking)
+        )
 
     # Render response cell (open by default)
     if groups["text"]:
         text_html = "".join(render_content_block(block) for block in groups["text"])
-        cells.append(_macros.cell("response", "Response", text_html, True, 0))
+        # Extract raw text for copy functionality
+        raw_text = "\n\n".join(block.get("text", "") for block in groups["text"])
+        cells.append(_macros.cell("response", "Response", text_html, True, 0, raw_text))
 
     # Render tools cell with pairing (closed by default)
     if groups["tools"]:
         tool_parts = []
+        raw_tool_parts = []
         for block in groups["tools"]:
             if not isinstance(block, dict):
                 tool_parts.append(f"<p>{html.escape(str(block))}</p>")
+                raw_tool_parts.append(str(block))
                 continue
             if block.get("type") == "tool_use":
                 tool_id = block.get("id", "")
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
                 tool_result = tool_result_lookup.get(tool_id)
                 if tool_result:
                     paired_tool_ids.add(tool_id)
@@ -1031,11 +1057,41 @@ def render_assistant_message_with_tool_pairs(
                     tool_parts.append(
                         _macros.tool_pair(tool_use_html, tool_result_html)
                     )
+                    # Add raw content for tool use and result
+                    raw_tool_parts.append(
+                        f"Tool: {tool_name}\nInput: {json.dumps(tool_input, indent=2)}"
+                    )
+                    result_content = tool_result.get("content", "")
+                    if isinstance(result_content, list):
+                        result_texts = []
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                result_texts.append(item.get("text", ""))
+                        result_content = "\n".join(result_texts)
+                    raw_tool_parts.append(f"Result:\n{result_content}")
                     continue
+                else:
+                    raw_tool_parts.append(
+                        f"Tool: {tool_name}\nInput: {json.dumps(tool_input, indent=2)}"
+                    )
+            elif block.get("type") == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_texts = []
+                    for item in result_content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            result_texts.append(item.get("text", ""))
+                    result_content = "\n".join(result_texts)
+                raw_tool_parts.append(f"Result:\n{result_content}")
             tool_parts.append(render_content_block(block))
         tools_html = "".join(tool_parts)
+        raw_tools = "\n\n".join(raw_tool_parts)
         tool_count = len([b for b in groups["tools"] if b.get("type") == "tool_use"])
-        cells.append(_macros.cell("tools", "Tool Calls", tools_html, False, tool_count))
+        cells.append(
+            _macros.cell(
+                "tools", "Tool Calls", tools_html, False, tool_count, raw_tools
+            )
+        )
 
     return "".join(cells)
 
@@ -1055,18 +1111,52 @@ def render_assistant_message(message_data):
         thinking_html = "".join(
             render_content_block(block) for block in groups["thinking"]
         )
-        cells.append(_macros.cell("thinking", "Thinking", thinking_html, False, 0))
+        # Extract raw thinking text for copy functionality
+        raw_thinking = "\n\n".join(
+            block.get("thinking", "") for block in groups["thinking"]
+        )
+        cells.append(
+            _macros.cell("thinking", "Thinking", thinking_html, False, 0, raw_thinking)
+        )
 
     # Render response cell (open by default)
     if groups["text"]:
         text_html = "".join(render_content_block(block) for block in groups["text"])
-        cells.append(_macros.cell("response", "Response", text_html, True, 0))
+        # Extract raw text for copy functionality
+        raw_text = "\n\n".join(block.get("text", "") for block in groups["text"])
+        cells.append(_macros.cell("response", "Response", text_html, True, 0, raw_text))
 
     # Render tools cell (closed by default)
     if groups["tools"]:
         tools_html = "".join(render_content_block(block) for block in groups["tools"])
+        # Extract raw tool content for copy functionality
+        raw_tool_parts = []
+        for block in groups["tools"]:
+            if not isinstance(block, dict):
+                raw_tool_parts.append(str(block))
+                continue
+            if block.get("type") == "tool_use":
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+                raw_tool_parts.append(
+                    f"Tool: {tool_name}\nInput: {json.dumps(tool_input, indent=2)}"
+                )
+            elif block.get("type") == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_texts = []
+                    for item in result_content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            result_texts.append(item.get("text", ""))
+                    result_content = "\n".join(result_texts)
+                raw_tool_parts.append(f"Result:\n{result_content}")
+        raw_tools = "\n\n".join(raw_tool_parts)
         tool_count = len([b for b in groups["tools"] if b.get("type") == "tool_use"])
-        cells.append(_macros.cell("tools", "Tool Calls", tools_html, False, tool_count))
+        cells.append(
+            _macros.cell(
+                "tools", "Tool Calls", tools_html, False, tool_count, raw_tools
+            )
+        )
 
     return "".join(cells)
 
@@ -1220,14 +1310,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.message { margin-bottom: 16px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
 .message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
 .message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
 .tool-reply .role-label { color: #e65100; }
 .tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
 .tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; border-radius: 12px 12px 0 0; }
 .role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .user .role-label { color: var(--user-border); }
 time { color: var(--text-muted); font-size: 0.8rem; }
@@ -1242,16 +1332,19 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
-.cell { margin: 8px 0; border-radius: 8px; overflow: hidden; }
-.cell summary { cursor: pointer; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9rem; list-style: none; }
+.cell { margin: 8px 0; border-radius: 8px; overflow: visible; }
+.cell summary { cursor: pointer; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9rem; list-style: none; position: sticky; top: 0; z-index: 10; }
 .cell summary::-webkit-details-marker { display: none; }
 .cell summary::before { content: '▶'; font-size: 0.7rem; margin-right: 8px; transition: transform 0.2s; }
 .cell[open] summary::before { transform: rotate(90deg); }
-.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: #f57c00; border-radius: 8px; }
+.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: #f57c00; border-radius: 8px; transition: background 0.15s, border-color 0.15s; }
+.thinking-cell summary:hover { background: rgba(255, 243, 224, 0.9); border-color: #f57c00; }
 .thinking-cell[open] summary { border-radius: 8px 8px 0 0; }
-.response-cell summary { background: rgba(0,0,0,0.03); border: 1px solid var(--assistant-border); color: var(--text-color); border-radius: 8px; }
+.response-cell summary { background: rgba(0,0,0,0.03); border: 1px solid var(--assistant-border); color: var(--text-color); border-radius: 8px; transition: background 0.15s, border-color 0.15s; }
+.response-cell summary:hover { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.2); }
 .response-cell[open] summary { border-radius: 8px 8px 0 0; }
-.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--tool-border); border-radius: 8px; }
+.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--tool-border); border-radius: 8px; transition: background 0.15s, border-color 0.15s; }
+.tools-cell summary:hover { background: rgba(243, 229, 245, 0.8); border-color: #7b1fa2; }
 .tools-cell[open] summary { border-radius: 8px 8px 0 0; }
 .cell-content { padding: 12px 16px; border: 1px solid rgba(0,0,0,0.1); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg); }
 .thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
@@ -1266,16 +1359,28 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
 .tool-description p { margin: 0; }
 .tool-input-rendered { font-family: monospace; white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5; }
-.json-key { color: #0d47a1; }
-.json-string-value { color: #1b5e20; }
+.view-toggle-btn { padding: 2px 8px; font-size: 0.7rem; background: rgba(255,255,255,0.8); border: 1px solid rgba(0,0,0,0.15); border-radius: 4px; cursor: pointer; margin-left: auto; transition: background 0.15s; }
+.view-toggle-btn:hover { background: rgba(255,255,255,1); }
+.view-json { display: none; }
+.view-markdown { display: block; }
+.show-json .view-json { display: block; }
+.show-json .view-markdown { display: none; }
+.tool-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.tool-result-label { font-weight: 600; font-size: 0.85rem; color: #2e7d32; display: flex; align-items: center; gap: 6px; }
+.tool-result.tool-error .tool-result-label { color: #c62828; }
+.result-icon { font-size: 1rem; }
+.tool-call-label { font-weight: 600; font-size: 0.8rem; color: var(--tool-border); background: rgba(156, 39, 176, 0.12); padding: 2px 8px; border-radius: 4px; margin-right: 8px; display: inline-flex; align-items: center; gap: 4px; }
+.call-icon { font-size: 0.9rem; }
+.json-key { color: #7b1fa2; font-weight: 600; }
+.json-string-value { color: #0d5c1e; }
 .json-string-value p { display: inline; margin: 0; }
 .json-string-value code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; }
 .json-string-value strong { font-weight: 600; }
 .json-string-value em { font-style: italic; }
 .json-string-value a { color: #1976d2; text-decoration: underline; }
-.json-number { color: #e65100; }
-.json-bool { color: #7b1fa2; }
-.json-null { color: #78909c; }
+.json-number { color: #c62828; font-weight: 500; }
+.json-bool { color: #1565c0; font-weight: 600; }
+.json-null { color: #78909c; font-style: italic; }
 .tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-result.tool-error { background: var(--tool-error-bg); }
 .tool-pair { border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px; margin: 12px 0; background: rgba(156, 39, 176, 0.06); }
@@ -1320,33 +1425,33 @@ pre.highlight { color: #e0e0e0; }
 code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 pre code { background: none; padding: 0; }
 .highlight .hll { background-color: #49483e }
-.highlight .c { color: #75715e } /* Comment */
-.highlight .err { color: #f92672 } /* Error */
-.highlight .k { color: #66d9ef } /* Keyword */
-.highlight .l { color: #ae81ff } /* Literal */
-.highlight .n { color: #e0e0e0 } /* Name */
-.highlight .o { color: #f92672 } /* Operator */
-.highlight .p { color: #e0e0e0 } /* Punctuation */
-.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #75715e } /* Comments */
-.highlight .gd { color: #f92672 } /* Generic.Deleted */
-.highlight .gi { color: #a6e22e } /* Generic.Inserted */
-.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #66d9ef } /* Keywords */
-.highlight .ld { color: #e6db74 } /* Literal.Date */
-.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #ae81ff } /* Numbers */
-.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #e6db74 } /* Strings */
-.highlight .na { color: #a6e22e } /* Name.Attribute */
-.highlight .nb { color: #e0e0e0 } /* Name.Builtin */
-.highlight .nc { color: #a6e22e } /* Name.Class */
-.highlight .no { color: #66d9ef } /* Name.Constant */
-.highlight .nd { color: #a6e22e } /* Name.Decorator */
-.highlight .ne { color: #a6e22e } /* Name.Exception */
-.highlight .nf { color: #a6e22e } /* Name.Function */
-.highlight .nl { color: #e0e0e0 } /* Name.Label */
-.highlight .nn { color: #e0e0e0 } /* Name.Namespace */
-.highlight .nt { color: #f92672 } /* Name.Tag */
-.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #e0e0e0 } /* Variables */
-.highlight .ow { color: #f92672 } /* Operator.Word */
-.highlight .w { color: #e0e0e0 } /* Text.Whitespace */
+.highlight .c { color: #8a9a5b; font-style: italic; } /* Comment - softer green-gray, italic */
+.highlight .err { color: #ff6b6b } /* Error - softer red */
+.highlight .k { color: #ff79c6; font-weight: 600; } /* Keyword - pink, bold */
+.highlight .l { color: #bd93f9 } /* Literal - purple */
+.highlight .n { color: #f8f8f2 } /* Name - bright white */
+.highlight .o { color: #ff79c6 } /* Operator - pink */
+.highlight .p { color: #f8f8f2 } /* Punctuation - bright white */
+.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #8a9a5b; font-style: italic; } /* Comments - softer green-gray, italic */
+.highlight .gd { color: #ff6b6b; background: rgba(255,107,107,0.15); } /* Generic.Deleted - red with bg */
+.highlight .gi { color: #50fa7b; background: rgba(80,250,123,0.15); } /* Generic.Inserted - green with bg */
+.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #8be9fd; font-weight: 600; } /* Keywords - cyan, bold */
+.highlight .ld { color: #f1fa8c } /* Literal.Date - yellow */
+.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #bd93f9 } /* Numbers - purple */
+.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #f1fa8c } /* Strings - yellow */
+.highlight .na { color: #50fa7b } /* Name.Attribute - green */
+.highlight .nb { color: #8be9fd } /* Name.Builtin - cyan */
+.highlight .nc { color: #50fa7b; font-weight: 600; } /* Name.Class - green, bold */
+.highlight .no { color: #8be9fd } /* Name.Constant - cyan */
+.highlight .nd { color: #ffb86c } /* Name.Decorator - orange */
+.highlight .ne { color: #ff79c6 } /* Name.Exception - pink */
+.highlight .nf { color: #50fa7b } /* Name.Function - green */
+.highlight .nl { color: #f8f8f2 } /* Name.Label - white */
+.highlight .nn { color: #f8f8f2 } /* Name.Namespace - white */
+.highlight .nt { color: #ff79c6 } /* Name.Tag - pink */
+.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #f8f8f2 } /* Variables - white */
+.highlight .ow { color: #ff79c6; font-weight: 600; } /* Operator.Word - pink, bold */
+.highlight .w { color: #f8f8f2 } /* Text.Whitespace */
 .user-content { margin: 0; }
 .truncatable { position: relative; }
 .truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
@@ -1478,9 +1583,15 @@ document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
     btn.addEventListener('click', function(e) {
         e.stopPropagation();
         e.preventDefault();
-        const cell = btn.closest('.cell');
-        const content = cell.querySelector('.cell-content');
-        const textToCopy = content.textContent.trim();
+        // Use raw content from data attribute if available, otherwise fall back to textContent
+        var textToCopy;
+        if (btn.dataset.copyContent) {
+            textToCopy = btn.dataset.copyContent;
+        } else {
+            const cell = btn.closest('.cell');
+            const content = cell.querySelector('.cell-content');
+            textToCopy = content.textContent.trim();
+        }
         navigator.clipboard.writeText(textToCopy).then(function() {
             btn.textContent = 'Copied!';
             btn.classList.add('copied');
@@ -1498,6 +1609,15 @@ document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
             e.preventDefault();
             this.click();
         }
+    });
+});
+// Toggle between JSON and Markdown views for tool calls/results
+document.querySelectorAll('.view-toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var container = btn.closest('.tool-use, .tool-result');
+        container.classList.toggle('show-json');
+        btn.textContent = container.classList.contains('show-json') ? 'Markdown' : 'JSON';
     });
 });
 """

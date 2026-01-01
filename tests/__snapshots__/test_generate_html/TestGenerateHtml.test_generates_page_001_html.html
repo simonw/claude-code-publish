@@ -12,14 +12,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.message { margin-bottom: 16px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 .message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
 .message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
 .message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
 .tool-reply .role-label { color: #e65100; }
 .tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
 .tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; border-radius: 12px 12px 0 0; }
 .role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .user .role-label { color: var(--user-border); }
 time { color: var(--text-muted); font-size: 0.8rem; }
@@ -34,16 +34,19 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
-.cell { margin: 8px 0; border-radius: 8px; overflow: hidden; }
-.cell summary { cursor: pointer; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9rem; list-style: none; }
+.cell { margin: 8px 0; border-radius: 8px; overflow: visible; }
+.cell summary { cursor: pointer; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 0.9rem; list-style: none; position: sticky; top: 0; z-index: 10; }
 .cell summary::-webkit-details-marker { display: none; }
 .cell summary::before { content: '▶'; font-size: 0.7rem; margin-right: 8px; transition: transform 0.2s; }
 .cell[open] summary::before { transform: rotate(90deg); }
-.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: #f57c00; border-radius: 8px; }
+.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: #f57c00; border-radius: 8px; transition: background 0.15s, border-color 0.15s; }
+.thinking-cell summary:hover { background: rgba(255, 243, 224, 0.9); border-color: #f57c00; }
 .thinking-cell[open] summary { border-radius: 8px 8px 0 0; }
-.response-cell summary { background: rgba(0,0,0,0.03); border: 1px solid var(--assistant-border); color: var(--text-color); border-radius: 8px; }
+.response-cell summary { background: rgba(0,0,0,0.03); border: 1px solid var(--assistant-border); color: var(--text-color); border-radius: 8px; transition: background 0.15s, border-color 0.15s; }
+.response-cell summary:hover { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.2); }
 .response-cell[open] summary { border-radius: 8px 8px 0 0; }
-.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--tool-border); border-radius: 8px; }
+.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--tool-border); border-radius: 8px; transition: background 0.15s, border-color 0.15s; }
+.tools-cell summary:hover { background: rgba(243, 229, 245, 0.8); border-color: #7b1fa2; }
 .tools-cell[open] summary { border-radius: 8px 8px 0 0; }
 .cell-content { padding: 12px 16px; border: 1px solid rgba(0,0,0,0.1); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg); }
 .thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
@@ -58,16 +61,28 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
 .tool-description p { margin: 0; }
 .tool-input-rendered { font-family: monospace; white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5; }
-.json-key { color: #0d47a1; }
-.json-string-value { color: #1b5e20; }
+.view-toggle-btn { padding: 2px 8px; font-size: 0.7rem; background: rgba(255,255,255,0.8); border: 1px solid rgba(0,0,0,0.15); border-radius: 4px; cursor: pointer; margin-left: auto; transition: background 0.15s; }
+.view-toggle-btn:hover { background: rgba(255,255,255,1); }
+.view-json { display: none; }
+.view-markdown { display: block; }
+.show-json .view-json { display: block; }
+.show-json .view-markdown { display: none; }
+.tool-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.tool-result-label { font-weight: 600; font-size: 0.85rem; color: #2e7d32; display: flex; align-items: center; gap: 6px; }
+.tool-result.tool-error .tool-result-label { color: #c62828; }
+.result-icon { font-size: 1rem; }
+.tool-call-label { font-weight: 600; font-size: 0.8rem; color: var(--tool-border); background: rgba(156, 39, 176, 0.12); padding: 2px 8px; border-radius: 4px; margin-right: 8px; display: inline-flex; align-items: center; gap: 4px; }
+.call-icon { font-size: 0.9rem; }
+.json-key { color: #7b1fa2; font-weight: 600; }
+.json-string-value { color: #0d5c1e; }
 .json-string-value p { display: inline; margin: 0; }
 .json-string-value code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; }
 .json-string-value strong { font-weight: 600; }
 .json-string-value em { font-style: italic; }
 .json-string-value a { color: #1976d2; text-decoration: underline; }
-.json-number { color: #e65100; }
-.json-bool { color: #7b1fa2; }
-.json-null { color: #78909c; }
+.json-number { color: #c62828; font-weight: 500; }
+.json-bool { color: #1565c0; font-weight: 600; }
+.json-null { color: #78909c; font-style: italic; }
 .tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-result.tool-error { background: var(--tool-error-bg); }
 .tool-pair { border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px; margin: 12px 0; background: rgba(156, 39, 176, 0.06); }
@@ -112,33 +127,33 @@ pre.highlight { color: #e0e0e0; }
 code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 pre code { background: none; padding: 0; }
 .highlight .hll { background-color: #49483e }
-.highlight .c { color: #75715e } /* Comment */
-.highlight .err { color: #f92672 } /* Error */
-.highlight .k { color: #66d9ef } /* Keyword */
-.highlight .l { color: #ae81ff } /* Literal */
-.highlight .n { color: #e0e0e0 } /* Name */
-.highlight .o { color: #f92672 } /* Operator */
-.highlight .p { color: #e0e0e0 } /* Punctuation */
-.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #75715e } /* Comments */
-.highlight .gd { color: #f92672 } /* Generic.Deleted */
-.highlight .gi { color: #a6e22e } /* Generic.Inserted */
-.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #66d9ef } /* Keywords */
-.highlight .ld { color: #e6db74 } /* Literal.Date */
-.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #ae81ff } /* Numbers */
-.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #e6db74 } /* Strings */
-.highlight .na { color: #a6e22e } /* Name.Attribute */
-.highlight .nb { color: #e0e0e0 } /* Name.Builtin */
-.highlight .nc { color: #a6e22e } /* Name.Class */
-.highlight .no { color: #66d9ef } /* Name.Constant */
-.highlight .nd { color: #a6e22e } /* Name.Decorator */
-.highlight .ne { color: #a6e22e } /* Name.Exception */
-.highlight .nf { color: #a6e22e } /* Name.Function */
-.highlight .nl { color: #e0e0e0 } /* Name.Label */
-.highlight .nn { color: #e0e0e0 } /* Name.Namespace */
-.highlight .nt { color: #f92672 } /* Name.Tag */
-.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #e0e0e0 } /* Variables */
-.highlight .ow { color: #f92672 } /* Operator.Word */
-.highlight .w { color: #e0e0e0 } /* Text.Whitespace */
+.highlight .c { color: #8a9a5b; font-style: italic; } /* Comment - softer green-gray, italic */
+.highlight .err { color: #ff6b6b } /* Error - softer red */
+.highlight .k { color: #ff79c6; font-weight: 600; } /* Keyword - pink, bold */
+.highlight .l { color: #bd93f9 } /* Literal - purple */
+.highlight .n { color: #f8f8f2 } /* Name - bright white */
+.highlight .o { color: #ff79c6 } /* Operator - pink */
+.highlight .p { color: #f8f8f2 } /* Punctuation - bright white */
+.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #8a9a5b; font-style: italic; } /* Comments - softer green-gray, italic */
+.highlight .gd { color: #ff6b6b; background: rgba(255,107,107,0.15); } /* Generic.Deleted - red with bg */
+.highlight .gi { color: #50fa7b; background: rgba(80,250,123,0.15); } /* Generic.Inserted - green with bg */
+.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #8be9fd; font-weight: 600; } /* Keywords - cyan, bold */
+.highlight .ld { color: #f1fa8c } /* Literal.Date - yellow */
+.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #bd93f9 } /* Numbers - purple */
+.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #f1fa8c } /* Strings - yellow */
+.highlight .na { color: #50fa7b } /* Name.Attribute - green */
+.highlight .nb { color: #8be9fd } /* Name.Builtin - cyan */
+.highlight .nc { color: #50fa7b; font-weight: 600; } /* Name.Class - green, bold */
+.highlight .no { color: #8be9fd } /* Name.Constant - cyan */
+.highlight .nd { color: #ffb86c } /* Name.Decorator - orange */
+.highlight .ne { color: #ff79c6 } /* Name.Exception - pink */
+.highlight .nf { color: #50fa7b } /* Name.Function - green */
+.highlight .nl { color: #f8f8f2 } /* Name.Label - white */
+.highlight .nn { color: #f8f8f2 } /* Name.Namespace - white */
+.highlight .nt { color: #ff79c6 } /* Name.Tag - pink */
+.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #f8f8f2 } /* Variables - white */
+.highlight .ow { color: #ff79c6; font-weight: 600; } /* Operator.Word - pink, bold */
+.highlight .w { color: #f8f8f2 } /* Text.Whitespace */
 .user-content { margin: 0; }
 .truncatable { position: relative; }
 .truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
@@ -229,7 +244,11 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell thinking-cell">
 <summary class="cell-header">
 <span class="cell-label">Thinking</span>
-<button class="cell-copy-btn" aria-label="Copy Thinking" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Thinking" tabindex="0" data-copy-content="The user wants a simple addition function. I should:
+1. Create the function
+2. Add a basic test
+
+This is straightforward.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="thinking"><div class="thinking-label">Thinking</div><p>The user wants a simple addition function. I should:
@@ -240,7 +259,7 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="I&#39;ll create a simple Python function for you. Let me write it now.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>I'll create a simple Python function for you. Let me write it now.</p></div></div>
@@ -248,7 +267,14 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Write
+Input: {
+  &#34;file_path&#34;: &#34;/project/math_utils.py&#34;,
+  &#34;content&#34;: &#34;def add(a: int, b: int) -&gt; int:\n    \&#34;\&#34;\&#34;Add two numbers together.\&#34;\&#34;\&#34;\n    return a + b\n&#34;
+}
+
+Result:
+File written successfully">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair"><div class="file-tool write-tool" data-tool-id="toolu_write_001">
@@ -258,13 +284,13 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Add two numbers together.&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">a</span> <span class="o">+</span> <span class="n">b</span>
 </pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File written successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File written successfully</p></div><div class="view-json"><pre>File written successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-00-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:15.000Z" data-timestamp="2025-12-24T10:00:15.000Z">2025-12-24T10:00:15.000Z</time></a></div><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="I&#39;ve created the `add` function. Now let me run the tests.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>I've created the <code>add</code> function. Now let me run the tests.</p></div></div>
@@ -272,25 +298,40 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
-</summary>
-<div class="cell-content">
-<div class="tool-pair">
-<div class="tool-use bash-tool" data-tool-id="toolu_bash_001">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description"><p>Run pytest on tests directory</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>===== test session starts =====
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;python -m pytest tests/&#34;,
+  &#34;description&#34;: &#34;Run pytest on tests directory&#34;
+}
+
+Result:
+===== test session starts =====
 collected 2 items
 
 tests/test_math.py ..  [100%]
 
-===== 2 passed in 0.05s =====</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+===== 2 passed in 0.05s =====">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="tool-pair">
+<div class="tool-use bash-tool" data-tool-id="toolu_bash_001">
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash</div>
+<div class="tool-description"><p>Run pytest on tests directory</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/</pre></div><button class="expand-btn">Show more</button></div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>===== test session starts =====
+collected 2 items</p>
+<p>tests/test_math.py ..  [100%]</p>
+<p>===== 2 passed in 0.05s =====</p></div><div class="view-json"><pre>===== test session starts =====
+collected 2 items
+
+tests/test_math.py ..  [100%]
+
+===== 2 passed in 0.05s =====</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-00-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:25.000Z" data-timestamp="2025-12-24T10:00:25.000Z">2025-12-24T10:00:25.000Z</time></a></div><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="All tests pass. Let me update the todo list and make a commit.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>All tests pass. Let me update the todo list and make a commit.</p></div></div>
@@ -298,30 +339,71 @@ tests/test_math.py ..  [100%]
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: TodoWrite
+Input: {
+  &#34;todos&#34;: [
+    {
+      &#34;content&#34;: &#34;Create add function&#34;,
+      &#34;status&#34;: &#34;completed&#34;,
+      &#34;activeForm&#34;: &#34;Creating add function&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Write tests&#34;,
+      &#34;status&#34;: &#34;completed&#34;,
+      &#34;activeForm&#34;: &#34;Writing tests&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Run tests&#34;,
+      &#34;status&#34;: &#34;completed&#34;,
+      &#34;activeForm&#34;: &#34;Running tests&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Commit changes&#34;,
+      &#34;status&#34;: &#34;in_progress&#34;,
+      &#34;activeForm&#34;: &#34;Committing changes&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Push to remote&#34;,
+      &#34;status&#34;: &#34;pending&#34;,
+      &#34;activeForm&#34;: &#34;Pushing to remote&#34;
+    }
+  ]
+}
+
+Result:
+Todos updated">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
-<div class="todo-list" data-tool-id="toolu_todo_001"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items"><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Create add function</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Write tests</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Run tests</span></li><li class="todo-item todo-in-progress"><span class="todo-icon">→</span><span class="todo-content">Commit changes</span></li><li class="todo-item todo-pending"><span class="todo-icon">○</span><span class="todo-content">Push to remote</span></li></ul></div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>Todos updated</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+<div class="todo-list" data-tool-id="toolu_todo_001"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items"><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Create add function</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Write tests</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Run tests</span></li><li class="todo-item todo-in-progress"><span class="todo-icon">→</span><span class="todo-content">Commit changes</span></li><li class="todo-item todo-pending"><span class="todo-icon">○</span><span class="todo-content">Push to remote</span></li></ul></div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>Todos updated</p></div><div class="view-json"><pre>Todos updated</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-00-35-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-35-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:35.000Z" data-timestamp="2025-12-24T10:00:35.000Z">2025-12-24T10:00:35.000Z</time></a></div><div class="message-content">
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;git add . &amp;&amp; git commit -m &#39;Add math_utils with add function&#39;&#34;,
+  &#34;description&#34;: &#34;Commit changes&#34;
+}
+
+Result:
+[main abc1234] Add math_utils with add function
+ 1 file changed, 5 insertions(+)">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_002">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash</div>
 <div class="tool-description"><p>Commit changes</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add math_utils with add function&#39;</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><div class="commit-card"><a href="https://github.com/example/project/commit/abc1234"><span class="commit-card-hash">abc1234</span> Add math_utils with add function</a></div><pre>1 file changed, 5 insertions(+)</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><div class="commit-card"><a href="https://github.com/example/project/commit/abc1234"><span class="commit-card-hash">abc1234</span> Add math_utils with add function</a></div><pre>1 file changed, 5 insertions(+)</pre></div><div class="view-json"><pre>[main abc1234] Add math_utils with add function
+ 1 file changed, 5 insertions(+)</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-00-45-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-45-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:45.000Z" data-timestamp="2025-12-24T10:00:45.000Z">2025-12-24T10:00:45.000Z</time></a></div><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="Committed! Now pushing to remote.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>Committed! Now pushing to remote.</p></div></div>
@@ -329,19 +411,36 @@ tests/test_math.py ..  [100%]
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;git push -u origin main&#34;,
+  &#34;description&#34;: &#34;Push to remote&#34;
+}
+
+Result:
+remote: 
+remote: Create a pull request for &#39;main&#39; on GitHub by visiting:
+remote:      https://github.com/example/project/pull/new/main
+remote: 
+To github.com:example/project.git
+   def5678..abc1234  main -&gt; main">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_003">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash</div>
 <div class="tool-description"><p>Push to remote</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git push -u origin main</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>remote: 
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>remote: 
+remote: Create a pull request for 'main' on GitHub by visiting:
+remote:      https://github.com/example/project/pull/new/main
+remote: 
+To github.com:example/project.git
+   def5678..abc1234  main -&gt; main</p></div><div class="view-json"><pre>remote: 
 remote: Create a pull request for &#x27;main&#x27; on GitHub by visiting:
 remote:      https://github.com/example/project/pull/new/main
 remote: 
 To github.com:example/project.git
-   def5678..abc1234  main -&gt; main</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+   def5678..abc1234  main -&gt; main</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message user" id="msg-2025-12-24T10-01-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-01-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:00.000Z" data-timestamp="2025-12-24T10:01:00.000Z">2025-12-24T10:01:00.000Z</time></a></div><div class="message-content">
 <div class="user-content"><p>Now edit the file to add a subtract function</p></div></div></div>
@@ -349,21 +448,41 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Glob
+Input: {
+  &#34;pattern&#34;: &#34;**/*.py&#34;,
+  &#34;path&#34;: &#34;/project&#34;
+}
+
+Result:
+/project/math_utils.py
+/project/tests/test_math.py">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
-<div class="tool-use" data-tool-id="toolu_glob_001"><div class="tool-header"><span class="tool-icon">⚙</span> Glob</div><div class="truncatable"><div class="truncatable-content"><div class="tool-input-rendered">{
+<div class="tool-use" data-tool-id="toolu_glob_001"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">⚙</span> Glob<button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown tool-input-rendered">{
   <span class="json-key">"pattern"</span>: <span class="json-string-value">*<em>/</em>.py</span>,
   <span class="json-key">"path"</span>: <span class="json-string-value">/project</span>
-}</div></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>/project/math_utils.py
-/project/tests/test_math.py</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+}</div><div class="view-json tool-input-rendered"><pre class="json">{
+  &quot;pattern&quot;: &quot;**/*.py&quot;,
+  &quot;path&quot;: &quot;/project&quot;
+}</pre></div></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>/project/math_utils.py
+/project/tests/test_math.py</p></div><div class="view-json"><pre>/project/math_utils.py
+/project/tests/test_math.py</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-01-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:15.000Z" data-timestamp="2025-12-24T10:01:15.000Z">2025-12-24T10:01:15.000Z</time></a></div><div class="message-content">
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Edit
+Input: {
+  &#34;file_path&#34;: &#34;/project/math_utils.py&#34;,
+  &#34;old_string&#34;: &#34;    return a + b\n&#34;,
+  &#34;new_string&#34;: &#34;    return a + b\n\n\ndef subtract(a: int, b: int) -&gt; int:\n    \&#34;\&#34;\&#34;Subtract b from a.\&#34;\&#34;\&#34;\n    return a - b\n&#34;
+}
+
+Result:
+File edited successfully">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair"><div class="file-tool edit-tool" data-tool-id="toolu_edit_001">
@@ -380,13 +499,13 @@ To github.com:example/project.git
     <span class="k">return</span> <span class="n">a</span> <span class="o">-</span> <span class="n">b</span>
 </pre></div>
 </div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File edited successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File edited successfully</p></div><div class="view-json"><pre>File edited successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-01-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:25.000Z" data-timestamp="2025-12-24T10:01:25.000Z">2025-12-24T10:01:25.000Z</time></a></div><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="Added the subtract function. Let me verify with grep.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>Added the subtract function. Let me verify with grep.</p></div></div>
@@ -394,15 +513,27 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Grep
+Input: {
+  &#34;pattern&#34;: &#34;def subtract&#34;,
+  &#34;path&#34;: &#34;/project&#34;,
+  &#34;output_mode&#34;: &#34;content&#34;
+}
+
+Result:
+/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
-<div class="tool-use" data-tool-id="toolu_grep_001"><div class="tool-header"><span class="tool-icon">⚙</span> Grep</div><div class="truncatable"><div class="truncatable-content"><div class="tool-input-rendered">{
+<div class="tool-use" data-tool-id="toolu_grep_001"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">⚙</span> Grep<button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown tool-input-rendered">{
   <span class="json-key">"pattern"</span>: <span class="json-string-value">def subtract</span>,
   <span class="json-key">"path"</span>: <span class="json-string-value">/project</span>,
   <span class="json-key">"output_mode"</span>: <span class="json-string-value">content</span>
-}</div></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+}</div><div class="view-json tool-input-rendered"><pre class="json">{
+  &quot;pattern&quot;: &quot;def subtract&quot;,
+  &quot;path&quot;: &quot;/project&quot;,
+  &quot;output_mode&quot;: &quot;content&quot;
+}</pre></div></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:</p></div><div class="view-json"><pre>/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message user" id="msg-2025-12-24T10-02-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-02-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:00.000Z" data-timestamp="2025-12-24T10:02:00.000Z">2025-12-24T10:02:00.000Z</time></a></div><div class="message-content">
 <div class="user-content"><p>Run the tests again</p></div></div></div>
@@ -410,22 +541,43 @@ To github.com:example/project.git
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;python -m pytest tests/ -v&#34;,
+  &#34;description&#34;: &#34;Run tests with verbose output&#34;
+}
+
+Result:
+Exit code 1
+===== FAILURES =====
+test_subtract - AssertionError: expected 5 but got None">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_004">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash</div>
 <div class="tool-description"><p>Run tests with verbose output</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/ -v</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result tool-error"><div class="truncatable"><div class="truncatable-content"><pre>Exit code 1
+</div><div class="tool-result tool-error"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">✗</span> Error</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>Exit code 1
 ===== FAILURES =====
-test_subtract - AssertionError: expected 5 but got None</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+test_subtract - AssertionError: expected 5 but got None</p></div><div class="view-json"><pre>Exit code 1
+===== FAILURES =====
+test_subtract - AssertionError: expected 5 but got None</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-02-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-02-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:15.000Z" data-timestamp="2025-12-24T10:02:15.000Z">2025-12-24T10:02:15.000Z</time></a></div><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="There&#39;s a test failure. I need to check the test file and fix it.
+
+Here&#39;s some **markdown** content with:
+- A bullet list
+- `inline code`
+- A [link](https://example.com)
+
+```python
+def example():
+    return 42
+```">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>There's a test failure. I need to check the test file and fix it.</p>
@@ -443,7 +595,16 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Edit
+Input: {
+  &#34;file_path&#34;: &#34;/project/tests/test_math.py&#34;,
+  &#34;old_string&#34;: &#34;assert subtract(10, 5) == None&#34;,
+  &#34;new_string&#34;: &#34;assert subtract(10, 5) == 5&#34;,
+  &#34;replace_all&#34;: true
+}
+
+Result:
+File edited successfully">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair"><div class="file-tool edit-tool" data-tool-id="toolu_edit_002">
@@ -455,26 +616,35 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content highlight"><span class="k">assert</span> <span class="n">subtract</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span> <span class="o">==</span> <span class="mi">5</span>
 </pre></div>
 </div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File edited successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File edited successfully</p></div><div class="view-json"><pre>File edited successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-03-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:15.000Z" data-timestamp="2025-12-24T10:03:15.000Z">2025-12-24T10:03:15.000Z</time></a></div><div class="message-content">
 <details class="cell tools-cell">
 <summary class="cell-header">
 <span class="cell-label">Tool Calls (1)</span>
-<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;git add . &amp;&amp; git commit -m &#39;Add subtract function and fix tests&#39;&#34;,
+  &#34;description&#34;: &#34;Commit the fix&#34;
+}
+
+Result:
+[main def5678] Add subtract function and fix tests
+ 2 files changed, 10 insertions(+), 1 deletion(-)">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_005">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash</div>
 <div class="tool-description"><p>Commit the fix</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add subtract function and fix tests&#39;</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><div class="commit-card"><a href="https://github.com/example/project/commit/def5678"><span class="commit-card-hash">def5678</span> Add subtract function and fix tests</a></div><pre>2 files changed, 10 insertions(+), 1 deletion(-)</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><button class="view-toggle-btn" type="button">JSON</button></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><div class="commit-card"><a href="https://github.com/example/project/commit/def5678"><span class="commit-card-hash">def5678</span> Add subtract function and fix tests</a></div><pre>2 files changed, 10 insertions(+), 1 deletion(-)</pre></div><div class="view-json"><pre>[main def5678] Add subtract function and fix tests
+ 2 files changed, 10 insertions(+), 1 deletion(-)</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
 </details></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-03-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:25.000Z" data-timestamp="2025-12-24T10:03:25.000Z">2025-12-24T10:03:25.000Z</time></a></div><div class="message-content">
 <details class="cell response-cell" open>
 <summary class="cell-header">
 <span class="cell-label">Response</span>
-<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0">Copy</button>
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="Done! The subtract function is now working and committed.">Copy</button>
 </summary>
 <div class="cell-content">
 <div class="assistant-text"><p>Done! The subtract function is now working and committed.</p></div></div>
@@ -553,9 +723,15 @@ document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
     btn.addEventListener('click', function(e) {
         e.stopPropagation();
         e.preventDefault();
-        const cell = btn.closest('.cell');
-        const content = cell.querySelector('.cell-content');
-        const textToCopy = content.textContent.trim();
+        // Use raw content from data attribute if available, otherwise fall back to textContent
+        var textToCopy;
+        if (btn.dataset.copyContent) {
+            textToCopy = btn.dataset.copyContent;
+        } else {
+            const cell = btn.closest('.cell');
+            const content = cell.querySelector('.cell-content');
+            textToCopy = content.textContent.trim();
+        }
         navigator.clipboard.writeText(textToCopy).then(function() {
             btn.textContent = 'Copied!';
             btn.classList.add('copied');
@@ -573,6 +749,15 @@ document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
             e.preventDefault();
             this.click();
         }
+    });
+});
+// Toggle between JSON and Markdown views for tool calls/results
+document.querySelectorAll('.view-toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var container = btn.closest('.tool-use, .tool-result');
+        container.classList.toggle('show-json');
+        btn.textContent = container.classList.contains('show-json') ? 'Markdown' : 'JSON';
     });
 });
 </script>
