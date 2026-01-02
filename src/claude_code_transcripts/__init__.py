@@ -139,6 +139,8 @@ def _get_jsonl_summary(filepath, max_length=200):
                     continue
                 try:
                     obj = json.loads(line)
+
+                    # Claude Code format: {"type": "user", "message": {...}}
                     if (
                         obj.get("type") == "user"
                         and not obj.get("isMeta")
@@ -150,6 +152,25 @@ def _get_jsonl_summary(filepath, max_length=200):
                             if len(text) > max_length:
                                 return text[: max_length - 3] + "..."
                             return text
+
+                    # Codex CLI format: {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [...]}}
+                    elif obj.get("type") == "response_item":
+                        payload = obj.get("payload", {})
+                        if (
+                            payload.get("type") == "message"
+                            and payload.get("role") == "user"
+                            and payload.get("content")
+                        ):
+                            content_blocks = payload["content"]
+                            # Extract text from Codex CLI content blocks
+                            if isinstance(content_blocks, list):
+                                for block in content_blocks:
+                                    if block.get("type") == "input_text":
+                                        text = block.get("text", "")
+                                        if text and not text.startswith("<"):
+                                            if len(text) > max_length:
+                                                return text[: max_length - 3] + "..."
+                                            return text
                 except json.JSONDecodeError:
                     continue
     except Exception:
@@ -177,6 +198,53 @@ def find_local_sessions(folder, limit=10):
         if summary.lower() == "warmup" or summary == "(no summary)":
             continue
         results.append((f, summary))
+
+    # Sort by modification time, most recent first
+    results.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+    return results[:limit]
+
+
+def find_combined_sessions(claude_dir=None, codex_dir=None, limit=10):
+    """Find recent sessions from both Claude Code and Codex CLI directories.
+
+    Args:
+        claude_dir: Path to Claude Code projects folder (default: ~/.claude/projects)
+        codex_dir: Path to Codex CLI sessions folder (default: ~/.codex/sessions)
+        limit: Maximum number of sessions to return (default: 10)
+
+    Returns:
+        List of (Path, summary, source) tuples sorted by modification time (newest first).
+        source is either "Claude" or "Codex".
+    """
+    if claude_dir is None:
+        claude_dir = Path.home() / ".claude" / "projects"
+    if codex_dir is None:
+        codex_dir = Path.home() / ".codex" / "sessions"
+
+    claude_dir = Path(claude_dir)
+    codex_dir = Path(codex_dir)
+
+    results = []
+
+    # Find Claude Code sessions
+    if claude_dir.exists():
+        for f in claude_dir.glob("**/*.jsonl"):
+            if f.name.startswith("agent-"):
+                continue
+            summary = get_session_summary(f)
+            if summary.lower() == "warmup" or summary == "(no summary)":
+                continue
+            results.append((f, summary, "Claude"))
+
+    # Find Codex CLI sessions
+    if codex_dir.exists():
+        for f in codex_dir.glob("**/*.jsonl"):
+            if f.name.startswith("agent-"):
+                continue
+            summary = get_session_summary(f)
+            if summary.lower() == "warmup" or summary == "(no summary)":
+                continue
+            results.append((f, summary, "Codex"))
 
     # Sort by modification time, most recent first
     results.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
@@ -1656,16 +1724,19 @@ def cli():
     help="Maximum number of sessions to show (default: 10)",
 )
 def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit):
-    """Select and convert a local Claude Code session to HTML."""
+    """Select and convert a local Claude Code or Codex CLI session to HTML."""
     projects_folder = Path.home() / ".claude" / "projects"
+    codex_folder = Path.home() / ".codex" / "sessions"
 
-    if not projects_folder.exists():
-        click.echo(f"Projects folder not found: {projects_folder}")
-        click.echo("No local Claude Code sessions available.")
+    # Check if at least one directory exists
+    if not projects_folder.exists() and not codex_folder.exists():
+        click.echo(f"Neither Claude Code nor Codex CLI sessions found.")
+        click.echo(f"  - Claude Code: {projects_folder}")
+        click.echo(f"  - Codex CLI: {codex_folder}")
         return
 
     click.echo("Loading local sessions...")
-    results = find_local_sessions(projects_folder, limit=limit)
+    results = find_combined_sessions(limit=limit)
 
     if not results:
         click.echo("No local sessions found.")
@@ -1673,15 +1744,16 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
 
     # Build choices for questionary
     choices = []
-    for filepath, summary in results:
+    for filepath, summary, source in results:
         stat = filepath.stat()
         mod_time = datetime.fromtimestamp(stat.st_mtime)
         size_kb = stat.st_size / 1024
         date_str = mod_time.strftime("%Y-%m-%d %H:%M")
         # Truncate summary if too long
-        if len(summary) > 50:
-            summary = summary[:47] + "..."
-        display = f"{date_str}  {size_kb:5.0f} KB  {summary}"
+        if len(summary) > 45:
+            summary = summary[:42] + "..."
+        # Add source label
+        display = f"{date_str}  {size_kb:5.0f} KB  [{source:6s}]  {summary}"
         choices.append(questionary.Choice(title=display, value=filepath))
 
     selected = questionary.select(
