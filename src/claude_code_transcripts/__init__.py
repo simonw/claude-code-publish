@@ -75,6 +75,20 @@ def extract_text_from_content(content):
     return ""
 
 
+def _is_preamble_text(text):
+    if not isinstance(text, str):
+        return False
+    stripped = text.lstrip()
+    if not stripped:
+        return False
+    if stripped.startswith("<"):
+        return True
+    lowered = stripped.lower()
+    return lowered.startswith("# agents.md instructions") or lowered.startswith(
+        "agents.md instructions"
+    )
+
+
 # Module-level variable for GitHub repo (set by generate_html)
 _github_repo = None
 
@@ -103,7 +117,7 @@ def get_session_summary(filepath, max_length=200):
                     msg = entry.get("message", {})
                     content = msg.get("content", "")
                     text = extract_text_from_content(content)
-                    if text:
+                    if text and not _is_preamble_text(text):
                         if len(text) > max_length:
                             return text[: max_length - 3] + "..."
                         return text
@@ -148,7 +162,7 @@ def _get_jsonl_summary(filepath, max_length=200):
                     ):
                         content = obj["message"]["content"]
                         text = extract_text_from_content(content)
-                        if text and not text.startswith("<"):
+                        if text and not _is_preamble_text(text):
                             if len(text) > max_length:
                                 return text[: max_length - 3] + "..."
                             return text
@@ -167,7 +181,7 @@ def _get_jsonl_summary(filepath, max_length=200):
                                 for block in content_blocks:
                                     if block.get("type") == "input_text":
                                         text = block.get("text", "")
-                                        if text and not text.startswith("<"):
+                                        if text and not _is_preamble_text(text):
                                             if len(text) > max_length:
                                                 return text[: max_length - 3] + "..."
                                             return text
@@ -182,7 +196,7 @@ def _get_jsonl_summary(filepath, max_length=200):
                             for block in content_blocks:
                                 if block.get("type") in ("input_text", "text"):
                                     text = block.get("text", "")
-                                    if text and not text.startswith("<"):
+                                    if text and not _is_preamble_text(text):
                                         if len(text) > max_length:
                                             return text[: max_length - 3] + "..."
                                         return text

@@ -1113,6 +1113,16 @@ class TestGetSessionSummary:
         assert len(summary) <= 100
         assert summary.endswith("...")
 
+    def test_skips_agents_preamble_in_codex_messages(self, tmp_path):
+        """Test skipping AGENTS.md preamble in Codex CLI messages."""
+        jsonl_file = tmp_path / "codex.jsonl"
+        jsonl_file.write_text(
+            '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/test/repo"}]}}\n'
+            '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Real question"}]}}\n'
+        )
+        summary = get_session_summary(jsonl_file)
+        assert summary == "Real question"
+
 
 class TestFindLocalSessions:
     """Tests for find_local_sessions which discovers local JSONL files."""
