@@ -131,6 +131,43 @@ class TestRenderFunctions:
         assert render_markdown_text("") == ""
         assert render_markdown_text(None) == ""
 
+    def test_render_markdown_strips_style_tags(self):
+        """Test that <style> tags in markdown content are stripped."""
+        # This prevents CSS in transcript content from affecting page styles
+        text = "Here is some CSS:\n<style>:root { --bg: red; }</style>"
+        result = render_markdown_text(text)
+        assert "<style>" not in result
+        assert "</style>" not in result
+
+    def test_render_markdown_strips_script_tags(self):
+        """Test that <script> tags in markdown content are stripped."""
+        # This prevents JS in transcript content from executing
+        text = "Here is some code:\n<script>alert('xss')</script>"
+        result = render_markdown_text(text)
+        assert "<script>" not in result
+        assert "</script>" not in result
+
+    def test_render_markdown_strips_form_elements(self):
+        """Test that form elements in markdown content are stripped."""
+        # This prevents forms/inputs from being rendered
+        text = (
+            "Here is a form:\n<form><input type='text'><button>Submit</button></form>"
+        )
+        result = render_markdown_text(text)
+        assert "<form>" not in result
+        assert "<input" not in result
+        assert "<button>" not in result
+
+    def test_render_markdown_allows_safe_tags(self):
+        """Test that safe markdown tags are preserved."""
+        text = "**bold** and `code` and [link](http://example.com)"
+        result = render_markdown_text(text)
+        assert "<strong>bold</strong>" in result
+        assert "<code>code</code>" in result
+        # nh3 adds rel="noopener noreferrer" to links for security
+        assert '<a href="http://example.com"' in result
+        assert ">link</a>" in result
+
     def test_format_json(self, snapshot_html):
         """Test JSON formatting."""
         result = format_json({"key": "value", "number": 42, "nested": {"a": 1}})
@@ -435,8 +472,8 @@ class TestInjectGistPreviewJs:
     def test_gist_preview_js_handles_fragment_navigation(self):
         """Test that GIST_PREVIEW_JS includes fragment navigation handling.
 
-        When accessing a gistpreview URL with a fragment like:
-        https://gistpreview.github.io/?GIST_ID/page-001.html#msg-2025-12-26T15-30-45-910Z
+        When accessing a gisthost URL with a fragment like:
+        https://gisthost.github.io/?GIST_ID/page-001.html#msg-2025-12-26T15-30-45-910Z
 
         The content loads dynamically, so the browser's native fragment
         navigation fails because the element doesn't exist yet. The JS
@@ -449,6 +486,11 @@ class TestInjectGistPreviewJs:
         )
         # The JS should scroll to the element
         assert "scrollIntoView" in GIST_PREVIEW_JS
+
+    def test_gist_preview_js_supports_both_hosts(self):
+        """Test that GIST_PREVIEW_JS supports both gisthost and gistpreview domains."""
+        assert "gisthost.github.io" in GIST_PREVIEW_JS
+        assert "gistpreview.github.io" in GIST_PREVIEW_JS
 
     def test_skips_files_without_body(self, output_dir):
         """Test that files without </body> are not modified."""
@@ -664,7 +706,7 @@ class TestSessionGistOption:
 
         assert result.exit_code == 0
         assert (output_dir / "index.html").exists()
-        # Verify JS was injected (checks for both domains for backwards compatibility)
+        # Verify JS was injected (supports both gisthost and gistpreview)
         index_content = (output_dir / "index.html").read_text(encoding="utf-8")
         assert "gisthost.github.io" in index_content
 
@@ -1077,6 +1119,58 @@ class TestParseSessionFile:
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
         assert "hello world" in index_html.lower()
         assert index_html == snapshot_html
+
+    def test_jsonl_preserves_tool_use_result(self, tmp_path):
+        """Test that toolUseResult field is preserved in parsed entries.
+
+        This is needed for originalFile content used in remote session code reconstruction.
+        """
+        # Create a JSONL file with toolUseResult
+        jsonl_content = """{"type":"user","timestamp":"2025-01-01T10:00:00Z","message":{"role":"user","content":"Edit the file"}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_001","name":"Edit","input":{"file_path":"/test.py","old_string":"old","new_string":"new"}}]}}
+{"type":"user","timestamp":"2025-01-01T10:00:10Z","toolUseResult":{"originalFile":"original content here","filePath":"/test.py"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_001","content":"File edited"}]}}"""
+
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(jsonl_content)
+
+        result = parse_session_file(jsonl_file)
+
+        # Find the tool result entry (last user message)
+        tool_result_entry = [
+            e
+            for e in result["loglines"]
+            if e["type"] == "user" and "tool_result" in str(e)
+        ][-1]
+
+        # toolUseResult should be preserved
+        assert "toolUseResult" in tool_result_entry
+        assert (
+            tool_result_entry["toolUseResult"]["originalFile"]
+            == "original content here"
+        )
+        assert tool_result_entry["toolUseResult"]["filePath"] == "/test.py"
+
+    def test_jsonl_preserves_is_meta(self, tmp_path):
+        """Test that isMeta field is preserved in parsed entries.
+
+        Skill expansion messages have isMeta=True and should be treated as
+        continuations for prompt numbering.
+        """
+        jsonl_content = """{"type":"user","timestamp":"2025-01-01T10:00:00Z","message":{"role":"user","content":"Use the test skill"}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Invoking skill..."}]}}
+{"type":"user","timestamp":"2025-01-01T10:00:10Z","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /path/to/skill"}]}}
+{"type":"assistant","timestamp":"2025-01-01T10:00:15Z","message":{"role":"assistant","content":[{"type":"text","text":"Working on it..."}]}}"""
+
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(jsonl_content)
+
+        result = parse_session_file(jsonl_file)
+
+        # Find the skill expansion entry (isMeta=True)
+        meta_entry = [e for e in result["loglines"] if e.get("isMeta")]
+        assert len(meta_entry) == 1
+        assert meta_entry[0]["isMeta"] is True
+        assert "Base directory for this skill" in str(meta_entry[0]["message"])
 
 
 class TestGetSessionSummary:
@@ -1497,6 +1591,43 @@ class TestOutputAutoOption:
         assert (expected_dir / "index.html").exists()
 
 
+class TestGistCreation:
+    """Tests for gist creation."""
+
+    def test_creates_gist_with_all_files(self, output_dir, monkeypatch):
+        """Test that create_gist uploads all files to a single gist."""
+        import subprocess
+
+        # Create test HTML files
+        (output_dir / "index.html").write_text(
+            "<html><head></head><body>Index</body></html>", encoding="utf-8"
+        )
+        (output_dir / "page-001.html").write_text(
+            "<html><head></head><body>Page</body></html>", encoding="utf-8"
+        )
+
+        # Track subprocess calls
+        subprocess_calls = []
+
+        def mock_run(cmd, *args, **kwargs):
+            subprocess_calls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="https://gist.github.com/testuser/abc123def456\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+
+        gist_id, gist_url = create_gist(output_dir)
+
+        # Should call gh gist create once with all files
+        assert len(subprocess_calls) == 1
+        assert subprocess_calls[0][0:3] == ["gh", "gist", "create"]
+        assert gist_id == "abc123def456"
+
+
 class TestSearchFeature:
     """Tests for the search feature on index.html pages."""
 
@@ -1531,6 +1662,7 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # For small sessions, JavaScript is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # JavaScript should handle DOMParser for parsing fetched pages
@@ -1545,25 +1677,26 @@ class TestSearchFeature:
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # For small sessions, CSS is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # CSS should style the search box
-        assert "#search-box" in index_html or ".search-box" in index_html
+        assert "#search-box" in index_html
         # CSS should style the search modal
-        assert "#search-modal" in index_html or ".search-modal" in index_html
+        assert "#search-modal" in index_html
 
     def test_search_box_hidden_by_default_in_css(self, output_dir):
         """Test that search box is hidden by default (for progressive enhancement)."""
         fixture_path = Path(__file__).parent / "sample_session.json"
         generate_html(fixture_path, output_dir, github_repo="example/project")
 
+        # For small sessions, CSS is inlined in HTML
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Search box should be hidden by default in CSS
         # JavaScript will show it when loaded
-        assert "search-box" in index_html
-        # The JS should show the search box
-        assert "style.display" in index_html or "classList" in index_html
+        assert "#search-box" in index_html
+        assert "display: none" in index_html
 
     def test_search_total_pages_available(self, output_dir):
         """Test that total_pages is available to JavaScript for fetching."""
@@ -1573,4 +1706,4 @@ class TestSearchFeature:
         index_html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         # Total pages should be embedded for JS to know how many pages to fetch
-        assert "totalPages" in index_html or "total_pages" in index_html
+        assert "TOTAL_PAGES" in index_html

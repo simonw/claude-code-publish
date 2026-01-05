@@ -11,9 +11,11 @@ requires-python = ">=3.10"
 dependencies = [
     "click",
     "click-default-group",
+    "gitpython",
     "httpx",
     "jinja2",
     "markdown",
+    "nh3>=0.3.2",
     "questionary",
 ]
 

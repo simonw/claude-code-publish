@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Claude Code transcript - Code{% endblock %}
+
+{% block header_title %}<a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a>{% endblock %}
+
+{% block content %}
+        <div class="code-viewer three-pane">
+            <div class="file-tree-panel" id="file-tree-panel">
+                <div class="panel-header">
+                    <h3>Files Modified</h3>
+                    <button class="collapse-btn" id="collapse-file-tree" title="Collapse file tree">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                    </button>
+                </div>
+                <ul class="file-tree" id="file-tree">
+                    {{ file_tree_html|safe }}
+                </ul>
+            </div>
+
+            <div class="resize-handle" id="resize-left"></div>
+
+            <div class="code-panel" id="code-panel">
+                <div id="code-header">
+                    <span id="current-file-path">Loading...</span>
+                </div>
+                <div id="code-content">
+                    <div class="initial-loading">
+                        <p>Loading code viewer...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="resize-handle" id="resize-right"></div>
+
+            <div class="transcript-panel" id="transcript-panel">
+                <h3>Transcript</h3>
+                <div id="pinned-user-message" class="pinned-user-message" style="display: none;">
+                    <div class="pinned-user-message-inner">
+                        <div class="pinned-user-message-label">User prompt:</div>
+                        <div class="pinned-user-content"></div>
+                    </div>
+                </div>
+                <div id="transcript-content">
+                    <!-- Messages rendered dynamically via JS for performance -->
+                    <div id="transcript-sentinel"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Inline data for local file:// access (removed for gist version) -->
+        {{ inline_data_script|safe }}
+
+        <!-- CodeMirror 6 from CDN -->
+        <script type="module">
+{{ code_view_js|safe }}
+        </script>
+{%- endblock %}

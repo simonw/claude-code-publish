@@ -1,5 +1,5 @@
 (function() {
-    var totalPages = {{ total_pages }};
+    var totalPages = window.TOTAL_PAGES || 1;
     var searchBox = document.getElementById('search-box');
     var searchInput = document.getElementById('search-input');
     var searchBtn = document.getElementById('search-btn');
@@ -57,7 +57,7 @@
 
     function getPageLinkUrl(pageFile) {
         if (isGistPreview && gistId) {
-            // Use gistpreview URL format for navigation links
+            // Use gisthost/gistpreview URL format for navigation links
             return '?' + gistId + '/' + pageFile;
         }
         return pageFile;
@@ -139,7 +139,7 @@
         });
     }
 
-    function processPage(pageFile, html, query) {
+    function processPageHtml(pageFile, html, query) {
         var parser = new DOMParser();
         var doc = parser.parseFromString(html, 'text/html');
         var resultsFromPage = 0;
@@ -175,6 +175,14 @@
         return resultsFromPage;
     }
 
+    async function fetchPageContent(pageNum) {
+        var pageFile = 'page-' + String(pageNum).padStart(3, '0') + '.html';
+        var response = await fetch(getPageFetchUrl(pageFile));
+        if (!response.ok) throw new Error('Failed to fetch');
+        var html = await response.text();
+        return { pageFile: pageFile, html: html };
+    }
+
     async function performSearch(query) {
         if (!query.trim()) {
             searchStatus.textContent = 'Enter a search term';
@@ -185,7 +193,7 @@
         searchResults.innerHTML = '';
         searchStatus.textContent = 'Searching...';
 
-        // Load gist info if on gistpreview (needed for constructing URLs)
+        // Load gist info if on gisthost/gistpreview (needed for constructing URLs)
         if (isGistPreview && !gistInfoLoaded) {
             searchStatus.textContent = 'Loading gist info...';
             await loadGistInfo();
@@ -198,29 +206,22 @@
         var resultsFound = 0;
         var pagesSearched = 0;
 
-        // Build list of pages to fetch
-        var pagesToFetch = [];
-        for (var i = 1; i <= totalPages; i++) {
-            pagesToFetch.push('page-' + String(i).padStart(3, '0') + '.html');
-        }
-
         searchStatus.textContent = 'Searching...';
 
         // Process pages in batches of 3, but show results immediately as each completes
         var batchSize = 3;
-        for (var i = 0; i < pagesToFetch.length; i += batchSize) {
-            var batch = pagesToFetch.slice(i, i + batchSize);
+        for (var i = 1; i <= totalPages; i += batchSize) {
+            var batch = [];
+            for (var j = i; j < i + batchSize && j <= totalPages; j++) {
+                batch.push(j);
+            }
 
             // Create promises that process results immediately when each fetch completes
-            var promises = batch.map(function(pageFile) {
-                return fetch(getPageFetchUrl(pageFile))
-                    .then(function(response) {
-                        if (!response.ok) throw new Error('Failed to fetch');
-                        return response.text();
-                    })
-                    .then(function(html) {
+            var promises = batch.map(function(pageNum) {
+                return fetchPageContent(pageNum)
+                    .then(function(result) {
                         // Process and display results immediately
-                        var count = processPage(pageFile, html, query);
+                        var count = processPageHtml(result.pageFile, result.html, query);
                         resultsFound += count;
                         pagesSearched++;
                         searchStatus.textContent = 'Found ' + resultsFound + ' result(s) in ' + pagesSearched + '/' + totalPages + ' pages...';

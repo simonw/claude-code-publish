@@ -9,14 +9,19 @@ import shutil
 import subprocess
 import tempfile
 import webbrowser
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Tuple, Dict, Any
 
 import click
 from click_default_group import DefaultGroup
+from git import Repo
+from git.exc import InvalidGitRepositoryError
 import httpx
 from jinja2 import Environment, PackageLoader
 import markdown
+import nh3
 import questionary
 
 # Set up Jinja2 environment
@@ -47,6 +52,101 @@ PROMPTS_PER_PAGE = 5
 LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
+
+
+# Import code viewer functionality from separate module
+from claude_code_transcripts.code_view import (
+    FileOperation,
+    FileState,
+    CodeViewData,
+    BlameRange,
+    OP_WRITE,
+    OP_EDIT,
+    OP_DELETE,
+    extract_file_operations,
+    filter_deleted_files,
+    normalize_file_paths,
+    find_git_repo_root,
+    find_commit_before_timestamp,
+    build_file_history_repo,
+    get_file_blame_ranges,
+    get_file_content_from_repo,
+    build_file_tree,
+    reconstruct_file_with_blame,
+    build_file_states,
+    render_file_tree_html,
+    file_state_to_dict,
+    generate_code_view_html,
+    build_msg_to_user_html,
+)
+
+
+def extract_github_repo_from_url(url: str) -> Optional[str]:
+    """Extract 'owner/name' from various GitHub URL formats.
+
+    Handles:
+    - https://github.com/owner/repo
+    - https://github.com/owner/repo.git
+    - git@github.com:owner/repo.git
+
+    Args:
+        url: GitHub URL or git remote URL.
+
+    Returns:
+        Repository identifier as 'owner/name', or None if not found.
+    """
+    match = re.search(r"github\.com[:/]([^/]+/[^/?#.]+)", url)
+    if match:
+        repo = match.group(1)
+        return repo[:-4] if repo.endswith(".git") else repo
+    return None
+
+
+def parse_repo_value(repo: Optional[str]) -> Tuple[Optional[str], Optional[Path]]:
+    """Parse --repo value to extract GitHub repo name and/or local path.
+
+    Args:
+        repo: The --repo value (could be path, URL, or owner/name).
+
+    Returns:
+        Tuple of (github_repo, local_path):
+        - github_repo: "owner/name" string for commit links, or None
+        - local_path: Path to local git repo for file history, or None
+    """
+    if not repo:
+        return None, None
+
+    # Check if it's a local path that exists
+    repo_path = Path(repo)
+    if repo_path.exists() and (repo_path / ".git").exists():
+        # Try to extract GitHub remote URL
+        github_repo = None
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                github_repo = extract_github_repo_from_url(result.stdout.strip())
+        except Exception:
+            pass
+        return github_repo, repo_path
+
+    # Check if it's a GitHub URL
+    if is_url(repo):
+        github_repo = extract_github_repo_from_url(repo)
+        if github_repo:
+            return github_repo, None
+        # Not a GitHub URL, ignore
+        return None, None
+
+    # Assume it's owner/name format
+    if "/" in repo and not repo.startswith("/"):
+        return repo, None
+
+    return None, None
 
 
 def extract_text_from_content(content):
@@ -401,8 +501,6 @@ def _generate_project_index(project, output_dir):
         project_name=project["name"],
         sessions=sessions_data,
         session_count=len(sessions_data),
-        css=CSS,
-        js=JS,
     )
 
     output_path = output_dir / "index.html"
@@ -440,8 +538,6 @@ def _generate_master_index(projects, output_dir):
         projects=projects_data,
         total_projects=len(projects),
         total_sessions=total_sessions,
-        css=CSS,
-        js=JS,
     )
 
     output_path = output_dir / "index.html"
@@ -491,6 +587,14 @@ def _parse_jsonl_file(filepath):
                 # Preserve isCompactSummary if present
                 if obj.get("isCompactSummary"):
                     entry["isCompactSummary"] = True
+
+                # Preserve isMeta if present (skill expansions, not real user prompts)
+                if obj.get("isMeta"):
+                    entry["isMeta"] = True
+
+                # Preserve toolUseResult if present (needed for originalFile content)
+                if "toolUseResult" in obj:
+                    entry["toolUseResult"] = obj["toolUseResult"]
 
                 loglines.append(entry)
             except json.JSONDecodeError:
@@ -629,10 +733,58 @@ def format_json(obj):
         return f"<pre>{html.escape(str(obj))}</pre>"
 
 
+# Allowed HTML tags for markdown content - anything else gets escaped
+ALLOWED_TAGS = {
+    # Block elements
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "pre",
+    "hr",
+    # Lists
+    "ul",
+    "ol",
+    "li",
+    # Inline elements
+    "a",
+    "strong",
+    "b",
+    "em",
+    "i",
+    "code",
+    "br",
+    "span",
+    # Tables
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+}
+
+ALLOWED_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "code": {"class"},  # For syntax highlighting
+    "pre": {"class"},
+    "span": {"class"},
+    "td": {"align"},
+    "th": {"align"},
+}
+
+
 def render_markdown_text(text):
     if not text:
         return ""
-    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+    raw_html = markdown.markdown(text, extensions=["fenced_code", "tables"])
+    # Sanitize HTML to only allow safe tags - escapes everything else
+    return nh3.clean(raw_html, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES)
 
 
 def is_json_like(text):
@@ -852,7 +1004,7 @@ def is_tool_result_message(message_data):
     )
 
 
-def render_message(log_type, message_json, timestamp):
+def render_message(log_type, message_json, timestamp, prompt_num=None):
     if not message_json:
         return ""
     try:
@@ -865,7 +1017,8 @@ def render_message(log_type, message_json, timestamp):
         if is_tool_result_message(message_data):
             role_class, role_label = "tool-reply", "Tool reply"
         else:
-            role_class, role_label = "user", "User"
+            role_class = "user"
+            role_label = f"User Prompt #{prompt_num}" if prompt_num else "User"
     elif log_type == "assistant":
         content_html = render_assistant_message(message_data)
         role_class, role_label = "assistant", "Assistant"
@@ -1082,7 +1235,7 @@ GIST_PREVIEW_JS = r"""
     }
 
     // Use MutationObserver to catch dynamically added content
-    // gistpreview.github.io may add content after initial load
+    // gisthost/gistpreview may add content after initial load
     var observer = new MutationObserver(function(mutations) {
         mutations.forEach(function(mutation) {
             mutation.addedNodes.forEach(function(node) {
@@ -1104,6 +1257,70 @@ GIST_PREVIEW_JS = r"""
         });
     });
 
+    // Load JS from gist (relative script srcs don't work on gistpreview)
+    document.querySelectorAll('script[src]').forEach(function(script) {
+        var src = script.getAttribute('src');
+        if (src.startsWith('http')) return; // Already absolute
+        var jsUrl = 'https://gist.githubusercontent.com/raw/' + gistId + '/' + src;
+        fetch(jsUrl)
+            .then(function(r) { if (!r.ok) throw new Error('Failed'); return r.text(); })
+            .then(function(js) {
+                var newScript = document.createElement('script');
+                newScript.textContent = js;
+                document.body.appendChild(newScript);
+            })
+            .catch(function(e) { console.error('Failed to load JS:', src, e); });
+    });
+
+    // Rewrite relative links to work with gist preview URL format
+    function rewriteLinks(root) {
+        var scope = root || document;
+        var links = [];
+
+        // Check if the root itself is a link (for MutationObserver calls)
+        if (scope.matches && scope.matches('a[href]')) {
+            links.push(scope);
+        }
+
+        // Also get all descendant links
+        scope.querySelectorAll('a[href]').forEach(function(link) {
+            links.push(link);
+        });
+
+        links.forEach(function(link) {
+            var href = link.getAttribute('href');
+            // Skip already-rewritten links (issue #26 fix)
+            if (href.startsWith('?')) return;
+            // Skip external links and anchors
+            if (href.startsWith('http') || href.startsWith('#') || href.startsWith('//')) return;
+            // Handle anchor in relative URL (e.g., page-001.html#msg-123)
+            var parts = href.split('#');
+            var filename = parts[0];
+            var anchor = parts.length > 1 ? '#' + parts[1] : '';
+            link.setAttribute('href', '?' + gistId + '/' + filename + anchor);
+        });
+    }
+
+    // Run immediately
+    rewriteLinks();
+
+    // Also run on DOMContentLoaded in case DOM isn't ready yet
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { rewriteLinks(); });
+    }
+
+    // Use MutationObserver to catch dynamically added content
+    // gistpreview.github.io may add content after initial load
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1) { // Element node
+                    rewriteLinks(node);
+                }
+            });
+        });
+    });
+
     // Start observing once body exists
     function startObserving() {
         if (document.body) {
@@ -1113,6 +1330,18 @@ GIST_PREVIEW_JS = r"""
         }
     }
     startObserving();
+
+    // Execute module scripts that were injected via innerHTML
+    // (browsers don't execute scripts added via innerHTML for security)
+    document.querySelectorAll('script[type="module"]').forEach(function(script) {
+        if (script.src) return; // Already has src, skip
+        var blob = new Blob([script.textContent], { type: 'application/javascript' });
+        var url = URL.createObjectURL(blob);
+        var newScript = document.createElement('script');
+        newScript.type = 'module';
+        newScript.src = url;
+        document.body.appendChild(newScript);
+    });
 
     // Handle fragment navigation after dynamic content loads
     // gisthost.github.io/gistpreview.github.io loads content dynamically, so the browser's
@@ -1142,10 +1371,29 @@ GIST_PREVIEW_JS = r"""
 
 
 def inject_gist_preview_js(output_dir):
-    """Inject gist preview JavaScript into all HTML files in the output directory."""
+    """Inject gist preview JavaScript into all HTML files in the output directory.
+
+    Also removes inline CODE_DATA from code.html since gist version fetches it separately.
+
+    Args:
+        output_dir: Path to the output directory containing HTML files.
+    """
     output_dir = Path(output_dir)
     for html_file in output_dir.glob("*.html"):
         content = html_file.read_text(encoding="utf-8")
+
+        # For code.html, remove the inline CODE_DATA script
+        # (gist version fetches code-data.json instead)
+        if html_file.name == "code.html":
+            import re
+
+            content = re.sub(
+                r"<script>window\.CODE_DATA = .*?;</script>\s*",
+                "",
+                content,
+                flags=re.DOTALL,
+            )
+
         # Insert the gist preview JS before the closing </body> tag
         if "</body>" in content:
             content = content.replace(
@@ -1154,22 +1402,49 @@ def inject_gist_preview_js(output_dir):
             html_file.write_text(content, encoding="utf-8")
 
 
-def create_gist(output_dir, public=False):
+def create_gist(output_dir, public=False, description=None):
     """Create a GitHub gist from the HTML files in output_dir.
 
-    Returns the gist ID on success, or raises click.ClickException on failure.
+    Args:
+        output_dir: Directory containing the HTML files to upload.
+        public: Whether to create a public gist.
+        description: Optional description for the gist.
+
+    Returns (gist_id, gist_url) tuple.
+    Raises click.ClickException on failure.
+
+    Note: This function calls inject_gist_preview_js internally. Caller should NOT
+    call it separately.
     """
     output_dir = Path(output_dir)
     html_files = list(output_dir.glob("*.html"))
     if not html_files:
         raise click.ClickException("No HTML files found to upload to gist.")
 
-    # Build the gh gist create command
-    # gh gist create file1 file2 ... --public/--private
+    # Collect all files (HTML + CSS/JS + data)
+    css_js_files = [
+        output_dir / f
+        for f in ["styles.css", "main.js", "search.js"]
+        if (output_dir / f).exists()
+    ]
+    data_files = []
+    code_data = output_dir / "code-data.json"
+    if code_data.exists():
+        data_files.append(code_data)
+
+    all_files = sorted(html_files) + css_js_files + data_files
+
+    # Inject gist preview JS into HTML files
+    inject_gist_preview_js(output_dir)
+
+    # Create gist with all files
+    click.echo(f"Creating gist with {len(all_files)} files...")
     cmd = ["gh", "gist", "create"]
-    cmd.extend(str(f) for f in sorted(html_files))
+    cmd.extend(str(f) for f in all_files)
     if public:
         cmd.append("--public")
+    if description:
+        cmd.extend(["--desc", description])
 
     try:
         result = subprocess.run(
@@ -1201,35 +1476,22 @@ def generate_index_pagination_html(total_pages):
     return _macros.index_pagination(total_pages)
 
 
-def generate_html(json_path, output_dir, github_repo=None):
-    output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
+def build_conversations(loglines):
+    """Build conversation dicts from loglines.
 
-    # Load session file (supports both JSON and JSONL)
-    data = parse_session_file(json_path)
-
-    loglines = data.get("loglines", [])
-
-    # Auto-detect GitHub repo if not provided
-    if github_repo is None:
-        github_repo = detect_github_repo(loglines)
-        if github_repo:
-            print(f"Auto-detected GitHub repo: {github_repo}")
-        else:
-            print(
-                "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
-            )
-
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
-
+    Returns list of conversation dicts with keys:
+    - user_text: The user's prompt text
+    - timestamp: ISO timestamp
+    - messages: List of (log_type, message_json, timestamp) tuples
+    - is_continuation: Boolean indicating if this is a continuation
+    """
     conversations = []
     current_conv = None
     for entry in loglines:
         log_type = entry.get("type")
         timestamp = entry.get("timestamp", "")
         is_compact_summary = entry.get("isCompactSummary", False)
+        is_meta = entry.get("isMeta", False)
         message_data = entry.get("message", {})
         if not message_data:
             continue
@@ -1246,66 +1508,25 @@ def generate_html(json_path, output_dir, github_repo=None):
         if is_user_prompt:
             if current_conv:
                 conversations.append(current_conv)
+            # isMeta entries (skill expansions) are continuations, not new prompts
             current_conv = {
                 "user_text": user_text,
                 "timestamp": timestamp,
                 "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary),
+                "is_continuation": bool(is_compact_summary or is_meta),
             }
         elif current_conv:
             current_conv["messages"].append((log_type, message_json, timestamp))
     if current_conv:
         conversations.append(current_conv)
+    return conversations
 
-    total_convs = len(conversations)
-    total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
 
-    for page_num in range(1, total_pages + 1):
-        start_idx = (page_num - 1) * PROMPTS_PER_PAGE
-        end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
-        page_convs = conversations[start_idx:end_idx]
-        messages_html = []
-        for conv in page_convs:
-            is_first = True
-            for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
-                if msg_html:
-                    # Wrap continuation summaries in collapsed details
-                    if is_first and conv.get("is_continuation"):
-                        msg_html = f'<details class="continuation"><summary>Session continuation summary</summary>{msg_html}</details>'
-                    messages_html.append(msg_html)
-                is_first = False
-        pagination_html = generate_pagination_html(page_num, total_pages)
-        page_template = get_template("page.html")
-        page_content = page_template.render(
-            css=CSS,
-            js=JS,
-            page_num=page_num,
-            total_pages=total_pages,
-            pagination_html=pagination_html,
-            messages_html="".join(messages_html),
-        )
-        (output_dir / f"page-{page_num:03d}.html").write_text(
-            page_content, encoding="utf-8"
-        )
-        print(f"Generated page-{page_num:03d}.html")
+def build_timeline_items(conversations, all_commits, github_repo):
+    """Build sorted timeline HTML items from conversations and commits.
 
-    # Calculate overall stats and collect all commits for timeline
-    total_tool_counts = {}
-    total_messages = 0
-    all_commits = []  # (timestamp, hash, message, page_num, conv_index)
-    for i, conv in enumerate(conversations):
-        total_messages += len(conv["messages"])
-        stats = analyze_conversation(conv["messages"])
-        for tool, count in stats["tool_counts"].items():
-            total_tool_counts[tool] = total_tool_counts.get(tool, 0) + count
-        page_num = (i // PROMPTS_PER_PAGE) + 1
-        for commit_hash, commit_msg, commit_ts in stats["commits"]:
-            all_commits.append((commit_ts, commit_hash, commit_msg, page_num, i))
-    total_tool_calls = sum(total_tool_counts.values())
-    total_commits = len(all_commits)
-
-    # Build timeline items: prompts and commits merged by timestamp
+    Returns list of HTML strings sorted by timestamp.
+    """
     timeline_items = []
 
     # Add prompts
@@ -1348,31 +1569,250 @@ def generate_html(json_path, output_dir, github_repo=None):
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
         item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
+            commit_hash, commit_msg, commit_ts, github_repo
         )
         timeline_items.append((commit_ts, "commit", item_html))
 
-    # Sort by timestamp
+    # Sort by timestamp and return just the HTML
     timeline_items.sort(key=lambda x: x[0])
-    index_items = [item[2] for item in timeline_items]
+    return [item[2] for item in timeline_items], prompt_num
+
+
+def _generate_html_impl(
+    loglines,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+    echo=None,
+):
+    """Internal implementation of HTML generation from loglines.
+
+    Args:
+        loglines: List of log entries
+        output_dir: Path to output directory
+        github_repo: Optional GitHub repo string (e.g., "owner/repo")
+        code_view: Whether to generate code view
+        exclude_deleted_files: Whether to filter deleted files from code view
+        echo: Function to use for output (print or click.echo wrapper)
+    """
+    if echo is None:
+        echo = print
+
+    output_dir = Path(output_dir)
+
+    # Set module-level variable for render functions
+    global _github_repo
+    _github_repo = github_repo
+
+    conversations = build_conversations(loglines)
+
+    total_convs = len(conversations)
+    total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
+
+    # Determine if code view will be generated (for tab navigation)
+    has_code_view = False
+    file_operations = None
+    if code_view:
+        file_operations = extract_file_operations(loglines, conversations)
+        # Optionally filter out files that no longer exist on disk
+        if exclude_deleted_files and file_operations:
+            file_operations = filter_deleted_files(file_operations)
+        has_code_view = len(file_operations) > 0
+
+    # Collect all messages HTML for the code view transcript pane
+    all_messages_html = []
+    # Collect messages per page for potential page-data.json
+    page_messages_dict = {}
+
+    # Track prompt number across all pages
+    prompt_num = 0
+
+    for page_num in range(1, total_pages + 1):
+        start_idx = (page_num - 1) * PROMPTS_PER_PAGE
+        end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
+        page_convs = conversations[start_idx:end_idx]
+        messages_html = []
+        # Count total messages for this page for progress display
+        total_page_messages = sum(len(c["messages"]) for c in page_convs)
+        msg_count = 0
+        for conv in page_convs:
+            is_first = True
+            for log_type, message_json, timestamp in conv["messages"]:
+                msg_count += 1
+                if total_page_messages > 50:
+                    echo(
+                        f"\rPage {page_num}/{total_pages}: rendering message {msg_count}/{total_page_messages}...",
+                        end="",
+                    )
+                # Track prompt number for user messages (not tool results)
+                current_prompt_num = None
+                if log_type == "user" and message_json:
+                    try:
+                        message_data = json.loads(message_json)
+                        if not is_tool_result_message(message_data):
+                            prompt_num += 1
+                            current_prompt_num = prompt_num
+                    except json.JSONDecodeError:
+                        pass
+                msg_html = render_message(
+                    log_type, message_json, timestamp, current_prompt_num
+                )
+                if msg_html:
+                    # Wrap continuation summaries in collapsed details
+                    if is_first and conv.get("is_continuation"):
+                        msg_html = f'<details class="continuation"><summary>Session continuation summary</summary>{msg_html}</details>'
+                    messages_html.append(msg_html)
+                is_first = False
+        if total_page_messages > 50:
+            echo("\r" + " " * 60 + "\r", end="")  # Clear the progress line
+
+        # Store messages for this page
+        page_messages_dict[str(page_num)] = "".join(messages_html)
+
+        # Collect all messages for code view transcript pane
+        all_messages_html.extend(messages_html)
+
+    # Generate page HTML files
+    for page_num in range(1, total_pages + 1):
+        pagination_html = generate_pagination_html(page_num, total_pages)
+        page_template = get_template("page.html")
+        page_content = page_template.render(
+            page_num=page_num,
+            total_pages=total_pages,
+            pagination_html=pagination_html,
+            messages_html=page_messages_dict[str(page_num)],
+            has_code_view=has_code_view,
+            active_tab="transcript",
+            use_page_data_json=False,
+            use_external_assets=False,
+        )
+        (output_dir / f"page-{page_num:03d}.html").write_text(
+            page_content, encoding="utf-8"
+        )
+        echo(f"Generated page-{page_num:03d}.html")
+
+    # Calculate overall stats and collect all commits for timeline
+    total_tool_counts = {}
+    total_messages = 0
+    all_commits = []  # (timestamp, hash, message, page_num, conv_index)
+    for i, conv in enumerate(conversations):
+        total_messages += len(conv["messages"])
+        stats = analyze_conversation(conv["messages"])
+        for tool, count in stats["tool_counts"].items():
+            total_tool_counts[tool] = total_tool_counts.get(tool, 0) + count
+        page_num = (i // PROMPTS_PER_PAGE) + 1
+        for commit_hash, commit_msg, commit_ts in stats["commits"]:
+            all_commits.append((commit_ts, commit_hash, commit_msg, page_num, i))
+    total_tool_calls = sum(total_tool_counts.values())
+    total_commits = len(all_commits)
+
+    # Build timeline items using helper
+    index_items, final_prompt_num = build_timeline_items(
+        conversations, all_commits, github_repo
+    )
+    index_items_html = "".join(index_items)
 
     index_pagination = generate_index_pagination_html(total_pages)
     index_template = get_template("index.html")
     index_content = index_template.render(
-        css=CSS,
-        js=JS,
         pagination_html=index_pagination,
-        prompt_num=prompt_num,
+        prompt_num=final_prompt_num,
         total_messages=total_messages,
         total_tool_calls=total_tool_calls,
         total_commits=total_commits,
         total_pages=total_pages,
-        index_items_html="".join(index_items),
+        index_items_html=index_items_html,
+        has_code_view=has_code_view,
+        active_tab="transcript",
+        use_index_data_json=False,
+        use_external_assets=False,
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
-    print(
+    echo(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
+    )
+
+    # Generate code view if requested
+    if has_code_view:
+        num_ops = len(file_operations)
+        num_files = len(set(op.file_path for op in file_operations))
+
+        last_phase = [None]  # Use list to allow mutation in nested function
+
+        def code_view_progress(phase, current, total):
+            # Clear line when switching phases
+            if last_phase[0] and last_phase[0] != phase:
+                echo("\r" + " " * 60 + "\r", end="")
+            last_phase[0] = phase
+
+            if phase == "operations" and num_ops > 20:
+                echo(
+                    f"\rCode view: replaying operation {current}/{total}...",
+                    end="",
+                )
+            elif phase == "files" and num_files > 5:
+                echo(
+                    f"\rCode view: processing file {current}/{total}...",
+                    end="",
+                )
+
+        msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
+            conversations
+        )
+        generate_code_view_html(
+            output_dir,
+            file_operations,
+            transcript_messages=all_messages_html,
+            msg_to_user_html=msg_to_user_html,
+            msg_to_context_id=msg_to_context_id,
+            msg_to_prompt_num=msg_to_prompt_num,
+            total_pages=total_pages,
+            progress_callback=code_view_progress,
+        )
+        # Clear progress line
+        if num_ops > 20 or num_files > 5:
+            echo("\r" + " " * 60 + "\r", end="")
+        echo(f"Generated code.html ({num_files} files)")
+
+
+def generate_html(
+    json_path,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+):
+    """Generate HTML from a session file path."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
+
+    # Load session file (supports both JSON and JSONL)
+    data = parse_session_file(json_path)
+    loglines = data.get("loglines", [])
+
+    # Auto-detect GitHub repo if not provided
+    if github_repo is None:
+        github_repo = detect_github_repo(loglines)
+        if github_repo:
+            print(f"Auto-detected GitHub repo: {github_repo}")
+        else:
+            print(
+                "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
+            )
+
+    # Use print with flush for progress output
+    def echo(msg, end="\n"):
+        print(msg, end=end, flush=True)
+
+    _generate_html_impl(
+        loglines,
+        output_dir,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+        echo=echo,
     )
 
 
@@ -1398,7 +1838,7 @@ def cli():
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="Git repo: local path, GitHub URL, or owner/name. Used for commit links and code viewer file history.",
 )
 @click.option(
     "--gist",
@@ -1422,7 +1862,27 @@ def cli():
     default=10,
     help="Maximum number of sessions to show (default: 10)",
 )
-def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit):
+@click.option(
+    "--code-view",
+    is_flag=True,
+    help="Generate a code viewer tab showing files modified during the session.",
+)
+@click.option(
+    "--exclude-deleted-files",
+    is_flag=True,
+    help="Exclude files that no longer exist on disk from the code viewer.",
+)
+def local_cmd(
+    output,
+    output_auto,
+    repo,
+    gist,
+    include_json,
+    open_browser,
+    limit,
+    code_view,
+    exclude_deleted_files,
+):
     """Select and convert a local Claude Code session to HTML."""
     projects_folder = Path.home() / ".claude" / "projects"
 
@@ -1473,7 +1933,15 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         output = Path(tempfile.gettempdir()) / f"claude-session-{session_file.stem}"
 
     output = Path(output)
-    generate_html(session_file, output, github_repo=repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
+    generate_html(
+        session_file,
+        output,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+    )
 
     # Show output directory
     click.echo(f"Output: {output.resolve()}")
@@ -1487,10 +1955,10 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         click.echo(f"JSONL: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_desc = f"claude-code-transcripts local {session_file.stem}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -1555,7 +2023,7 @@ def fetch_url_to_tempfile(url):
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="Git repo: local path, GitHub URL, or owner/name. Used for commit links and code viewer file history.",
 )
 @click.option(
     "--gist",
@@ -1574,9 +2042,30 @@ def fetch_url_to_tempfile(url):
     is_flag=True,
     help="Open the generated index.html in your default browser (default if no -o specified).",
 )
-def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_browser):
+@click.option(
+    "--code-view",
+    is_flag=True,
+    help="Generate a code viewer tab showing files modified during the session.",
+)
+@click.option(
+    "--exclude-deleted-files",
+    is_flag=True,
+    help="Exclude files that no longer exist on disk from the code viewer.",
+)
+def json_cmd(
+    json_file,
+    output,
+    output_auto,
+    repo,
+    gist,
+    include_json,
+    open_browser,
+    code_view,
+    exclude_deleted_files,
+):
     """Convert a Claude Code session JSON/JSONL file or URL to HTML."""
     # Handle URL input
+    original_input = json_file
     if is_url(json_file):
         click.echo(f"Fetching {json_file}...")
         temp_file = fetch_url_to_tempfile(json_file)
@@ -1589,6 +2078,9 @@ def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_brow
         if not json_file_path.exists():
             raise click.ClickException(f"File not found: {json_file}")
         url_name = None
+
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
 
     # Determine output directory and whether to open browser
     # If no -o specified, use temp dir and open browser by default
@@ -1604,24 +2096,43 @@ def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_brow
         )
 
     output = Path(output)
-    generate_html(json_file_path, output, github_repo=repo)
+    generate_html(
+        json_file_path,
+        output,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+    )
 
     # Show output directory
     click.echo(f"Output: {output.resolve()}")
 
     # Copy JSON file to output directory if requested
-    if include_json:
+    if include_json and not is_url(original_input):
         output.mkdir(exist_ok=True)
         json_dest = output / json_file_path.name
         shutil.copy(json_file_path, json_dest)
         json_size_kb = json_dest.stat().st_size / 1024
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
+    elif include_json and is_url(original_input):
+        # For URLs, copy the temp file with a meaningful name
+        output.mkdir(exist_ok=True)
+        url_name = Path(original_input.split("?")[0]).name or "session.jsonl"
+        json_dest = output / url_name
+        shutil.copy(json_file, json_dest)
+        json_size_kb = json_dest.stat().st_size / 1024
+        click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        # Use filename/URL for description
+        if is_url(original_input):
+            input_name = Path(original_input.split("?")[0]).name or "session"
+        else:
+            input_name = Path(original_input).stem
+        gist_desc = f"claude-code-transcripts json {input_name}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")
@@ -1677,7 +2188,13 @@ def format_session_for_display(session_data):
     return f"{session_id}  {created_at[:19] if created_at else 'N/A':19}  {title}"
 
 
-def generate_html_from_session_data(session_data, output_dir, github_repo=None):
+def generate_html_from_session_data(
+    session_data,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+):
     """Generate HTML from session data dict (instead of file path)."""
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
@@ -1690,159 +2207,17 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         if github_repo:
             click.echo(f"Auto-detected GitHub repo: {github_repo}")
 
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
+    # Use click.echo for progress output
+    def echo(msg, end="\n"):
+        click.echo(msg, nl=(end == "\n"))
 
-    conversations = []
-    current_conv = None
-    for entry in loglines:
-        log_type = entry.get("type")
-        timestamp = entry.get("timestamp", "")
-        is_compact_summary = entry.get("isCompactSummary", False)
-        message_data = entry.get("message", {})
-        if not message_data:
-            continue
-        # Convert message dict to JSON string for compatibility with existing render functions
-        message_json = json.dumps(message_data)
-        is_user_prompt = False
-        user_text = None
-        if log_type == "user":
-            content = message_data.get("content", "")
-            text = extract_text_from_content(content)
-            if text:
-                is_user_prompt = True
-                user_text = text
-        if is_user_prompt:
-            if current_conv:
-                conversations.append(current_conv)
-            current_conv = {
-                "user_text": user_text,
-                "timestamp": timestamp,
-                "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary),
-            }
-        elif current_conv:
-            current_conv["messages"].append((log_type, message_json, timestamp))
-    if current_conv:
-        conversations.append(current_conv)
-
-    total_convs = len(conversations)
-    total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
-
-    for page_num in range(1, total_pages + 1):
-        start_idx = (page_num - 1) * PROMPTS_PER_PAGE
-        end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
-        page_convs = conversations[start_idx:end_idx]
-        messages_html = []
-        for conv in page_convs:
-            is_first = True
-            for log_type, message_json, timestamp in conv["messages"]:
-                msg_html = render_message(log_type, message_json, timestamp)
-                if msg_html:
-                    # Wrap continuation summaries in collapsed details
-                    if is_first and conv.get("is_continuation"):
-                        msg_html = f'<details class="continuation"><summary>Session continuation summary</summary>{msg_html}</details>'
-                    messages_html.append(msg_html)
-                is_first = False
-        pagination_html = generate_pagination_html(page_num, total_pages)
-        page_template = get_template("page.html")
-        page_content = page_template.render(
-            css=CSS,
-            js=JS,
-            page_num=page_num,
-            total_pages=total_pages,
-            pagination_html=pagination_html,
-            messages_html="".join(messages_html),
-        )
-        (output_dir / f"page-{page_num:03d}.html").write_text(
-            page_content, encoding="utf-8"
-        )
-        click.echo(f"Generated page-{page_num:03d}.html")
-
-    # Calculate overall stats and collect all commits for timeline
-    total_tool_counts = {}
-    total_messages = 0
-    all_commits = []  # (timestamp, hash, message, page_num, conv_index)
-    for i, conv in enumerate(conversations):
-        total_messages += len(conv["messages"])
-        stats = analyze_conversation(conv["messages"])
-        for tool, count in stats["tool_counts"].items():
-            total_tool_counts[tool] = total_tool_counts.get(tool, 0) + count
-        page_num = (i // PROMPTS_PER_PAGE) + 1
-        for commit_hash, commit_msg, commit_ts in stats["commits"]:
-            all_commits.append((commit_ts, commit_hash, commit_msg, page_num, i))
-    total_tool_calls = sum(total_tool_counts.values())
-    total_commits = len(all_commits)
-
-    # Build timeline items: prompts and commits merged by timestamp
-    timeline_items = []
-
-    # Add prompts
-    prompt_num = 0
-    for i, conv in enumerate(conversations):
-        if conv.get("is_continuation"):
-            continue
-        if conv["user_text"].startswith("Stop hook feedback:"):
-            continue
-        prompt_num += 1
-        page_num = (i // PROMPTS_PER_PAGE) + 1
-        msg_id = make_msg_id(conv["timestamp"])
-        link = f"page-{page_num:03d}.html#{msg_id}"
-        rendered_content = render_markdown_text(conv["user_text"])
-
-        # Collect all messages including from subsequent continuation conversations
-        # This ensures long_texts from continuations appear with the original prompt
-        all_messages = list(conv["messages"])
-        for j in range(i + 1, len(conversations)):
-            if not conversations[j].get("is_continuation"):
-                break
-            all_messages.extend(conversations[j]["messages"])
-
-        # Analyze conversation for stats (excluding commits from inline display now)
-        stats = analyze_conversation(all_messages)
-        tool_stats_str = format_tool_stats(stats["tool_counts"])
-
-        long_texts_html = ""
-        for lt in stats["long_texts"]:
-            rendered_lt = render_markdown_text(lt)
-            long_texts_html += _macros.index_long_text(rendered_lt)
-
-        stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
-
-        item_html = _macros.index_item(
-            prompt_num, link, conv["timestamp"], rendered_content, stats_html
-        )
-        timeline_items.append((conv["timestamp"], "prompt", item_html))
-
-    # Add commits as separate timeline items
-    for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
-        item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
-        )
-        timeline_items.append((commit_ts, "commit", item_html))
-
-    # Sort by timestamp
-    timeline_items.sort(key=lambda x: x[0])
-    index_items = [item[2] for item in timeline_items]
-
-    index_pagination = generate_index_pagination_html(total_pages)
-    index_template = get_template("index.html")
-    index_content = index_template.render(
-        css=CSS,
-        js=JS,
-        pagination_html=index_pagination,
-        prompt_num=prompt_num,
-        total_messages=total_messages,
-        total_tool_calls=total_tool_calls,
-        total_commits=total_commits,
-        total_pages=total_pages,
-        index_items_html="".join(index_items),
-    )
-    index_path = output_dir / "index.html"
-    index_path.write_text(index_content, encoding="utf-8")
-    click.echo(
-        f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
+    _generate_html_impl(
+        loglines,
+        output_dir,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+        echo=echo,
     )
 
 
@@ -1866,7 +2241,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="Git repo: local path, GitHub URL, or owner/name. Used for commit links and code viewer file history.",
 )
 @click.option(
     "--gist",
@@ -1885,6 +2260,11 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     is_flag=True,
     help="Open the generated index.html in your default browser (default if no -o specified).",
 )
+@click.option(
+    "--code-view",
+    is_flag=True,
+    help="Generate a code viewer tab showing files modified during the session.",
+)
 def web_cmd(
     session_id,
     output,
@@ -1895,6 +2275,7 @@ def web_cmd(
     gist,
     include_json,
     open_browser,
+    code_view,
 ):
     """Select and convert a web session from the Claude API to HTML.
 
@@ -1966,7 +2347,14 @@ def web_cmd(
 
     output = Path(output)
     click.echo(f"Generating HTML in {output}/...")
-    generate_html_from_session_data(session_data, output, github_repo=repo)
+    # Parse --repo to get GitHub repo name
+    github_repo, _ = parse_repo_value(repo)
+    generate_html_from_session_data(
+        session_data,
+        output,
+        github_repo=github_repo,
+        code_view=code_view,
+    )
 
     # Show output directory
     click.echo(f"Output: {output.resolve()}")
@@ -1981,10 +2369,10 @@ def web_cmd(
         click.echo(f"JSON: {json_dest} ({json_size_kb:.1f} KB)")
 
     if gist:
-        # Inject gist preview JS and create gist
-        inject_gist_preview_js(output)
+        # Create gist (handles inject_gist_preview_js internally)
         click.echo("Creating GitHub gist...")
-        gist_id, gist_url = create_gist(output)
+        gist_desc = f"claude-code-transcripts web {session_id}"
+        gist_id, gist_url = create_gist(output, description=gist_desc)
         preview_url = f"https://gisthost.github.io/?{gist_id}/index.html"
         click.echo(f"Gist: {gist_url}")
         click.echo(f"Preview: {preview_url}")

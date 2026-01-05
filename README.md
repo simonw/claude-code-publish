@@ -47,14 +47,16 @@ All commands support these options:
 
 - `-o, --output DIRECTORY` - output directory (default: writes to temp dir and opens browser)
 - `-a, --output-auto` - auto-name output subdirectory based on session ID or filename
-- `--repo OWNER/NAME` - GitHub repo for commit links (auto-detected from git push output if not specified)
+- `--repo PATH|URL|OWNER/NAME` - Git repo for commit links and code viewer. Accepts a local path, GitHub URL, or owner/name format.
 - `--open` - open the generated `index.html` in your default browser (default if no `-o` specified)
 - `--gist` - upload the generated HTML files to a GitHub Gist and output a preview URL
 - `--json` - include the original session file in the output directory
+- `--code-view` - generate an interactive code viewer showing all files modified during the session
 
 The generated output includes:
 - `index.html` - an index page with a timeline of prompts and commits
 - `page-001.html`, `page-002.html`, etc. - paginated transcript pages
+- `code.html` - interactive code viewer (when `--code-view` is used)
 
 ### Local sessions
 
@@ -106,7 +108,19 @@ Preview: https://gisthost.github.io/?abc123def456/index.html
 Files: /var/folders/.../session-id
 ```
 
-The preview URL uses [gisthost.github.io](https://gisthost.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gisthost.
+The preview URL uses [gisthost.github.io](https://gisthost.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gisthost (also works with gistpreview.github.io for backward compatibility).
+
+**Large sessions:** GitHub's gist API has size limits (~1MB). For large sessions, the tool automatically handles this:
+
+- **Page content**: When total page content exceeds 500KB, the tool generates separate `page-data-NNN.json` files for each page. The HTML pages are stripped of their inline content when uploaded, and JavaScript fetches the content from the JSON files on demand. This keeps each file small while preserving full functionality.
+
+- **Code viewer**: When using `--code-view`, large sessions may have a `code-data.json` file that also needs separate handling.
+
+- **Two-gist strategy**: When data files exceed 1MB total, they're uploaded to a separate "data gist", and the main gist's HTML files reference it.
+
+- **Batched uploads**: If files are still too large, they're automatically batched into multiple gists.
+
+All of this happens transparently and requires no additional options. Search continues to work by fetching from the JSON files instead of HTML.
 
 Combine with `-o` to keep a local copy:
 
@@ -115,6 +129,36 @@ claude-code-transcripts json session.json -o ./my-transcript --gist
 ```
 
 **Requirements:** The `--gist` option requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated (`gh auth login`).
+
+### Code viewer
+
+Use `--code-view` to generate an interactive three-pane code viewer that shows all files modified during the session:
+
+```bash
+# Generate with code viewer from a local session
+claude-code-transcripts --code-view
+
+# Point to the actual repo for full file content and blame
+claude-code-transcripts --code-view --repo /path/to/repo
+
+# From a URL
+claude-code-transcripts json https://example.com/session.jsonl --code-view
+```
+
+The code viewer (`code.html`) provides:
+- **File tree**: Navigate all files that were written or edited during the session
+- **File content**: View file contents with git blame-style annotations showing which prompt modified each line
+- **Transcript pane**: Browse the full conversation with links to jump to specific file operations
+
+When you provide `--repo` pointing to the local git repository that was being modified, the code viewer can show the complete file content with accurate blame attribution. Without a repo path, it shows a diff-only view of the changes.
+
+Use `--exclude-deleted-files` to filter out files that no longer exist on disk:
+
+```bash
+claude-code-transcripts --code-view --exclude-deleted-files
+```
+
+This is useful when files were deleted after the session (either manually or by commands not captured in the transcript).
 
 ### Auto-naming output directories
 
@@ -145,11 +189,14 @@ This is useful for archiving the source data alongside the HTML output.
 
 ### Converting from JSON/JSONL files
 
-Convert a specific session file directly:
+Convert a specific session file or URL directly:
 
 ```bash
 claude-code-transcripts json session.json -o output-directory/
 claude-code-transcripts json session.jsonl --open
+
+# Fetch and convert from a URL
+claude-code-transcripts json https://example.com/session.jsonl --open
 ```
 This works with both JSONL files in the `~/.claude/projects/` folder and JSON session files extracted from Claude Code for web.
 
