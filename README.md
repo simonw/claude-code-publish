@@ -108,7 +108,7 @@ Preview: https://gisthost.github.io/?abc123def456/index.html
 Files: /var/folders/.../session-id
 ```
 
-The preview URL uses [gisthost.github.io](https://gisthost.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gisthost.
+The preview URL uses [gisthost.github.io](https://gisthost.github.io/) to render your HTML gist. The tool automatically injects JavaScript to fix relative links when served through gisthost (also works with gistpreview.github.io for backward compatibility).
 
 **Large sessions:** GitHub's gist API has size limits (~1MB). For large sessions, the tool automatically handles this:
 
