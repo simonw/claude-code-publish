@@ -1731,35 +1731,15 @@ def generate_index_pagination_html(total_pages):
     return _macros.index_pagination(total_pages)
 
 
-def generate_html(
-    json_path,
-    output_dir,
-    github_repo=None,
-    code_view=False,
-    exclude_deleted_files=False,
-):
-    output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
+def build_conversations(loglines):
+    """Build conversation dicts from loglines.
 
-    # Load session file (supports both JSON and JSONL)
-    data = parse_session_file(json_path)
-
-    loglines = data.get("loglines", [])
-
-    # Auto-detect GitHub repo if not provided
-    if github_repo is None:
-        github_repo = detect_github_repo(loglines)
-        if github_repo:
-            print(f"Auto-detected GitHub repo: {github_repo}")
-        else:
-            print(
-                "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
-            )
-
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
-
+    Returns list of conversation dicts with keys:
+    - user_text: The user's prompt text
+    - timestamp: ISO timestamp
+    - messages: List of (log_type, message_json, timestamp) tuples
+    - is_continuation: Boolean indicating if this is a continuation
+    """
     conversations = []
     current_conv = None
     for entry in loglines:
@@ -1794,6 +1774,93 @@ def generate_html(
             current_conv["messages"].append((log_type, message_json, timestamp))
     if current_conv:
         conversations.append(current_conv)
+    return conversations
+
+
+def build_timeline_items(conversations, all_commits, github_repo):
+    """Build sorted timeline HTML items from conversations and commits.
+
+    Returns list of HTML strings sorted by timestamp.
+    """
+    timeline_items = []
+
+    # Add prompts
+    prompt_num = 0
+    for i, conv in enumerate(conversations):
+        if conv.get("is_continuation"):
+            continue
+        if conv["user_text"].startswith("Stop hook feedback:"):
+            continue
+        prompt_num += 1
+        page_num = (i // PROMPTS_PER_PAGE) + 1
+        msg_id = make_msg_id(conv["timestamp"])
+        link = f"page-{page_num:03d}.html#{msg_id}"
+        rendered_content = render_markdown_text(conv["user_text"])
+
+        # Collect all messages including from subsequent continuation conversations
+        # This ensures long_texts from continuations appear with the original prompt
+        all_messages = list(conv["messages"])
+        for j in range(i + 1, len(conversations)):
+            if not conversations[j].get("is_continuation"):
+                break
+            all_messages.extend(conversations[j]["messages"])
+
+        # Analyze conversation for stats (excluding commits from inline display now)
+        stats = analyze_conversation(all_messages)
+        tool_stats_str = format_tool_stats(stats["tool_counts"])
+
+        long_texts_html = ""
+        for lt in stats["long_texts"]:
+            rendered_lt = render_markdown_text(lt)
+            long_texts_html += _macros.index_long_text(rendered_lt)
+
+        stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
+
+        item_html = _macros.index_item(
+            prompt_num, link, conv["timestamp"], rendered_content, stats_html
+        )
+        timeline_items.append((conv["timestamp"], "prompt", item_html))
+
+    # Add commits as separate timeline items
+    for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
+        item_html = _macros.index_commit(
+            commit_hash, commit_msg, commit_ts, github_repo
+        )
+        timeline_items.append((commit_ts, "commit", item_html))
+
+    # Sort by timestamp and return just the HTML
+    timeline_items.sort(key=lambda x: x[0])
+    return [item[2] for item in timeline_items], prompt_num
+
+
+def _generate_html_impl(
+    loglines,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+    echo=None,
+):
+    """Internal implementation of HTML generation from loglines.
+
+    Args:
+        loglines: List of log entries
+        output_dir: Path to output directory
+        github_repo: Optional GitHub repo string (e.g., "owner/repo")
+        code_view: Whether to generate code view
+        exclude_deleted_files: Whether to filter deleted files from code view
+        echo: Function to use for output (print or click.echo wrapper)
+    """
+    if echo is None:
+        echo = print
+
+    output_dir = Path(output_dir)
+
+    # Set module-level variable for render functions
+    global _github_repo
+    _github_repo = github_repo
+
+    conversations = build_conversations(loglines)
 
     total_convs = len(conversations)
     total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
@@ -1829,10 +1896,9 @@ def generate_html(
             for log_type, message_json, timestamp in conv["messages"]:
                 msg_count += 1
                 if total_page_messages > 50:
-                    print(
+                    echo(
                         f"\rPage {page_num}/{total_pages}: rendering message {msg_count}/{total_page_messages}...",
                         end="",
-                        flush=True,
                     )
                 # Track prompt number for user messages (not tool results)
                 current_prompt_num = None
@@ -1854,7 +1920,7 @@ def generate_html(
                     messages_html.append(msg_html)
                 is_first = False
         if total_page_messages > 50:
-            print("\r" + " " * 60 + "\r", end="")  # Clear the progress line
+            echo("\r" + " " * 60 + "\r", end="")  # Clear the progress line
 
         # Store messages for this page
         page_messages_dict[str(page_num)] = "".join(messages_html)
@@ -1902,7 +1968,7 @@ def generate_html(
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
         )
-        print(f"Generated page-{page_num:03d}.html")
+        echo(f"Generated page-{page_num:03d}.html")
 
     # Calculate overall stats and collect all commits for timeline
     total_tool_counts = {}
@@ -1919,56 +1985,10 @@ def generate_html(
     total_tool_calls = sum(total_tool_counts.values())
     total_commits = len(all_commits)
 
-    # Build timeline items: prompts and commits merged by timestamp
-    timeline_items = []
-
-    # Add prompts
-    prompt_num = 0
-    for i, conv in enumerate(conversations):
-        if conv.get("is_continuation"):
-            continue
-        if conv["user_text"].startswith("Stop hook feedback:"):
-            continue
-        prompt_num += 1
-        page_num = (i // PROMPTS_PER_PAGE) + 1
-        msg_id = make_msg_id(conv["timestamp"])
-        link = f"page-{page_num:03d}.html#{msg_id}"
-        rendered_content = render_markdown_text(conv["user_text"])
-
-        # Collect all messages including from subsequent continuation conversations
-        # This ensures long_texts from continuations appear with the original prompt
-        all_messages = list(conv["messages"])
-        for j in range(i + 1, len(conversations)):
-            if not conversations[j].get("is_continuation"):
-                break
-            all_messages.extend(conversations[j]["messages"])
-
-        # Analyze conversation for stats (excluding commits from inline display now)
-        stats = analyze_conversation(all_messages)
-        tool_stats_str = format_tool_stats(stats["tool_counts"])
-
-        long_texts_html = ""
-        for lt in stats["long_texts"]:
-            rendered_lt = render_markdown_text(lt)
-            long_texts_html += _macros.index_long_text(rendered_lt)
-
-        stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
-
-        item_html = _macros.index_item(
-            prompt_num, link, conv["timestamp"], rendered_content, stats_html
-        )
-        timeline_items.append((conv["timestamp"], "prompt", item_html))
-
-    # Add commits as separate timeline items
-    for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
-        item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
-        )
-        timeline_items.append((commit_ts, "commit", item_html))
-
-    # Sort by timestamp
-    timeline_items.sort(key=lambda x: x[0])
-    index_items = [item[2] for item in timeline_items]
+    # Build timeline items using helper
+    index_items, final_prompt_num = build_timeline_items(
+        conversations, all_commits, github_repo
+    )
     index_items_html = "".join(index_items)
 
     # Write index-data.json for gist lazy loading if session is large
@@ -1982,7 +2002,7 @@ def generate_html(
     # JSON file is generated above for gist preview loading
     index_content = index_template.render(
         pagination_html=index_pagination,
-        prompt_num=prompt_num,
+        prompt_num=final_prompt_num,
         total_messages=total_messages,
         total_tool_calls=total_tool_calls,
         total_commits=total_commits,
@@ -1995,7 +2015,7 @@ def generate_html(
     )
     index_path = output_dir / "index.html"
     index_path.write_text(index_content, encoding="utf-8")
-    print(
+    echo(
         f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
     )
 
@@ -2009,20 +2029,18 @@ def generate_html(
         def code_view_progress(phase, current, total):
             # Clear line when switching phases
             if last_phase[0] and last_phase[0] != phase:
-                print("\r" + " " * 60 + "\r", end="", flush=True)
+                echo("\r" + " " * 60 + "\r", end="")
             last_phase[0] = phase
 
             if phase == "operations" and num_ops > 20:
-                print(
+                echo(
                     f"\rCode view: replaying operation {current}/{total}...",
                     end="",
-                    flush=True,
                 )
             elif phase == "files" and num_files > 5:
-                print(
+                echo(
                     f"\rCode view: processing file {current}/{total}...",
                     end="",
-                    flush=True,
                 )
 
         msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
@@ -2040,8 +2058,47 @@ def generate_html(
         )
         # Clear progress line
         if num_ops > 20 or num_files > 5:
-            print("\r" + " " * 60 + "\r", end="", flush=True)
-        print(f"Generated code.html ({num_files} files)")
+            echo("\r" + " " * 60 + "\r", end="")
+        echo(f"Generated code.html ({num_files} files)")
+
+
+def generate_html(
+    json_path,
+    output_dir,
+    github_repo=None,
+    code_view=False,
+    exclude_deleted_files=False,
+):
+    """Generate HTML from a session file path."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
+
+    # Load session file (supports both JSON and JSONL)
+    data = parse_session_file(json_path)
+    loglines = data.get("loglines", [])
+
+    # Auto-detect GitHub repo if not provided
+    if github_repo is None:
+        github_repo = detect_github_repo(loglines)
+        if github_repo:
+            print(f"Auto-detected GitHub repo: {github_repo}")
+        else:
+            print(
+                "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
+            )
+
+    # Use print with flush for progress output
+    def echo(msg, end="\n"):
+        print(msg, end=end, flush=True)
+
+    _generate_html_impl(
+        loglines,
+        output_dir,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+        echo=echo,
+    )
 
 
 @click.group(cls=DefaultGroup, default="local", default_if_no_args=True)
@@ -2435,289 +2492,18 @@ def generate_html_from_session_data(
         if github_repo:
             click.echo(f"Auto-detected GitHub repo: {github_repo}")
 
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
+    # Use click.echo for progress output
+    def echo(msg, end="\n"):
+        click.echo(msg, nl=(end == "\n"))
 
-    conversations = []
-    current_conv = None
-    for entry in loglines:
-        log_type = entry.get("type")
-        timestamp = entry.get("timestamp", "")
-        is_compact_summary = entry.get("isCompactSummary", False)
-        is_meta = entry.get("isMeta", False)
-        message_data = entry.get("message", {})
-        if not message_data:
-            continue
-        # Convert message dict to JSON string for compatibility with existing render functions
-        message_json = json.dumps(message_data)
-        is_user_prompt = False
-        user_text = None
-        if log_type == "user":
-            content = message_data.get("content", "")
-            text = extract_text_from_content(content)
-            if text:
-                is_user_prompt = True
-                user_text = text
-        if is_user_prompt:
-            if current_conv:
-                conversations.append(current_conv)
-            # isMeta entries (skill expansions) are continuations, not new prompts
-            current_conv = {
-                "user_text": user_text,
-                "timestamp": timestamp,
-                "messages": [(log_type, message_json, timestamp)],
-                "is_continuation": bool(is_compact_summary or is_meta),
-            }
-        elif current_conv:
-            current_conv["messages"].append((log_type, message_json, timestamp))
-    if current_conv:
-        conversations.append(current_conv)
-
-    total_convs = len(conversations)
-    total_pages = (total_convs + PROMPTS_PER_PAGE - 1) // PROMPTS_PER_PAGE
-
-    # Determine if code view will be generated (for tab navigation)
-    has_code_view = False
-    file_operations = None
-    if code_view:
-        file_operations = extract_file_operations(loglines, conversations)
-        # Optionally filter out files that no longer exist on disk
-        if exclude_deleted_files and file_operations:
-            file_operations = filter_deleted_files(file_operations)
-        has_code_view = len(file_operations) > 0
-
-    # Collect all messages HTML for the code view transcript pane
-    all_messages_html = []
-    # Collect messages per page for potential page-data.json
-    page_messages_dict = {}
-
-    # Track prompt number across all pages
-    prompt_num = 0
-
-    for page_num in range(1, total_pages + 1):
-        start_idx = (page_num - 1) * PROMPTS_PER_PAGE
-        end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
-        page_convs = conversations[start_idx:end_idx]
-        messages_html = []
-        # Count total messages for this page for progress display
-        total_page_messages = sum(len(c["messages"]) for c in page_convs)
-        msg_count = 0
-        for conv in page_convs:
-            is_first = True
-            for log_type, message_json, timestamp in conv["messages"]:
-                msg_count += 1
-                if total_page_messages > 50:
-                    click.echo(
-                        f"\rPage {page_num}/{total_pages}: rendering message {msg_count}/{total_page_messages}...",
-                        nl=False,
-                    )
-                # Track prompt number for user messages (not tool results)
-                current_prompt_num = None
-                if log_type == "user" and message_json:
-                    try:
-                        message_data = json.loads(message_json)
-                        if not is_tool_result_message(message_data):
-                            prompt_num += 1
-                            current_prompt_num = prompt_num
-                    except json.JSONDecodeError:
-                        pass
-                msg_html = render_message(
-                    log_type, message_json, timestamp, current_prompt_num
-                )
-                if msg_html:
-                    # Wrap continuation summaries in collapsed details
-                    if is_first and conv.get("is_continuation"):
-                        msg_html = f'<details class="continuation"><summary>Session continuation summary</summary>{msg_html}</details>'
-                    messages_html.append(msg_html)
-                is_first = False
-        if total_page_messages > 50:
-            click.echo("\r" + " " * 60 + "\r", nl=False)  # Clear the progress line
-
-        # Store messages for this page
-        page_messages_dict[str(page_num)] = "".join(messages_html)
-
-        # Collect all messages for code view transcript pane
-        all_messages_html.extend(messages_html)
-
-    # Calculate total size of all page messages to decide if page-data files are needed
-    total_page_messages_size = sum(len(html) for html in page_messages_dict.values())
-    use_page_data_json = total_page_messages_size > PAGE_DATA_SIZE_THRESHOLD
-
-    # For large sessions, use external CSS/JS files to reduce HTML size
-    # For small sessions, inline CSS/JS for simplicity
-    use_external_assets = use_page_data_json
-    if use_external_assets:
-        templates_dir = Path(__file__).parent / "templates"
-        for static_file in ["styles.css", "main.js", "search.js"]:
-            src = templates_dir / static_file
-            if src.exists():
-                shutil.copy(src, output_dir / static_file)
-
-    if use_page_data_json:
-        # Write individual page-data-NNN.json files for gist lazy loading
-        # This allows batched uploads and avoids GitHub's gist size limits
-        for page_num_str, messages_html in page_messages_dict.items():
-            page_data_file = output_dir / f"page-data-{int(page_num_str):03d}.json"
-            page_data_file.write_text(json.dumps(messages_html), encoding="utf-8")
-
-    # Generate page HTML files
-    # Always include content in HTML for local viewing (use_page_data_json=False)
-    # JSON files are generated above for gist preview loading
-    for page_num in range(1, total_pages + 1):
-        pagination_html = generate_pagination_html(page_num, total_pages)
-        page_template = get_template("page.html")
-        page_content = page_template.render(
-            page_num=page_num,
-            total_pages=total_pages,
-            pagination_html=pagination_html,
-            messages_html=page_messages_dict[str(page_num)],
-            has_code_view=has_code_view,
-            active_tab="transcript",
-            use_page_data_json=False,  # Always include content for local viewing
-            use_external_assets=use_external_assets,
-        )
-        (output_dir / f"page-{page_num:03d}.html").write_text(
-            page_content, encoding="utf-8"
-        )
-        click.echo(f"Generated page-{page_num:03d}.html")
-
-    # Calculate overall stats and collect all commits for timeline
-    total_tool_counts = {}
-    total_messages = 0
-    all_commits = []  # (timestamp, hash, message, page_num, conv_index)
-    for i, conv in enumerate(conversations):
-        total_messages += len(conv["messages"])
-        stats = analyze_conversation(conv["messages"])
-        for tool, count in stats["tool_counts"].items():
-            total_tool_counts[tool] = total_tool_counts.get(tool, 0) + count
-        page_num = (i // PROMPTS_PER_PAGE) + 1
-        for commit_hash, commit_msg, commit_ts in stats["commits"]:
-            all_commits.append((commit_ts, commit_hash, commit_msg, page_num, i))
-    total_tool_calls = sum(total_tool_counts.values())
-    total_commits = len(all_commits)
-
-    # Build timeline items: prompts and commits merged by timestamp
-    timeline_items = []
-
-    # Add prompts
-    prompt_num = 0
-    for i, conv in enumerate(conversations):
-        if conv.get("is_continuation"):
-            continue
-        if conv["user_text"].startswith("Stop hook feedback:"):
-            continue
-        prompt_num += 1
-        page_num = (i // PROMPTS_PER_PAGE) + 1
-        msg_id = make_msg_id(conv["timestamp"])
-        link = f"page-{page_num:03d}.html#{msg_id}"
-        rendered_content = render_markdown_text(conv["user_text"])
-
-        # Collect all messages including from subsequent continuation conversations
-        # This ensures long_texts from continuations appear with the original prompt
-        all_messages = list(conv["messages"])
-        for j in range(i + 1, len(conversations)):
-            if not conversations[j].get("is_continuation"):
-                break
-            all_messages.extend(conversations[j]["messages"])
-
-        # Analyze conversation for stats (excluding commits from inline display now)
-        stats = analyze_conversation(all_messages)
-        tool_stats_str = format_tool_stats(stats["tool_counts"])
-
-        long_texts_html = ""
-        for lt in stats["long_texts"]:
-            rendered_lt = render_markdown_text(lt)
-            long_texts_html += _macros.index_long_text(rendered_lt)
-
-        stats_html = _macros.index_stats(tool_stats_str, long_texts_html)
-
-        item_html = _macros.index_item(
-            prompt_num, link, conv["timestamp"], rendered_content, stats_html
-        )
-        timeline_items.append((conv["timestamp"], "prompt", item_html))
-
-    # Add commits as separate timeline items
-    for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
-        item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
-        )
-        timeline_items.append((commit_ts, "commit", item_html))
-
-    # Sort by timestamp
-    timeline_items.sort(key=lambda x: x[0])
-    index_items = [item[2] for item in timeline_items]
-    index_items_html = "".join(index_items)
-
-    # Write index-data.json for gist lazy loading if session is large
-    if use_page_data_json:
-        index_data_file = output_dir / "index-data.json"
-        index_data_file.write_text(json.dumps(index_items_html), encoding="utf-8")
-
-    index_pagination = generate_index_pagination_html(total_pages)
-    index_template = get_template("index.html")
-    # Always include content in HTML for local viewing (use_index_data_json=False)
-    # JSON file is generated above for gist preview loading
-    index_content = index_template.render(
-        pagination_html=index_pagination,
-        prompt_num=prompt_num,
-        total_messages=total_messages,
-        total_tool_calls=total_tool_calls,
-        total_commits=total_commits,
-        total_pages=total_pages,
-        index_items_html=index_items_html,
-        has_code_view=has_code_view,
-        active_tab="transcript",
-        use_index_data_json=False,  # Always include content for local viewing
-        use_external_assets=use_external_assets,
+    _generate_html_impl(
+        loglines,
+        output_dir,
+        github_repo=github_repo,
+        code_view=code_view,
+        exclude_deleted_files=exclude_deleted_files,
+        echo=echo,
     )
-    index_path = output_dir / "index.html"
-    index_path.write_text(index_content, encoding="utf-8")
-    click.echo(
-        f"Generated {index_path.resolve()} ({total_convs} prompts, {total_pages} pages)"
-    )
-
-    # Generate code view if requested
-    if has_code_view:
-        num_ops = len(file_operations)
-        num_files = len(set(op.file_path for op in file_operations))
-
-        last_phase = [None]  # Use list to allow mutation in nested function
-
-        def code_view_progress(phase, current, total):
-            # Clear line when switching phases
-            if last_phase[0] and last_phase[0] != phase:
-                click.echo("\r" + " " * 60 + "\r", nl=False)
-            last_phase[0] = phase
-
-            if phase == "operations" and num_ops > 20:
-                click.echo(
-                    f"\rCode view: replaying operation {current}/{total}...",
-                    nl=False,
-                )
-            elif phase == "files" and num_files > 5:
-                click.echo(
-                    f"\rCode view: processing file {current}/{total}...",
-                    nl=False,
-                )
-
-        msg_to_user_html, msg_to_context_id, msg_to_prompt_num = build_msg_to_user_html(
-            conversations
-        )
-        generate_code_view_html(
-            output_dir,
-            file_operations,
-            transcript_messages=all_messages_html,
-            msg_to_user_html=msg_to_user_html,
-            msg_to_context_id=msg_to_context_id,
-            msg_to_prompt_num=msg_to_prompt_num,
-            total_pages=total_pages,
-            progress_callback=code_view_progress,
-        )
-        # Clear progress line
-        if num_ops > 20 or num_files > 5:
-            click.echo("\r" + " " * 60 + "\r", nl=False)
-        click.echo(f"Generated code.html ({num_files} files)")
 
 
 @cli.command("web")
