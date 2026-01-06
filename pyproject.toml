@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
     "click",
     "click-default-group",
+    "duckdb",
     "httpx",
     "jinja2",
     "markdown",

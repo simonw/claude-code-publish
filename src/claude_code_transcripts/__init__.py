@@ -14,6 +14,7 @@ from pathlib import Path
 
 import click
 from click_default_group import DefaultGroup
+import duckdb
 import httpx
 from jinja2 import Environment, PackageLoader
 import markdown
@@ -648,6 +649,394 @@ def _generate_search_index(projects, output_dir):
     )
     output_path = output_dir / "search-index.js"
     output_path.write_text(js_content, encoding="utf-8")
+
+
+# =============================================================================
+# DuckDB Export Functions
+# =============================================================================
+
+
+def create_duckdb_schema(db_path):
+    """Create DuckDB database with schema for transcript data.
+
+    Args:
+        db_path: Path to the DuckDB database file
+
+    Returns:
+        duckdb.Connection to the database
+    """
+    conn = duckdb.connect(str(db_path))
+
+    # Sessions table
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE sessions (
+            session_id VARCHAR,
+            project_path VARCHAR,
+            project_name VARCHAR,
+            first_timestamp TIMESTAMP,
+            last_timestamp TIMESTAMP,
+            message_count INTEGER,
+            user_message_count INTEGER,
+            assistant_message_count INTEGER,
+            tool_use_count INTEGER,
+            cwd VARCHAR,
+            git_branch VARCHAR,
+            version VARCHAR
+        )
+    """
+    )
+
+    # Messages table
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE messages (
+            id VARCHAR,
+            session_id VARCHAR,
+            parent_id VARCHAR,
+            type VARCHAR,
+            timestamp TIMESTAMP,
+            model VARCHAR,
+            content TEXT,
+            content_json JSON,
+            has_tool_use BOOLEAN,
+            has_tool_result BOOLEAN,
+            has_thinking BOOLEAN
+        )
+    """
+    )
+
+    # Tool calls table
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE tool_calls (
+            tool_use_id VARCHAR,
+            session_id VARCHAR,
+            message_id VARCHAR,
+            result_message_id VARCHAR,
+            tool_name VARCHAR,
+            input_json JSON,
+            input_summary TEXT,
+            output_text TEXT,
+            timestamp TIMESTAMP
+        )
+    """
+    )
+
+    # Thinking table
+    conn.execute(
+        """
+        CREATE OR REPLACE TABLE thinking (
+            id INTEGER,
+            session_id VARCHAR,
+            message_id VARCHAR,
+            thinking_text TEXT,
+            timestamp TIMESTAMP
+        )
+    """
+    )
+
+    return conn
+
+
+def export_session_to_duckdb(
+    conn, session_path, project_name, include_thinking=False, truncate_output=2000
+):
+    """Export a single session to DuckDB.
+
+    Args:
+        conn: DuckDB connection
+        session_path: Path to the JSONL session file
+        project_name: Name of the project
+        include_thinking: Whether to export thinking blocks
+        truncate_output: Max characters for tool output (default 2000)
+    """
+    session_path = Path(session_path)
+    session_id = None
+    cwd = None
+    git_branch = None
+    version = None
+    first_timestamp = None
+    last_timestamp = None
+    user_count = 0
+    assistant_count = 0
+    tool_use_count = 0
+
+    # Maps to link tool_use to tool_result
+    tool_use_map = (
+        {}
+    )  # tool_use_id -> {message_id, tool_name, input_json, input_summary, timestamp}
+    thinking_id = 0
+
+    with open(session_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            entry_type = entry.get("type")
+            if entry_type not in ("user", "assistant"):
+                continue
+
+            # Extract metadata from first entry
+            # Always use file stem as unique ID (agent files share parent sessionId)
+            if session_id is None:
+                session_id = session_path.stem
+                cwd = entry.get("cwd")
+                git_branch = entry.get("gitBranch")
+                version = entry.get("version")
+
+            uuid = entry.get("uuid", "")
+            parent_uuid = entry.get("parentUuid")
+            timestamp_str = entry.get("timestamp", "")
+            message_data = entry.get("message", {})
+
+            # Parse timestamp
+            timestamp = None
+            if timestamp_str:
+                try:
+                    timestamp = datetime.fromisoformat(
+                        timestamp_str.replace("Z", "+00:00")
+                    )
+                    if first_timestamp is None:
+                        first_timestamp = timestamp
+                    last_timestamp = timestamp
+                except ValueError:
+                    pass
+
+            # Extract content
+            content = message_data.get("content", "")
+            model = message_data.get("model")
+            has_tool_use = False
+            has_tool_result = False
+            has_thinking = False
+            text_content = ""
+
+            if isinstance(content, str):
+                text_content = content
+            elif isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    block_type = block.get("type")
+
+                    if block_type == "text":
+                        text_parts.append(block.get("text", ""))
+
+                    elif block_type == "tool_use":
+                        has_tool_use = True
+                        tool_use_count += 1
+                        tool_id = block.get("id", "")
+                        tool_name = block.get("name", "")
+                        tool_input = block.get("input", {})
+
+                        # Create summary of input
+                        if isinstance(tool_input, dict):
+                            input_summary = json.dumps(tool_input)[:truncate_output]
+                        else:
+                            input_summary = str(tool_input)[:truncate_output]
+
+                        tool_use_map[tool_id] = {
+                            "message_id": uuid,
+                            "tool_name": tool_name,
+                            "input_json": json.dumps(tool_input),
+                            "input_summary": input_summary,
+                            "timestamp": timestamp,
+                        }
+
+                    elif block_type == "tool_result":
+                        has_tool_result = True
+                        tool_id = block.get("tool_use_id", "")
+                        result_content = block.get("content", "")
+                        if isinstance(result_content, str):
+                            output_text = result_content[:truncate_output]
+                        else:
+                            output_text = str(result_content)[:truncate_output]
+
+                        # Link to tool_use and insert
+                        if tool_id in tool_use_map:
+                            tool_info = tool_use_map[tool_id]
+                            conn.execute(
+                                """
+                                INSERT INTO tool_calls (
+                                    tool_use_id, session_id, message_id,
+                                    result_message_id, tool_name, input_json,
+                                    input_summary, output_text, timestamp
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                                [
+                                    tool_id,
+                                    session_id,
+                                    tool_info["message_id"],
+                                    uuid,
+                                    tool_info["tool_name"],
+                                    tool_info["input_json"],
+                                    tool_info["input_summary"],
+                                    output_text,
+                                    tool_info["timestamp"],
+                                ],
+                            )
+
+                    elif block_type == "thinking":
+                        has_thinking = True
+                        if include_thinking:
+                            thinking_text = block.get("thinking", "")
+                            thinking_id += 1
+                            conn.execute(
+                                """
+                                INSERT INTO thinking (id, session_id, message_id, thinking_text, timestamp)
+                                VALUES (?, ?, ?, ?, ?)
+                            """,
+                                [
+                                    thinking_id,
+                                    session_id,
+                                    uuid,
+                                    thinking_text,
+                                    timestamp,
+                                ],
+                            )
+
+                text_content = " ".join(text_parts)
+
+            # Count messages
+            if entry_type == "user":
+                user_count += 1
+            else:
+                assistant_count += 1
+
+            # Insert message
+            conn.execute(
+                """
+                INSERT INTO messages (
+                    id, session_id, parent_id, type, timestamp, model,
+                    content, content_json, has_tool_use, has_tool_result, has_thinking
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                [
+                    uuid,
+                    session_id,
+                    parent_uuid,
+                    entry_type,
+                    timestamp,
+                    model,
+                    text_content,
+                    json.dumps(content) if isinstance(content, list) else None,
+                    has_tool_use,
+                    has_tool_result,
+                    has_thinking,
+                ],
+            )
+
+    # Insert session metadata
+    if session_id:
+        conn.execute(
+            """
+            INSERT INTO sessions (
+                session_id, project_path, project_name, first_timestamp, last_timestamp,
+                message_count, user_message_count, assistant_message_count,
+                tool_use_count, cwd, git_branch, version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            [
+                session_id,
+                str(session_path),
+                project_name,
+                first_timestamp,
+                last_timestamp,
+                user_count + assistant_count,
+                user_count,
+                assistant_count,
+                tool_use_count,
+                cwd,
+                git_branch,
+                version,
+            ],
+        )
+
+
+def generate_duckdb_archive(
+    source_folder,
+    output_dir,
+    include_agents=False,
+    include_thinking=False,
+    truncate_output=2000,
+    progress_callback=None,
+):
+    """Generate DuckDB archive for all sessions.
+
+    Args:
+        source_folder: Path to Claude projects folder
+        output_dir: Path for output
+        include_agents: Whether to include agent sessions
+        include_thinking: Whether to include thinking blocks
+        truncate_output: Max chars for tool output
+        progress_callback: Optional progress callback
+
+    Returns:
+        dict with statistics
+    """
+    source_folder = Path(source_folder)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    db_path = output_dir / "archive.duckdb"
+    conn = create_duckdb_schema(db_path)
+
+    projects = find_all_sessions(source_folder, include_agents=include_agents)
+
+    total_session_count = sum(len(p["sessions"]) for p in projects)
+    processed_count = 0
+    successful_sessions = 0
+    failed_sessions = []
+
+    for project in projects:
+        project_name = project["name"]
+
+        for session in project["sessions"]:
+            session_path = session["path"]
+
+            try:
+                export_session_to_duckdb(
+                    conn,
+                    session_path,
+                    project_name,
+                    include_thinking=include_thinking,
+                    truncate_output=truncate_output,
+                )
+                successful_sessions += 1
+            except Exception as e:
+                failed_sessions.append(
+                    {
+                        "project": project_name,
+                        "session": session_path.stem,
+                        "error": str(e),
+                    }
+                )
+
+            processed_count += 1
+            if progress_callback:
+                progress_callback(
+                    project_name,
+                    session_path.stem,
+                    processed_count,
+                    total_session_count,
+                )
+
+    conn.close()
+
+    return {
+        "total_projects": len(projects),
+        "total_sessions": successful_sessions,
+        "failed_sessions": failed_sessions,
+        "output_dir": output_dir,
+        "db_path": db_path,
+    }
 
 
 def parse_session_file(filepath):
@@ -2250,8 +2639,28 @@ def web_cmd(
     is_flag=True,
     help="Skip generating the search index (faster, smaller output).",
 )
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["html", "duckdb", "both"]),
+    default="html",
+    help="Output format: html (default), duckdb, or both.",
+)
+@click.option(
+    "--include-thinking",
+    is_flag=True,
+    help="Include thinking blocks in DuckDB export (can be large).",
+)
 def all_cmd(
-    source, output, include_agents, dry_run, open_browser, quiet, no_search_index
+    source,
+    output,
+    include_agents,
+    dry_run,
+    open_browser,
+    quiet,
+    no_search_index,
+    output_format,
+    include_thinking,
 ):
     """Convert all local Claude Code sessions to a browsable HTML archive.
 
@@ -2312,31 +2721,52 @@ def all_cmd(
         if not quiet and current % 10 == 0:
             click.echo(f"  Processed {current}/{total} sessions...")
 
-    # Generate the archive using the library function
-    stats = generate_batch_html(
-        source,
-        output,
-        include_agents=include_agents,
-        progress_callback=on_progress,
-        no_search_index=no_search_index,
-    )
+    stats = None
+    duckdb_stats = None
+
+    # Generate HTML if requested
+    if output_format in ("html", "both"):
+        stats = generate_batch_html(
+            source,
+            output,
+            include_agents=include_agents,
+            progress_callback=on_progress,
+            no_search_index=no_search_index,
+        )
+
+    # Generate DuckDB if requested
+    if output_format in ("duckdb", "both"):
+        if not quiet:
+            if output_format == "both":
+                click.echo("\nGenerating DuckDB archive...")
+        duckdb_stats = generate_duckdb_archive(
+            source,
+            output,
+            include_agents=include_agents,
+            include_thinking=include_thinking,
+            progress_callback=on_progress if output_format == "duckdb" else None,
+        )
+        if stats is None:
+            stats = duckdb_stats
 
     # Report any failures
-    if stats["failed_sessions"]:
+    if stats and stats["failed_sessions"]:
         click.echo(f"\nWarning: {len(stats['failed_sessions'])} session(s) failed:")
         for failure in stats["failed_sessions"]:
             click.echo(
                 f"  {failure['project']}/{failure['session']}: {failure['error']}"
             )
 
-    if not quiet:
+    if not quiet and stats:
         click.echo(
             f"\nGenerated archive with {stats['total_projects']} projects, "
             f"{stats['total_sessions']} sessions"
         )
         click.echo(f"Output: {output.resolve()}")
+        if output_format in ("duckdb", "both") and duckdb_stats:
+            click.echo(f"DuckDB: {duckdb_stats['db_path']}")
 
-    if open_browser:
+    if open_browser and output_format in ("html", "both"):
         index_url = (output / "index.html").resolve().as_uri()
         webbrowser.open(index_url)
 
