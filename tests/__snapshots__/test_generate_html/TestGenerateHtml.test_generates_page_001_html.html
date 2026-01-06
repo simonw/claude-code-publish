@@ -5,21 +5,102 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Claude Code transcript - page 1</title>
     <style>
-:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
+:root {
+  /* Backgrounds - Craft.do inspired warm palette */
+  --bg-primary: #faf9f7;           /* Warm off-white */
+  --bg-secondary: #f5f3f0;         /* Cream */
+  --bg-tertiary: #ebe8e4;          /* Soft gray-cream */
+  --bg-paper: #fffffe;             /* Pure paper white */
+
+  /* Text Colors */
+  --text-primary: #1a1a1a;         /* Deep charcoal */
+  --text-secondary: #4a4a4a;       /* Warm dark gray */
+  --text-muted: #7a7a7a;           /* Medium gray */
+  --text-subtle: #a0a0a0;          /* Light gray */
+
+  /* Accent Colors */
+  --accent-purple: #7c3aed;        /* Primary purple */
+  --accent-purple-light: #a78bfa;  /* Light purple */
+  --accent-purple-bg: rgba(124, 58, 237, 0.08);
+  --accent-blue: #0ea5e9;          /* Sky blue */
+  --accent-blue-light: #7dd3fc;
+  --accent-green: #10b981;         /* Success green */
+  --accent-green-bg: rgba(16, 185, 129, 0.08);
+  --accent-red: #ef4444;           /* Error red */
+  --accent-red-bg: rgba(239, 68, 68, 0.08);
+  --accent-orange: #f59e0b;        /* Warning orange */
+
+  /* Surface & Cards */
+  --card-bg: #fffffe;
+  --card-border: rgba(0, 0, 0, 0.06);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+  --card-shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
+
+  /* Borders & Dividers */
+  --border-light: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.1);
+  --border-radius-sm: 6px;
+  --border-radius-md: 10px;
+  --border-radius-lg: 14px;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Sticky Header Heights */
+  --sticky-level-0: 48px;  /* Message header */
+  --sticky-level-1: 44px;  /* Cell header */
+  --sticky-level-2: 40px;  /* Subcell header */
+
+  /* Frosted Glass Effect */
+  --glass-bg: rgba(255, 255, 254, 0.85);
+  --glass-blur: blur(12px);
+  --glass-border: rgba(255, 255, 255, 0.2);
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-medium: 0.25s ease;
+
+  /* Typography */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+
+  /* Legacy variable mappings for backward compatibility */
+  --bg-color: var(--bg-primary);
+  --user-bg: #e8f4fd;
+  --user-border: var(--accent-blue);
+  --assistant-bg: var(--bg-secondary);
+  --assistant-border: var(--border-medium);
+  --thinking-bg: #fef9e7;
+  --thinking-border: var(--accent-orange);
+  --thinking-text: var(--text-secondary);
+  --tool-bg: var(--accent-purple-bg);
+  --tool-border: var(--accent-purple);
+  --tool-result-bg: var(--accent-green-bg);
+  --tool-error-bg: var(--accent-red-bg);
+  --text-color: var(--text-primary);
+  --code-bg: #1e1e2e;
+  --code-text: #a6e3a1;
+}
 * { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"); color: var(--text-primary); margin: 0; padding: var(--spacing-md); line-height: 1.6; }
 .container { max-width: 800px; margin: 0 auto; }
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.message { margin-bottom: var(--spacing-md); border-radius: var(--border-radius-lg); box-shadow: var(--card-shadow); transition: box-shadow var(--transition-fast); }
 .message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
 .message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
 .message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
 .tool-reply .role-label { color: #e65100; }
 .tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
 .tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.message-header { display: flex; justify-content: space-between; align-items: center; padding: var(--spacing-sm) var(--spacing-md); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); font-size: var(--font-size-sm); border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0; position: sticky; top: 0; z-index: 30; }
 .role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .user .role-label { color: var(--user-border); }
 time { color: var(--text-muted); font-size: 0.8rem; }
@@ -27,89 +108,142 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .timestamp-link:hover { text-decoration: underline; }
 .message:target { animation: highlight 2s ease-out; }
 @keyframes highlight { 0% { background-color: rgba(25, 118, 210, 0.2); } 100% { background-color: transparent; } }
-.message-content { padding: 16px; }
+.message-content { padding: var(--spacing-md); }
 .message-content p { margin: 0 0 12px 0; }
 .message-content p:last-child { margin-bottom: 0; }
-.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 0.9rem; color: var(--thinking-text); }
-.thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
+.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; font-size: var(--font-size-sm); color: var(--thinking-text); }
+.thinking-label { font-size: var(--font-size-xs); font-weight: 600; text-transform: uppercase; color: var(--accent-orange); margin-bottom: var(--spacing-sm); }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
-.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.tool-icon { font-size: 1.1rem; }
-.tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
-.tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.cell { margin: var(--spacing-sm) 0; border-radius: var(--border-radius-md); overflow: visible; }
+.cell summary { cursor: pointer; padding: var(--spacing-sm) var(--spacing-md); display: flex; align-items: center; font-weight: 600; font-size: var(--font-size-sm); list-style: none; position: sticky; top: var(--sticky-level-0); z-index: 20; background: inherit; backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); gap: var(--spacing-sm); }
+.cell summary .cell-label { flex: 1; }
+.cell summary::-webkit-details-marker { display: none; }
+.cell summary::before { content: '▶'; font-size: var(--font-size-xs); margin-right: var(--spacing-sm); transition: transform var(--transition-fast); }
+.cell[open] summary::before { transform: rotate(90deg); }
+.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: var(--accent-orange); border-radius: var(--border-radius-md); transition: background var(--transition-fast), border-color var(--transition-fast); }
+.thinking-cell summary:hover { background: rgba(254, 249, 231, 0.9); border-color: var(--accent-orange); }
+.thinking-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.response-cell summary { background: var(--border-light); border: 1px solid var(--assistant-border); color: var(--text-primary); border-radius: var(--border-radius-md); transition: background var(--transition-fast), border-color var(--transition-fast); }
+.response-cell summary:hover { background: var(--bg-tertiary); border-color: var(--border-medium); }
+.response-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--accent-purple); border-radius: var(--border-radius-md); transition: background var(--transition-fast), border-color var(--transition-fast); }
+.tools-cell summary:hover { background: rgba(124, 58, 237, 0.12); border-color: var(--accent-purple); }
+.tools-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.user-cell summary { background: var(--user-bg); border: 1px solid var(--user-border); color: var(--accent-blue); border-radius: var(--border-radius-md); transition: var(--transition-fast); }
+.user-cell summary:hover { background: rgba(227, 242, 253, 0.9); border-color: var(--accent-blue); }
+.user-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.user-cell .cell-content { background: var(--user-bg); border-color: var(--user-border); }
+.cell-content { padding: var(--spacing-md); border: 1px solid var(--border-medium); border-top: none; border-radius: 0 0 var(--border-radius-md) var(--border-radius-md); background: var(--card-bg); }
+.thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
+.tools-cell .cell-content { background: var(--accent-purple-bg); border-color: var(--tool-border); }
+.cell-copy-btn { padding: var(--spacing-xs) var(--spacing-sm); background: var(--glass-bg); border: 1px solid var(--border-light); border-radius: var(--border-radius-sm); cursor: pointer; font-size: var(--font-size-xs); color: var(--text-muted); transition: all var(--transition-fast); margin-left: auto; }
+.cell-copy-btn:hover { background: var(--bg-paper); color: var(--text-primary); border-color: var(--border-medium); }
+.cell-copy-btn:focus { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.cell-copy-btn.copied { background: var(--accent-green-bg); color: var(--accent-green); border-color: var(--accent-green); }
+.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
+.tool-header { font-weight: 600; color: var(--accent-purple); margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: var(--spacing-sm); position: sticky; top: calc(var(--sticky-level-0) + var(--sticky-level-1)); z-index: 10; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: var(--spacing-xs) 0; flex-wrap: wrap; }
+.tool-icon { font-size: var(--font-size-lg); min-width: 1.5em; text-align: center; }
+.tool-description { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: var(--spacing-sm); font-style: italic; }
+.tool-description p { margin: 0; }
+.tool-input-rendered { font-family: monospace; white-space: pre-wrap; font-size: var(--font-size-sm); line-height: 1.5; }
+/* Tab-style view toggle (shadcn inspired) */
+.view-toggle { display: inline-flex; background: var(--bg-tertiary); border-radius: var(--border-radius-sm); padding: 2px; gap: 2px; margin-left: auto; }
+.view-toggle-tab { padding: var(--spacing-xs) var(--spacing-sm); font-size: var(--font-size-xs); font-weight: 500; color: var(--text-muted); background: transparent; border: none; border-radius: 4px; cursor: pointer; transition: var(--transition-fast); white-space: nowrap; }
+.view-toggle-tab:hover { color: var(--text-secondary); background: rgba(0, 0, 0, 0.04); }
+.view-toggle-tab.active { color: var(--text-primary); background: var(--bg-paper); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.view-json { display: none; }
+.view-markdown { display: block; }
+.show-json .view-json { display: block; }
+.show-json .view-markdown { display: none; }
+.tool-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); position: sticky; top: calc(var(--sticky-level-0) + var(--sticky-level-1)); z-index: 10; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: var(--spacing-xs) 0; }
+.tool-result-label { font-weight: 600; font-size: var(--font-size-sm); color: var(--accent-green); display: flex; align-items: center; gap: var(--spacing-sm); }
+.tool-result.tool-error .tool-result-label { color: var(--accent-red); }
+.result-icon { font-size: var(--font-size-base); }
+.tool-call-label { font-weight: 600; font-size: var(--font-size-xs); color: var(--accent-purple); background: var(--accent-purple-bg); padding: 2px var(--spacing-sm); border-radius: var(--border-radius-sm); margin-right: var(--spacing-sm); display: inline-flex; align-items: center; gap: var(--spacing-xs); }
+.call-icon { font-size: var(--font-size-sm); }
+.json-key { color: var(--accent-purple); font-weight: 600; }
+.json-string-value { color: var(--accent-green); }
+.json-string-value p { display: inline; margin: 0; }
+.json-string-value code { background: var(--border-light); padding: 1px var(--spacing-xs); border-radius: 3px; }
+.json-string-value strong { font-weight: 600; }
+.json-string-value em { font-style: italic; }
+.json-string-value a { color: var(--accent-blue); text-decoration: underline; }
+.json-number { color: var(--accent-red); font-weight: 500; }
+.json-bool { color: var(--accent-blue); font-weight: 600; }
+.json-null { color: var(--text-muted); font-style: italic; }
+.tool-result { background: var(--tool-result-bg); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
 .tool-result.tool-error { background: var(--tool-error-bg); }
-.tool-pair { border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px; margin: 12px 0; background: rgba(156, 39, 176, 0.06); }
-.tool-pair .tool-use, .tool-pair .tool-result { margin: 8px 0; }
-.file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
-.write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
-.edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
-.file-tool-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.write-header { color: #2e7d32; }
-.edit-header { color: #e65100; }
-.file-tool-icon { font-size: 1rem; }
-.file-tool-path { font-family: monospace; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 4px; }
-.file-tool-fullpath { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
+.tool-pair { border: 1px solid var(--tool-border); border-radius: var(--border-radius-md); padding: var(--spacing-sm); margin: var(--spacing-md) 0; background: var(--accent-purple-bg); }
+.tool-pair .tool-use, .tool-pair .tool-result { margin: var(--spacing-sm) 0; }
+.file-tool { border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
+.write-tool { background: linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%); border: 1px solid var(--accent-green); }
+.edit-tool { background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(239, 68, 68, 0.05) 100%); border: 1px solid var(--accent-orange); }
+.file-tool-header { font-weight: 600; margin-bottom: var(--spacing-xs); display: flex; align-items: center; gap: var(--spacing-sm); font-size: var(--font-size-sm); flex-wrap: wrap; }
+.write-header { color: var(--accent-green); }
+.edit-header { color: var(--accent-orange); }
+.file-tool-icon { font-size: var(--font-size-base); }
+.file-tool-path { font-family: monospace; background: var(--border-light); padding: 2px var(--spacing-sm); border-radius: var(--border-radius-sm); }
+.file-tool-fullpath { font-family: monospace; font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--spacing-sm); word-break: break-all; }
 .file-content { margin: 0; }
-.edit-section { display: flex; margin: 4px 0; border-radius: 4px; overflow: hidden; }
-.edit-label { padding: 8px 12px; font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
-.edit-old { background: #fce4ec; }
-.edit-old .edit-label { color: #b71c1c; background: #f8bbd9; }
-.edit-old .edit-content { color: #880e4f; }
-.edit-new { background: #e8f5e9; }
-.edit-new .edit-label { color: #1b5e20; background: #a5d6a7; }
-.edit-new .edit-content { color: #1b5e20; }
-.edit-content { margin: 0; flex: 1; background: transparent; font-size: 0.85rem; }
-.edit-replace-all { font-size: 0.75rem; font-weight: normal; color: var(--text-muted); }
-.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #e6f4ea); }
-.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff0e5); }
-.todo-list { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border: 1px solid #81c784; border-radius: 8px; padding: 12px; margin: 12px 0; }
-.todo-header { font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+.edit-section { display: flex; margin: var(--spacing-xs) 0; border-radius: var(--border-radius-sm); overflow: hidden; }
+.edit-label { padding: var(--spacing-sm) var(--spacing-md); font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
+.edit-old { background: var(--accent-red-bg); }
+.edit-old .edit-label { color: var(--accent-red); background: rgba(239, 68, 68, 0.15); }
+.edit-old .edit-content { color: var(--accent-red); }
+.edit-new { background: var(--accent-green-bg); }
+.edit-new .edit-label { color: var(--accent-green); background: rgba(16, 185, 129, 0.15); }
+.edit-new .edit-content { color: var(--accent-green); }
+.edit-content { margin: 0; flex: 1; background: transparent; font-size: var(--font-size-sm); }
+.edit-replace-all { font-size: var(--font-size-xs); font-weight: normal; color: var(--text-muted); }
+.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.08)); }
+.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, rgba(245, 158, 11, 0.08)); }
+.todo-list { background: linear-gradient(135deg, var(--accent-green-bg) 0%, rgba(16, 185, 129, 0.04) 100%); border: 1px solid var(--accent-green); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
+.todo-header { font-weight: 600; color: var(--accent-green); margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: var(--spacing-sm); font-size: var(--font-size-sm); flex-wrap: wrap; }
 .todo-items { list-style: none; margin: 0; padding: 0; }
-.todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 0.9rem; }
+.todo-item { display: flex; align-items: flex-start; gap: var(--spacing-sm); padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--border-light); font-size: var(--font-size-sm); }
 .todo-item:last-child { border-bottom: none; }
 .todo-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%; }
-.todo-completed .todo-icon { color: #2e7d32; background: rgba(46, 125, 50, 0.15); }
-.todo-completed .todo-content { color: #558b2f; text-decoration: line-through; }
-.todo-in-progress .todo-icon { color: #f57c00; background: rgba(245, 124, 0, 0.15); }
-.todo-in-progress .todo-content { color: #e65100; font-weight: 500; }
-.todo-pending .todo-icon { color: #757575; background: rgba(0,0,0,0.05); }
-.todo-pending .todo-content { color: #616161; }
-pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
+.todo-completed .todo-icon { color: var(--accent-green); background: var(--accent-green-bg); }
+.todo-completed .todo-content { color: var(--accent-green); text-decoration: line-through; }
+.todo-in-progress .todo-icon { color: var(--accent-orange); background: rgba(245, 158, 11, 0.15); }
+.todo-in-progress .todo-content { color: var(--accent-orange); font-weight: 500; }
+.todo-pending .todo-icon { color: var(--text-muted); background: var(--border-light); }
+.todo-pending .todo-content { color: var(--text-secondary); }
+pre { background: var(--code-bg); color: var(--code-text); padding: var(--spacing-md); border-radius: var(--border-radius-sm); overflow-x: auto; font-size: var(--font-size-sm); line-height: 1.5; margin: var(--spacing-sm) 0; white-space: pre-wrap; word-wrap: break-word; }
 pre.json { color: #e0e0e0; }
 pre.highlight { color: #e0e0e0; }
-code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+code { background: var(--border-light); padding: 2px var(--spacing-sm); border-radius: var(--border-radius-sm); font-size: 0.9em; }
 pre code { background: none; padding: 0; }
 .highlight .hll { background-color: #49483e }
-.highlight .c { color: #75715e } /* Comment */
-.highlight .err { color: #f92672 } /* Error */
-.highlight .k { color: #66d9ef } /* Keyword */
-.highlight .l { color: #ae81ff } /* Literal */
-.highlight .n { color: #e0e0e0 } /* Name */
-.highlight .o { color: #f92672 } /* Operator */
-.highlight .p { color: #e0e0e0 } /* Punctuation */
-.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #75715e } /* Comments */
-.highlight .gd { color: #f92672 } /* Generic.Deleted */
-.highlight .gi { color: #a6e22e } /* Generic.Inserted */
-.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #66d9ef } /* Keywords */
-.highlight .ld { color: #e6db74 } /* Literal.Date */
-.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #ae81ff } /* Numbers */
-.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #e6db74 } /* Strings */
-.highlight .na { color: #a6e22e } /* Name.Attribute */
-.highlight .nb { color: #e0e0e0 } /* Name.Builtin */
-.highlight .nc { color: #a6e22e } /* Name.Class */
-.highlight .no { color: #66d9ef } /* Name.Constant */
-.highlight .nd { color: #a6e22e } /* Name.Decorator */
-.highlight .ne { color: #a6e22e } /* Name.Exception */
-.highlight .nf { color: #a6e22e } /* Name.Function */
-.highlight .nl { color: #e0e0e0 } /* Name.Label */
-.highlight .nn { color: #e0e0e0 } /* Name.Namespace */
-.highlight .nt { color: #f92672 } /* Name.Tag */
-.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #e0e0e0 } /* Variables */
-.highlight .ow { color: #f92672 } /* Operator.Word */
-.highlight .w { color: #e0e0e0 } /* Text.Whitespace */
-.user-content { margin: 0; }
+.highlight .c { color: #8a9a5b; font-style: italic; } /* Comment - softer green-gray, italic */
+.highlight .err { color: #ff6b6b } /* Error - softer red */
+.highlight .k { color: #ff79c6; font-weight: 600; } /* Keyword - pink, bold */
+.highlight .l { color: #bd93f9 } /* Literal - purple */
+.highlight .n { color: #f8f8f2 } /* Name - bright white */
+.highlight .o { color: #ff79c6 } /* Operator - pink */
+.highlight .p { color: #f8f8f2 } /* Punctuation - bright white */
+.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #8a9a5b; font-style: italic; } /* Comments - softer green-gray, italic */
+.highlight .gd { color: #ff6b6b; background: rgba(255,107,107,0.15); } /* Generic.Deleted - red with bg */
+.highlight .gi { color: #50fa7b; background: rgba(80,250,123,0.15); } /* Generic.Inserted - green with bg */
+.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #8be9fd; font-weight: 600; } /* Keywords - cyan, bold */
+.highlight .ld { color: #f1fa8c } /* Literal.Date - yellow */
+.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #bd93f9 } /* Numbers - purple */
+.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #f1fa8c } /* Strings - yellow */
+.highlight .na { color: #50fa7b } /* Name.Attribute - green */
+.highlight .nb { color: #8be9fd } /* Name.Builtin - cyan */
+.highlight .nc { color: #50fa7b; font-weight: 600; } /* Name.Class - green, bold */
+.highlight .no { color: #8be9fd } /* Name.Constant - cyan */
+.highlight .nd { color: #ffb86c } /* Name.Decorator - orange */
+.highlight .ne { color: #ff79c6 } /* Name.Exception - pink */
+.highlight .nf { color: #50fa7b } /* Name.Function - green */
+.highlight .nl { color: #f8f8f2 } /* Name.Label - white */
+.highlight .nn { color: #f8f8f2 } /* Name.Namespace - white */
+.highlight .nt { color: #ff79c6 } /* Name.Tag - pink */
+.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #f8f8f2 } /* Variables - white */
+.highlight .ow { color: #ff79c6; font-weight: 600; } /* Operator.Word - pink, bold */
+.highlight .w { color: #f8f8f2 } /* Text.Whitespace */
+.user-content { margin: 0; overflow-wrap: break-word; word-break: break-word; }
 .truncatable { position: relative; }
 .truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
 .truncatable.truncated::after { content: ''; position: absolute; bottom: 32px; left: 0; right: 0; height: 60px; background: linear-gradient(to bottom, transparent, var(--card-bg)); pointer-events: none; }
@@ -117,66 +251,78 @@ pre code { background: none; padding: 0; }
 .message.tool-reply .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
 .tool-use .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-bg)); }
 .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-result-bg)); }
-.expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
-.expand-btn:hover { background: rgba(0,0,0,0.1); }
+.expand-btn { display: none; width: 100%; padding: var(--spacing-sm) var(--spacing-md); margin-top: var(--spacing-xs); background: var(--border-light); border: 1px solid var(--border-medium); border-radius: var(--border-radius-sm); cursor: pointer; font-size: var(--font-size-sm); color: var(--text-muted); transition: background var(--transition-fast); }
+.expand-btn:hover { background: var(--bg-tertiary); }
 .truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
-.copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 8px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.2); border-radius: 4px; cursor: pointer; font-size: 0.75rem; color: var(--text-muted); opacity: 0; transition: opacity 0.2s; z-index: 10; }
-.copy-btn:hover { background: white; color: var(--text-color); }
-.copy-btn.copied { background: #c8e6c9; color: #2e7d32; }
+.copy-btn { position: absolute; top: var(--spacing-sm); right: var(--spacing-sm); padding: var(--spacing-xs) var(--spacing-sm); background: var(--glass-bg); border: 1px solid var(--border-light); border-radius: var(--border-radius-sm); cursor: pointer; font-size: var(--font-size-xs); color: var(--text-muted); opacity: 0; transition: opacity var(--transition-fast); z-index: 10; }
+.copy-btn:hover { background: var(--bg-paper); color: var(--text-primary); }
+.copy-btn.copied { background: var(--accent-green-bg); color: var(--accent-green); }
 pre:hover .copy-btn, .tool-result:hover .copy-btn, .truncatable:hover .copy-btn { opacity: 1; }
 .code-container { position: relative; }
-.pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
-.pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
-.pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
-.pagination a:hover { background: var(--user-bg); }
-.pagination .current { background: var(--user-border); color: white; }
-.pagination .disabled { color: var(--text-muted); border: 1px solid #ddd; }
-.pagination .index-link { background: var(--user-border); color: white; }
-details.continuation { margin-bottom: 16px; }
-details.continuation summary { cursor: pointer; padding: 12px 16px; background: var(--user-bg); border-left: 4px solid var(--user-border); border-radius: 12px; font-weight: 500; color: var(--text-muted); }
-details.continuation summary:hover { background: rgba(25, 118, 210, 0.15); }
-details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom: 0; }
-.index-item { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background: var(--user-bg); border-left: 4px solid var(--user-border); }
+.pagination { display: flex; justify-content: center; gap: var(--spacing-sm); margin: var(--spacing-lg) 0; flex-wrap: wrap; }
+.pagination a, .pagination span { padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--border-radius-sm); text-decoration: none; font-size: var(--font-size-sm); }
+.pagination a { background: var(--card-bg); color: var(--accent-blue); border: 1px solid var(--accent-blue); transition: background var(--transition-fast); }
+.pagination a:hover { background: rgba(14, 165, 233, 0.1); }
+.pagination .current { background: var(--accent-blue); color: white; }
+.pagination .disabled { color: var(--text-muted); border: 1px solid var(--border-light); }
+.pagination .index-link { background: var(--accent-blue); color: white; }
+details.continuation { margin-bottom: var(--spacing-md); }
+details.continuation summary { cursor: pointer; padding: var(--spacing-md); background: var(--user-bg); border-left: 4px solid var(--accent-blue); border-radius: var(--border-radius-lg); font-weight: 500; color: var(--text-muted); transition: background var(--transition-fast); }
+details.continuation summary:hover { background: rgba(14, 165, 233, 0.15); }
+details.continuation[open] summary { border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0; margin-bottom: 0; }
+.index-item { margin-bottom: var(--spacing-md); border-radius: var(--border-radius-lg); overflow: hidden; box-shadow: var(--card-shadow); background: var(--user-bg); border-left: 4px solid var(--accent-blue); transition: box-shadow var(--transition-fast); }
+.index-item:hover { box-shadow: var(--card-shadow-hover); }
 .index-item a { display: block; text-decoration: none; color: inherit; }
-.index-item a:hover { background: rgba(25, 118, 210, 0.1); }
-.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.index-item-number { font-weight: 600; color: var(--user-border); }
-.index-item-content { padding: 16px; }
-.index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
-.index-item-commit { margin-top: 6px; padding: 4px 8px; background: #fff3e0; border-radius: 4px; font-size: 0.85rem; color: #e65100; }
-.index-item-commit code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; margin-right: 6px; }
-.commit-card { margin: 8px 0; padding: 10px 14px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 6px; }
-.commit-card a { text-decoration: none; color: #5d4037; display: block; }
-.commit-card a:hover { color: #e65100; }
-.commit-card-hash { font-family: monospace; color: #e65100; font-weight: 600; margin-right: 8px; }
-.index-commit { margin-bottom: 12px; padding: 10px 16px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.index-item a:hover { background: rgba(14, 165, 233, 0.08); }
+.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: var(--spacing-sm) var(--spacing-md); background: var(--border-light); font-size: var(--font-size-sm); }
+.index-item-number { font-weight: 600; color: var(--accent-blue); }
+.index-item-content { padding: var(--spacing-md); }
+.index-item-stats { padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md) var(--spacing-xl); font-size: var(--font-size-sm); color: var(--text-muted); border-top: 1px solid var(--border-light); }
+.index-item-commit { margin-top: var(--spacing-sm); padding: var(--spacing-xs) var(--spacing-sm); background: rgba(245, 158, 11, 0.1); border-radius: var(--border-radius-sm); font-size: var(--font-size-sm); color: var(--accent-orange); }
+.index-item-commit code { background: var(--border-light); padding: 1px var(--spacing-xs); border-radius: 3px; font-size: var(--font-size-xs); margin-right: var(--spacing-sm); }
+.commit-card { margin: var(--spacing-sm) 0; padding: var(--spacing-sm) var(--spacing-md); background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--accent-orange); border-radius: var(--border-radius-sm); }
+.commit-card a { text-decoration: none; color: var(--text-secondary); display: block; }
+.commit-card a:hover { color: var(--accent-orange); }
+.commit-card-hash { font-family: monospace; color: var(--accent-orange); font-weight: 600; margin-right: var(--spacing-sm); }
+.index-commit { margin-bottom: var(--spacing-md); padding: var(--spacing-sm) var(--spacing-md); background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--accent-orange); border-radius: var(--border-radius-md); box-shadow: var(--card-shadow); }
 .index-commit a { display: block; text-decoration: none; color: inherit; }
-.index-commit a:hover { background: rgba(255, 152, 0, 0.1); margin: -10px -16px; padding: 10px 16px; border-radius: 8px; }
-.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 4px; }
-.index-commit-hash { font-family: monospace; color: #e65100; font-weight: 600; }
-.index-commit-msg { color: #5d4037; }
-.index-item-long-text { margin-top: 8px; padding: 12px; background: var(--card-bg); border-radius: 8px; border-left: 3px solid var(--assistant-border); }
+.index-commit a:hover { background: rgba(245, 158, 11, 0.1); margin: calc(-1 * var(--spacing-sm)) calc(-1 * var(--spacing-md)); padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--border-radius-md); }
+.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: var(--font-size-sm); margin-bottom: var(--spacing-xs); }
+.index-commit-hash { font-family: monospace; color: var(--accent-orange); font-weight: 600; }
+.index-commit-msg { color: var(--text-secondary); }
+.index-item-long-text { margin-top: var(--spacing-sm); padding: var(--spacing-md); background: var(--card-bg); border-radius: var(--border-radius-md); border-left: 3px solid var(--assistant-border); }
 .index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
-.index-item-long-text-content { color: var(--text-color); }
-#search-box { display: none; align-items: center; gap: 8px; }
-#search-box input { padding: 6px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; width: 180px; }
-#search-box button, #modal-search-btn, #modal-close-btn { background: var(--user-border); color: white; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-#search-box button:hover, #modal-search-btn:hover { background: #1565c0; }
-#modal-close-btn { background: var(--text-muted); margin-left: 8px; }
-#modal-close-btn:hover { background: #616161; }
-#search-modal[open] { border: none; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
-#search-modal::backdrop { background: rgba(0,0,0,0.5); }
-.search-modal-header { display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--assistant-border); background: var(--bg-color); border-radius: 12px 12px 0 0; }
-.search-modal-header input { flex: 1; padding: 8px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; }
-#search-status { padding: 8px 16px; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-#search-results { flex: 1; overflow-y: auto; padding: 16px; }
-.search-result { margin-bottom: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.index-item-long-text-content { color: var(--text-primary); }
+#search-box { display: none; align-items: center; gap: var(--spacing-sm); }
+#search-box input { padding: var(--spacing-sm) var(--spacing-md); border: 1px solid var(--border-medium); border-radius: var(--border-radius-sm); font-size: var(--font-size-base); width: 180px; transition: border-color var(--transition-fast); }
+#search-box input:focus { border-color: var(--accent-blue); outline: none; }
+#search-box button, #modal-search-btn, #modal-close-btn { background: var(--accent-blue); color: white; border: none; border-radius: var(--border-radius-sm); padding: var(--spacing-sm) var(--spacing-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--transition-fast); }
+#search-box button:hover, #modal-search-btn:hover { background: #0284c7; }
+#modal-close-btn { background: var(--text-muted); margin-left: var(--spacing-sm); }
+#modal-close-btn:hover { background: var(--text-secondary); }
+#search-modal[open] { border: none; border-radius: var(--border-radius-lg); box-shadow: 0 4px 24px rgba(0,0,0,0.15); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
+#search-modal::backdrop { background: rgba(0,0,0,0.4); }
+.search-modal-header { display: flex; align-items: center; gap: var(--spacing-sm); padding: var(--spacing-md); border-bottom: 1px solid var(--border-medium); background: var(--bg-primary); border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0; }
+.search-modal-header input { flex: 1; padding: var(--spacing-sm) var(--spacing-md); border: 1px solid var(--border-medium); border-radius: var(--border-radius-sm); font-size: var(--font-size-base); }
+#search-status { padding: var(--spacing-sm) var(--spacing-md); font-size: var(--font-size-sm); color: var(--text-muted); border-bottom: 1px solid var(--border-light); }
+#search-results { flex: 1; overflow-y: auto; padding: var(--spacing-md); }
+.search-result { margin-bottom: var(--spacing-md); border-radius: var(--border-radius-md); overflow: hidden; box-shadow: var(--card-shadow); }
 .search-result a { display: block; text-decoration: none; color: inherit; }
-.search-result a:hover { background: rgba(25, 118, 210, 0.05); }
-.search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-.search-result-content { padding: 12px; }
-.search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
+.search-result a:hover { background: rgba(14, 165, 233, 0.05); }
+.search-result-page { padding: var(--spacing-sm) var(--spacing-md); background: var(--border-light); font-size: var(--font-size-xs); color: var(--text-muted); border-bottom: 1px solid var(--border-light); }
+.search-result-content { padding: var(--spacing-md); }
+.search-result mark { background: rgba(245, 158, 11, 0.3); padding: 1px 2px; border-radius: 2px; }
+/* Metadata subsection */
+.message-metadata { margin: 0; border-radius: var(--border-radius-sm); font-size: var(--font-size-xs); }
+.message-metadata summary { cursor: pointer; padding: var(--spacing-xs) var(--spacing-sm); color: var(--text-muted); list-style: none; display: flex; align-items: center; gap: var(--spacing-xs); }
+.message-metadata summary::-webkit-details-marker { display: none; }
+.message-metadata summary::before { content: 'i'; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 10px; font-weight: 600; font-style: italic; font-family: Georgia, serif; background: var(--border-light); border-radius: 50%; color: var(--text-muted); }
+.message-metadata[open] summary { border-bottom: 1px solid var(--border-light); }
+.metadata-content { padding: var(--spacing-sm); background: var(--bg-secondary); border-radius: 0 0 var(--border-radius-sm) var(--border-radius-sm); display: flex; flex-wrap: wrap; gap: var(--spacing-sm) var(--spacing-md); }
+.metadata-item { display: flex; align-items: center; gap: var(--spacing-xs); }
+.metadata-label { color: var(--text-muted); font-weight: 500; }
+.metadata-value { color: var(--text-secondary); font-family: monospace; }
+@media (max-width: 600px) { body { padding: var(--spacing-sm); } .message, .index-item { border-radius: var(--border-radius-md); } .message-content, .index-item-content { padding: var(--spacing-md); } pre { font-size: var(--font-size-xs); padding: var(--spacing-sm); } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 </style>
 </head>
 <body>
@@ -193,68 +339,485 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 </div>
 
         
-<div class="message user" id="msg-2025-12-24T10-00-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-00-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:00.000Z" data-timestamp="2025-12-24T10:00:00.000Z">2025-12-24T10:00:00.000Z</time></a></div><div class="message-content">
-<div class="user-content"><p>Create a simple Python function to add two numbers</p></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-00-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:05.000Z" data-timestamp="2025-12-24T10:00:05.000Z">2025-12-24T10:00:05.000Z</time></a></div><div class="message-content">
+<div class="message user" id="msg-2025-12-24T10-00-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-00-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:00.000Z" data-timestamp="2025-12-24T10:00:00.000Z">2025-12-24T10:00:00.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">50</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~12</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell user-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Message</span>
+
+<button class="cell-copy-btn" aria-label="Copy Message" tabindex="0" data-copy-content="Create a simple Python function to add two numbers">Copy</button>
+</summary>
+<div class="cell-content"><p>Create a simple Python function to add two numbers</p></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-00-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:05.000Z" data-timestamp="2025-12-24T10:00:05.000Z">2025-12-24T10:00:05.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">335</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~83</span></div>
+<div class="metadata-item"><span class="metadata-label">Write:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell thinking-cell">
+<summary class="cell-header">
+<span class="cell-label">Thinking</span>
+
+<button class="cell-copy-btn" aria-label="Copy Thinking" tabindex="0" data-copy-content="The user wants a simple addition function. I should:
+1. Create the function
+2. Add a basic test
+
+This is straightforward.">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="thinking"><div class="thinking-label">Thinking</div><p>The user wants a simple addition function. I should:
 1. Create the function
 2. Add a basic test</p>
-<p>This is straightforward.</p></div>
-<div class="assistant-text"><p>I'll create a simple Python function for you. Let me write it now.</p></div>
+<p>This is straightforward.</p></div></div>
+</details>
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="I&#39;ll create a simple Python function for you. Let me write it now.">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="assistant-text"><p>I'll create a simple Python function for you. Let me write it now.</p></div></div>
+</details>
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Write
+Input: {
+  &#34;file_path&#34;: &#34;/project/math_utils.py&#34;,
+  &#34;content&#34;: &#34;def add(a: int, b: int) -&gt; int:\n    \&#34;\&#34;\&#34;Add two numbers together.\&#34;\&#34;\&#34;\n    return a + b\n&#34;
+}
+
+Result:
+File written successfully">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair"><div class="file-tool write-tool" data-tool-id="toolu_write_001">
-<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">math_utils.py</span></div>
+<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">math_utils.py</span>
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
 <div class="file-tool-fullpath">/project/math_utils.py</div>
 <div class="truncatable"><div class="truncatable-content"><pre class="file-content highlight"><span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Add two numbers together.&quot;&quot;&quot;</span>
     <span class="k">return</span> <span class="n">a</span> <span class="o">+</span> <span class="n">b</span>
 </pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File written successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-00-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:15.000Z" data-timestamp="2025-12-24T10:00:15.000Z">2025-12-24T10:00:15.000Z</time></a></div><div class="message-content">
-<div class="assistant-text"><p>I've created the <code>add</code> function. Now let me run the tests.</p></div>
-<div class="tool-pair">
-<div class="tool-use bash-tool" data-tool-id="toolu_bash_001">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description">Run pytest on tests directory</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>===== test session starts =====
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;file_path&quot;: &quot;/project/math_utils.py&quot;,
+  &quot;content&quot;: &quot;def add(a: int, b: int) -&gt; int:\n    \&quot;\&quot;\&quot;Add two numbers together.\&quot;\&quot;\&quot;\n    return a + b\n&quot;
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File written successfully</p></div><div class="view-json"><pre>File written successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-00-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:15.000Z" data-timestamp="2025-12-24T10:00:15.000Z">2025-12-24T10:00:15.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">144</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~36</span></div>
+<div class="metadata-item"><span class="metadata-label">Bash:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="I&#39;ve created the `add` function. Now let me run the tests.">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="assistant-text"><p>I've created the <code>add</code> function. Now let me run the tests.</p></div></div>
+</details>
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;python -m pytest tests/&#34;,
+  &#34;description&#34;: &#34;Run pytest on tests directory&#34;
+}
+
+Result:
+===== test session starts =====
 collected 2 items
 
 tests/test_math.py ..  [100%]
 
-===== 2 passed in 0.05s =====</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-00-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:25.000Z" data-timestamp="2025-12-24T10:00:25.000Z">2025-12-24T10:00:25.000Z</time></a></div><div class="message-content">
-<div class="assistant-text"><p>All tests pass. Let me update the todo list and make a commit.</p></div>
+===== 2 passed in 0.05s =====">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair">
-<div class="todo-list" data-tool-id="toolu_todo_001"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items"><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Create add function</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Write tests</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Run tests</span></li><li class="todo-item todo-in-progress"><span class="todo-icon">→</span><span class="todo-content">Commit changes</span></li><li class="todo-item todo-pending"><span class="todo-icon">○</span><span class="todo-content">Push to remote</span></li></ul></div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>Todos updated</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-00-35-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-35-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:35.000Z" data-timestamp="2025-12-24T10:00:35.000Z">2025-12-24T10:00:35.000Z</time></a></div><div class="message-content">
+<div class="tool-use bash-tool" data-tool-id="toolu_bash_001">
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="tool-description"><p>Run pytest on tests directory</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;command&quot;: &quot;python -m pytest tests/&quot;,
+  &quot;description&quot;: &quot;Run pytest on tests directory&quot;
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>===== test session starts =====
+collected 2 items</p>
+<p>tests/test_math.py ..  [100%]</p>
+<p>===== 2 passed in 0.05s =====</p></div><div class="view-json"><pre>===== test session starts =====
+collected 2 items
+
+tests/test_math.py ..  [100%]
+
+===== 2 passed in 0.05s =====</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-00-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:25.000Z" data-timestamp="2025-12-24T10:00:25.000Z">2025-12-24T10:00:25.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">512</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~128</span></div>
+<div class="metadata-item"><span class="metadata-label">TodoWrite:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="All tests pass. Let me update the todo list and make a commit.">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="assistant-text"><p>All tests pass. Let me update the todo list and make a commit.</p></div></div>
+</details>
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: TodoWrite
+Input: {
+  &#34;todos&#34;: [
+    {
+      &#34;content&#34;: &#34;Create add function&#34;,
+      &#34;status&#34;: &#34;completed&#34;,
+      &#34;activeForm&#34;: &#34;Creating add function&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Write tests&#34;,
+      &#34;status&#34;: &#34;completed&#34;,
+      &#34;activeForm&#34;: &#34;Writing tests&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Run tests&#34;,
+      &#34;status&#34;: &#34;completed&#34;,
+      &#34;activeForm&#34;: &#34;Running tests&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Commit changes&#34;,
+      &#34;status&#34;: &#34;in_progress&#34;,
+      &#34;activeForm&#34;: &#34;Committing changes&#34;
+    },
+    {
+      &#34;content&#34;: &#34;Push to remote&#34;,
+      &#34;status&#34;: &#34;pending&#34;,
+      &#34;activeForm&#34;: &#34;Pushing to remote&#34;
+    }
+  ]
+}
+
+Result:
+Todos updated">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="tool-pair">
+<div class="todo-list" data-tool-id="toolu_todo_001">
+<div class="todo-header"><span class="todo-header-icon">☰</span> Task List
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<ul class="todo-items"><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Create add function</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Write tests</span></li><li class="todo-item todo-completed"><span class="todo-icon">✓</span><span class="todo-content">Run tests</span></li><li class="todo-item todo-in-progress"><span class="todo-icon">→</span><span class="todo-content">Commit changes</span></li><li class="todo-item todo-pending"><span class="todo-icon">○</span><span class="todo-content">Push to remote</span></li></ul>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;todos&quot;: [
+    {
+      &quot;content&quot;: &quot;Create add function&quot;,
+      &quot;status&quot;: &quot;completed&quot;,
+      &quot;activeForm&quot;: &quot;Creating add function&quot;
+    },
+    {
+      &quot;content&quot;: &quot;Write tests&quot;,
+      &quot;status&quot;: &quot;completed&quot;,
+      &quot;activeForm&quot;: &quot;Writing tests&quot;
+    },
+    {
+      &quot;content&quot;: &quot;Run tests&quot;,
+      &quot;status&quot;: &quot;completed&quot;,
+      &quot;activeForm&quot;: &quot;Running tests&quot;
+    },
+    {
+      &quot;content&quot;: &quot;Commit changes&quot;,
+      &quot;status&quot;: &quot;in_progress&quot;,
+      &quot;activeForm&quot;: &quot;Committing changes&quot;
+    },
+    {
+      &quot;content&quot;: &quot;Push to remote&quot;,
+      &quot;status&quot;: &quot;pending&quot;,
+      &quot;activeForm&quot;: &quot;Pushing to remote&quot;
+    }
+  ]
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>Todos updated</p></div><div class="view-json"><pre>Todos updated</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-00-35-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-35-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:35.000Z" data-timestamp="2025-12-24T10:00:35.000Z">2025-12-24T10:00:35.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">109</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~27</span></div>
+<div class="metadata-item"><span class="metadata-label">Bash:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;git add . &amp;&amp; git commit -m &#39;Add math_utils with add function&#39;&#34;,
+  &#34;description&#34;: &#34;Commit changes&#34;
+}
+
+Result:
+[main abc1234] Add math_utils with add function
+ 1 file changed, 5 insertions(+)">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_002">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description">Commit changes</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add math_utils with add function&#39;</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><div class="commit-card"><a href="https://github.com/example/project/commit/abc1234"><span class="commit-card-hash">abc1234</span> Add math_utils with add function</a></div><pre>1 file changed, 5 insertions(+)</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-00-45-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-45-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:45.000Z" data-timestamp="2025-12-24T10:00:45.000Z">2025-12-24T10:00:45.000Z</time></a></div><div class="message-content">
-<div class="assistant-text"><p>Committed! Now pushing to remote.</p></div>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="tool-description"><p>Commit changes</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add math_utils with add function&#39;</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;command&quot;: &quot;git add . &amp;&amp; git commit -m &#x27;Add math_utils with add function&#x27;&quot;,
+  &quot;description&quot;: &quot;Commit changes&quot;
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><div class="commit-card"><a href="https://github.com/example/project/commit/abc1234"><span class="commit-card-hash">abc1234</span> Add math_utils with add function</a></div><pre>1 file changed, 5 insertions(+)</pre></div><div class="view-json"><pre>[main abc1234] Add math_utils with add function
+ 1 file changed, 5 insertions(+)</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-00-45-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-45-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:45.000Z" data-timestamp="2025-12-24T10:00:45.000Z">2025-12-24T10:00:45.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">104</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~26</span></div>
+<div class="metadata-item"><span class="metadata-label">Bash:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="Committed! Now pushing to remote.">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="assistant-text"><p>Committed! Now pushing to remote.</p></div></div>
+</details>
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;git push -u origin main&#34;,
+  &#34;description&#34;: &#34;Push to remote&#34;
+}
+
+Result:
+remote: 
+remote: Create a pull request for &#39;main&#39; on GitHub by visiting:
+remote:      https://github.com/example/project/pull/new/main
+remote: 
+To github.com:example/project.git
+   def5678..abc1234  main -&gt; main">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_003">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description">Push to remote</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git push -u origin main</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>remote: 
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="tool-description"><p>Push to remote</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git push -u origin main</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;command&quot;: &quot;git push -u origin main&quot;,
+  &quot;description&quot;: &quot;Push to remote&quot;
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>remote: 
+remote: Create a pull request for 'main' on GitHub by visiting:
+remote:      https://github.com/example/project/pull/new/main
+remote: 
+To github.com:example/project.git
+   def5678..abc1234  main -&gt; main</p></div><div class="view-json"><pre>remote: 
 remote: Create a pull request for &#x27;main&#x27; on GitHub by visiting:
 remote:      https://github.com/example/project/pull/new/main
 remote: 
 To github.com:example/project.git
-   def5678..abc1234  main -&gt; main</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message user" id="msg-2025-12-24T10-01-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-01-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:00.000Z" data-timestamp="2025-12-24T10:01:00.000Z">2025-12-24T10:01:00.000Z</time></a></div><div class="message-content">
-<div class="user-content"><p>Now edit the file to add a subtract function</p></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-01-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:05.000Z" data-timestamp="2025-12-24T10:01:05.000Z">2025-12-24T10:01:05.000Z</time></a></div><div class="message-content">
-<div class="tool-pair">
-<div class="tool-use" data-tool-id="toolu_glob_001"><div class="tool-header"><span class="tool-icon">⚙</span> Glob</div><div class="truncatable"><div class="truncatable-content"><pre class="json">{
+   def5678..abc1234  main -&gt; main</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message user" id="msg-2025-12-24T10-01-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-01-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:00.000Z" data-timestamp="2025-12-24T10:01:00.000Z">2025-12-24T10:01:00.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">44</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~11</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell user-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Message</span>
+
+<button class="cell-copy-btn" aria-label="Copy Message" tabindex="0" data-copy-content="Now edit the file to add a subtract function">Copy</button>
+</summary>
+<div class="cell-content"><p>Now edit the file to add a subtract function</p></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-01-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:05.000Z" data-timestamp="2025-12-24T10:01:05.000Z">2025-12-24T10:01:05.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">42</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~10</span></div>
+<div class="metadata-item"><span class="metadata-label">Glob:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Glob
+Input: {
   &#34;pattern&#34;: &#34;**/*.py&#34;,
   &#34;path&#34;: &#34;/project&#34;
-}</pre></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>/project/math_utils.py
-/project/tests/test_math.py</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-01-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:15.000Z" data-timestamp="2025-12-24T10:01:15.000Z">2025-12-24T10:01:15.000Z</time></a></div><div class="message-content">
+}
+
+Result:
+/project/math_utils.py
+/project/tests/test_math.py">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="tool-pair">
+<div class="tool-use" data-tool-id="toolu_glob_001"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">🔍</span> Glob<div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown tool-input-rendered">{
+  <span class="json-key">"pattern"</span>: <span class="json-string-value">*<em>/</em>.py</span>,
+  <span class="json-key">"path"</span>: <span class="json-string-value">/project</span>
+}</div><div class="view-json tool-input-rendered"><pre class="json">{
+  &quot;pattern&quot;: &quot;**/*.py&quot;,
+  &quot;path&quot;: &quot;/project&quot;
+}</pre></div></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>/project/math_utils.py
+/project/tests/test_math.py</p></div><div class="view-json"><pre>/project/math_utils.py
+/project/tests/test_math.py</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-01-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:15.000Z" data-timestamp="2025-12-24T10:01:15.000Z">2025-12-24T10:01:15.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">207</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~51</span></div>
+<div class="metadata-item"><span class="metadata-label">Edit:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Edit
+Input: {
+  &#34;file_path&#34;: &#34;/project/math_utils.py&#34;,
+  &#34;old_string&#34;: &#34;    return a + b\n&#34;,
+  &#34;new_string&#34;: &#34;    return a + b\n\n\ndef subtract(a: int, b: int) -&gt; int:\n    \&#34;\&#34;\&#34;Subtract b from a.\&#34;\&#34;\&#34;\n    return a - b\n&#34;
+}
+
+Result:
+File edited successfully">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair"><div class="file-tool edit-tool" data-tool-id="toolu_edit_001">
-<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">math_utils.py</span></div>
+<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">math_utils.py</span>
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
 <div class="file-tool-fullpath">/project/math_utils.py</div>
 <div class="truncatable"><div class="truncatable-content">
 <div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content highlight">    <span class="k">return</span> <span class="n">a</span> <span class="o">+</span> <span class="n">b</span>
@@ -267,26 +830,159 @@ To github.com:example/project.git
     <span class="k">return</span> <span class="n">a</span> <span class="o">-</span> <span class="n">b</span>
 </pre></div>
 </div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File edited successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-01-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:25.000Z" data-timestamp="2025-12-24T10:01:25.000Z">2025-12-24T10:01:25.000Z</time></a></div><div class="message-content">
-<div class="assistant-text"><p>Added the subtract function. Let me verify with grep.</p></div>
-<div class="tool-pair">
-<div class="tool-use" data-tool-id="toolu_grep_001"><div class="tool-header"><span class="tool-icon">⚙</span> Grep</div><div class="truncatable"><div class="truncatable-content"><pre class="json">{
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;file_path&quot;: &quot;/project/math_utils.py&quot;,
+  &quot;old_string&quot;: &quot;    return a + b\n&quot;,
+  &quot;new_string&quot;: &quot;    return a + b\n\n\ndef subtract(a: int, b: int) -&gt; int:\n    \&quot;\&quot;\&quot;Subtract b from a.\&quot;\&quot;\&quot;\n    return a - b\n&quot;
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File edited successfully</p></div><div class="view-json"><pre>File edited successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-01-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-01-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:01:25.000Z" data-timestamp="2025-12-24T10:01:25.000Z">2025-12-24T10:01:25.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">126</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~31</span></div>
+<div class="metadata-item"><span class="metadata-label">Grep:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="Added the subtract function. Let me verify with grep.">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="assistant-text"><p>Added the subtract function. Let me verify with grep.</p></div></div>
+</details>
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Grep
+Input: {
   &#34;pattern&#34;: &#34;def subtract&#34;,
   &#34;path&#34;: &#34;/project&#34;,
   &#34;output_mode&#34;: &#34;content&#34;
-}</pre></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message user" id="msg-2025-12-24T10-02-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-02-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:00.000Z" data-timestamp="2025-12-24T10:02:00.000Z">2025-12-24T10:02:00.000Z</time></a></div><div class="message-content">
-<div class="user-content"><p>Run the tests again</p></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-02-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-02-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:05.000Z" data-timestamp="2025-12-24T10:02:05.000Z">2025-12-24T10:02:05.000Z</time></a></div><div class="message-content">
+}
+
+Result:
+/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="tool-pair">
+<div class="tool-use" data-tool-id="toolu_grep_001"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">🔎</span> Grep<div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown tool-input-rendered">{
+  <span class="json-key">"pattern"</span>: <span class="json-string-value">def subtract</span>,
+  <span class="json-key">"path"</span>: <span class="json-string-value">/project</span>,
+  <span class="json-key">"output_mode"</span>: <span class="json-string-value">content</span>
+}</div><div class="view-json tool-input-rendered"><pre class="json">{
+  &quot;pattern&quot;: &quot;def subtract&quot;,
+  &quot;path&quot;: &quot;/project&quot;,
+  &quot;output_mode&quot;: &quot;content&quot;
+}</pre></div></div><button class="expand-btn">Show more</button></div></div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:</p></div><div class="view-json"><pre>/project/math_utils.py:6:def subtract(a: int, b: int) -&gt; int:</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message user" id="msg-2025-12-24T10-02-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-02-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:00.000Z" data-timestamp="2025-12-24T10:02:00.000Z">2025-12-24T10:02:00.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">19</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~4</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell user-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Message</span>
+
+<button class="cell-copy-btn" aria-label="Copy Message" tabindex="0" data-copy-content="Run the tests again">Copy</button>
+</summary>
+<div class="cell-content"><p>Run the tests again</p></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-02-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-02-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:05.000Z" data-timestamp="2025-12-24T10:02:05.000Z">2025-12-24T10:02:05.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">89</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~22</span></div>
+<div class="metadata-item"><span class="metadata-label">Bash:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;python -m pytest tests/ -v&#34;,
+  &#34;description&#34;: &#34;Run tests with verbose output&#34;
+}
+
+Result:
+Exit code 1
+===== FAILURES =====
+test_subtract - AssertionError: expected 5 but got None">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_004">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description">Run tests with verbose output</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/ -v</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result tool-error"><div class="truncatable"><div class="truncatable-content"><pre>Exit code 1
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="tool-description"><p>Run tests with verbose output</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">python -m pytest tests/ -v</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;command&quot;: &quot;python -m pytest tests/ -v&quot;,
+  &quot;description&quot;: &quot;Run tests with verbose output&quot;
+}</pre>
+</div>
+</div><div class="tool-result tool-error"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">✗</span> Error</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>Exit code 1
 ===== FAILURES =====
-test_subtract - AssertionError: expected 5 but got None</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-02-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-02-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:15.000Z" data-timestamp="2025-12-24T10:02:15.000Z">2025-12-24T10:02:15.000Z</time></a></div><div class="message-content">
+test_subtract - AssertionError: expected 5 but got None</p></div><div class="view-json"><pre>Exit code 1
+===== FAILURES =====
+test_subtract - AssertionError: expected 5 but got None</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-02-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-02-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:02:15.000Z" data-timestamp="2025-12-24T10:02:15.000Z">2025-12-24T10:02:15.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">213</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~53</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="There&#39;s a test failure. I need to check the test file and fix it.
+
+Here&#39;s some **markdown** content with:
+- A bullet list
+- `inline code`
+- A [link](https://example.com)
+
+```python
+def example():
+    return 42
+```">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="assistant-text"><p>There's a test failure. I need to check the test file and fix it.</p>
 <p>Here's some <strong>markdown</strong> content with:
 - A bullet list
@@ -294,12 +990,62 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 - A <a href="https://example.com">link</a></p>
 <pre><code class="language-python">def example():
     return 42
-</code></pre></div></div></div>
-<div class="message user" id="msg-2025-12-24T10-03-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-03-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:00.000Z" data-timestamp="2025-12-24T10:03:00.000Z">2025-12-24T10:03:00.000Z</time></a></div><div class="message-content">
-<div class="user-content"><p>Fix the issue and commit</p></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-03-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:05.000Z" data-timestamp="2025-12-24T10:03:05.000Z">2025-12-24T10:03:05.000Z</time></a></div><div class="message-content">
+</code></pre></div></div>
+</details></div></div>
+<div class="message user" id="msg-2025-12-24T10-03-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-03-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:00.000Z" data-timestamp="2025-12-24T10:03:00.000Z">2025-12-24T10:03:00.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">24</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~6</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell user-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Message</span>
+
+<button class="cell-copy-btn" aria-label="Copy Message" tabindex="0" data-copy-content="Fix the issue and commit">Copy</button>
+</summary>
+<div class="cell-content"><p>Fix the issue and commit</p></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-03-05-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-05-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:05.000Z" data-timestamp="2025-12-24T10:03:05.000Z">2025-12-24T10:03:05.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">158</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~39</span></div>
+<div class="metadata-item"><span class="metadata-label">Edit:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Edit
+Input: {
+  &#34;file_path&#34;: &#34;/project/tests/test_math.py&#34;,
+  &#34;old_string&#34;: &#34;assert subtract(10, 5) == None&#34;,
+  &#34;new_string&#34;: &#34;assert subtract(10, 5) == 5&#34;,
+  &#34;replace_all&#34;: true
+}
+
+Result:
+File edited successfully">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair"><div class="file-tool edit-tool" data-tool-id="toolu_edit_002">
-<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">test_math.py</span> <span class="edit-replace-all">(replace all)</span></div>
+<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">test_math.py</span> <span class="edit-replace-all">(replace all)</span>
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
 <div class="file-tool-fullpath">/project/tests/test_math.py</div>
 <div class="truncatable"><div class="truncatable-content">
 <div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content highlight"><span class="k">assert</span> <span class="n">subtract</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span> <span class="o">==</span> <span class="kc">None</span>
@@ -307,17 +1053,99 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content highlight"><span class="k">assert</span> <span class="n">subtract</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span> <span class="o">==</span> <span class="mi">5</span>
 </pre></div>
 </div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>File edited successfully</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-03-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:15.000Z" data-timestamp="2025-12-24T10:03:15.000Z">2025-12-24T10:03:15.000Z</time></a></div><div class="message-content">
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;file_path&quot;: &quot;/project/tests/test_math.py&quot;,
+  &quot;old_string&quot;: &quot;assert subtract(10, 5) == None&quot;,
+  &quot;new_string&quot;: &quot;assert subtract(10, 5) == 5&quot;,
+  &quot;replace_all&quot;: true
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><p>File edited successfully</p></div><div class="view-json"><pre>File edited successfully</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-03-15-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-15-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:15.000Z" data-timestamp="2025-12-24T10:03:15.000Z">2025-12-24T10:03:15.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">112</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~28</span></div>
+<div class="metadata-item"><span class="metadata-label">Bash:</span><span class="metadata-value">1</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell tools-cell">
+<summary class="cell-header">
+<span class="cell-label">Tool Calls (1)</span>
+
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+
+<button class="cell-copy-btn" aria-label="Copy Tool Calls" tabindex="0" data-copy-content="Tool: Bash
+Input: {
+  &#34;command&#34;: &#34;git add . &amp;&amp; git commit -m &#39;Add subtract function and fix tests&#39;&#34;,
+  &#34;description&#34;: &#34;Commit the fix&#34;
+}
+
+Result:
+[main def5678] Add subtract function and fix tests
+ 2 files changed, 10 insertions(+), 1 deletion(-)">Copy</button>
+</summary>
+<div class="cell-content">
 <div class="tool-pair">
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_005">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description">Commit the fix</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add subtract function and fix tests&#39;</pre></div><button class="expand-btn">Show more</button></div>
-</div><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><div class="commit-card"><a href="https://github.com/example/project/commit/def5678"><span class="commit-card-hash">def5678</span> Add subtract function and fix tests</a></div><pre>2 files changed, 10 insertions(+), 1 deletion(-)</pre></div><button class="expand-btn">Show more</button></div></div></div></div></div>
-<div class="message assistant" id="msg-2025-12-24T10-03-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:25.000Z" data-timestamp="2025-12-24T10:03:25.000Z">2025-12-24T10:03:25.000Z</time></a></div><div class="message-content">
-<div class="assistant-text"><p>Done! The subtract function is now working and committed.</p></div></div></div><details class="continuation"><summary>Session continuation summary</summary>
-<div class="message user" id="msg-2025-12-24T10-04-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-04-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:04:00.000Z" data-timestamp="2025-12-24T10:04:00.000Z">2025-12-24T10:04:00.000Z</time></a></div><div class="message-content">
-<div class="user-content"><p>This is a session continuation summary from a previous context. The user was working on a math utilities library.</p></div></div></div></details>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="tool-description"><p>Commit the fix</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add subtract function and fix tests&#39;</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;command&quot;: &quot;git add . &amp;&amp; git commit -m &#x27;Add subtract function and fix tests&#x27;&quot;,
+  &quot;description&quot;: &quot;Commit the fix&quot;
+}</pre>
+</div>
+</div><div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown"><div class="commit-card"><a href="https://github.com/example/project/commit/def5678"><span class="commit-card-hash">def5678</span> Add subtract function and fix tests</a></div><pre>2 files changed, 10 insertions(+), 1 deletion(-)</pre></div><div class="view-json"><pre>[main def5678] Add subtract function and fix tests
+ 2 files changed, 10 insertions(+), 1 deletion(-)</pre></div></div><button class="expand-btn">Show more</button></div></div></div></div>
+</details></div></div>
+<div class="message assistant" id="msg-2025-12-24T10-03-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:25.000Z" data-timestamp="2025-12-24T10:03:25.000Z">2025-12-24T10:03:25.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">57</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~14</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell response-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Response</span>
+
+<button class="cell-copy-btn" aria-label="Copy Response" tabindex="0" data-copy-content="Done! The subtract function is now working and committed.">Copy</button>
+</summary>
+<div class="cell-content">
+<div class="assistant-text"><p>Done! The subtract function is now working and committed.</p></div></div>
+</details></div></div><details class="continuation"><summary>Session continuation summary</summary>
+<div class="message user" id="msg-2025-12-24T10-04-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-04-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:04:00.000Z" data-timestamp="2025-12-24T10:04:00.000Z">2025-12-24T10:04:00.000Z</time></a></div>
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">113</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~28</span></div>
+</div>
+</details><div class="message-content">
+<details class="cell user-cell" open>
+<summary class="cell-header">
+<span class="cell-label">Message</span>
+
+<button class="cell-copy-btn" aria-label="Copy Message" tabindex="0" data-copy-content="This is a session continuation summary from a previous context. The user was working on a math utilities library.">Copy</button>
+</summary>
+<div class="cell-content"><p>This is a session continuation summary from a previous context. The user was working on a math utilities library.</p></div>
+</details></div></div></details>
         
 
 <div class="pagination">
@@ -330,6 +1158,33 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 
     </div>
     <script>
+// Clipboard helper with fallback for older browsers
+function copyToClipboard(text) {
+    // Modern browsers: use Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    }
+    // Fallback: use execCommand('copy')
+    return new Promise(function(resolve, reject) {
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        textarea.setAttribute('readonly', '');
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            var success = document.execCommand('copy');
+            document.body.removeChild(textarea);
+            if (success) { resolve(); }
+            else { reject(new Error('execCommand copy failed')); }
+        } catch (err) {
+            document.body.removeChild(textarea);
+            reject(err);
+        }
+    });
+}
 document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
     const timestamp = el.getAttribute('data-timestamp');
     const date = new Date(timestamp);
@@ -362,6 +1217,8 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
 document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command').forEach(function(el) {
     // Skip if already has a copy button
     if (el.querySelector('.copy-btn')) return;
+    // Skip if inside a cell (cell header has its own copy button)
+    if (el.closest('.cell-content')) return;
     // Make container relative if needed
     if (getComputedStyle(el).position === 'static') {
         el.style.position = 'relative';
@@ -372,7 +1229,7 @@ document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command
     copyBtn.addEventListener('click', function(e) {
         e.stopPropagation();
         const textToCopy = el.textContent.replace(/^Copy$/, '').trim();
-        navigator.clipboard.writeText(textToCopy).then(function() {
+        copyToClipboard(textToCopy).then(function() {
             copyBtn.textContent = 'Copied!';
             copyBtn.classList.add('copied');
             setTimeout(function() {
@@ -381,9 +1238,107 @@ document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command
             }, 2000);
         }).catch(function(err) {
             console.error('Failed to copy:', err);
+            copyBtn.textContent = 'Failed';
+            setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
         });
     });
     el.appendChild(copyBtn);
+});
+// Add copy functionality to cell headers
+document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        // Use raw content from data attribute if available, otherwise fall back to textContent
+        var textToCopy;
+        if (btn.dataset.copyContent) {
+            textToCopy = btn.dataset.copyContent;
+        } else {
+            const cell = btn.closest('.cell');
+            const content = cell.querySelector('.cell-content');
+            textToCopy = content.textContent.trim();
+        }
+        copyToClipboard(textToCopy).then(function() {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(function(err) {
+            console.error('Failed to copy cell:', err);
+            btn.textContent = 'Failed';
+            setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+        });
+    });
+    // Keyboard accessibility
+    btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.click();
+        }
+    });
+});
+// Tab-style view toggle for tool calls/results
+document.querySelectorAll('.view-toggle:not(.cell-view-toggle)').forEach(function(toggle) {
+    toggle.querySelectorAll('.view-toggle-tab').forEach(function(tab) {
+        tab.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var container = toggle.closest('.tool-use, .tool-result, .file-tool, .todo-list');
+            var viewType = tab.dataset.view;
+
+            // Update active tab styling
+            toggle.querySelectorAll('.view-toggle-tab').forEach(function(t) {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
+            tab.classList.add('active');
+            tab.setAttribute('aria-selected', 'true');
+
+            // Toggle view class
+            if (viewType === 'json') {
+                container.classList.add('show-json');
+            } else {
+                container.classList.remove('show-json');
+            }
+        });
+    });
+});
+// Cell-level master toggle for all subcells
+document.querySelectorAll('.cell-view-toggle').forEach(function(toggle) {
+    toggle.querySelectorAll('.view-toggle-tab').forEach(function(tab) {
+        tab.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var cell = toggle.closest('.cell');
+            var viewType = tab.dataset.view;
+
+            // Update active tab styling on master toggle
+            toggle.querySelectorAll('.view-toggle-tab').forEach(function(t) {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
+            tab.classList.add('active');
+            tab.setAttribute('aria-selected', 'true');
+
+            // Propagate to all child elements
+            cell.querySelectorAll('.tool-use, .tool-result, .file-tool, .todo-list').forEach(function(container) {
+                if (viewType === 'json') {
+                    container.classList.add('show-json');
+                } else {
+                    container.classList.remove('show-json');
+                }
+                // Update child toggle tabs
+                container.querySelectorAll('.view-toggle-tab').forEach(function(childTab) {
+                    childTab.classList.remove('active');
+                    childTab.setAttribute('aria-selected', 'false');
+                    if (childTab.dataset.view === viewType) {
+                        childTab.classList.add('active');
+                        childTab.setAttribute('aria-selected', 'true');
+                    }
+                });
+            });
+        });
+    });
 });
 </script>
 </body>

@@ -1,5 +1,6 @@
 """Convert Claude Code session JSON to a clean mobile-friendly HTML page with pagination."""
 
+import contextvars
 import json
 import html
 import os
@@ -51,6 +52,45 @@ PROMPTS_PER_PAGE = 5
 LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
+
+# Tool type icons for display in tool headers
+TOOL_ICONS = {
+    # File operations
+    "Read": "📖",
+    "Write": "📝",
+    "Edit": "✏️",
+    "NotebookEdit": "📓",
+    # Search/find operations
+    "Glob": "🔍",
+    "Grep": "🔎",
+    # Terminal operations
+    "Bash": "$",
+    # Web operations
+    "WebFetch": "🌐",
+    "WebSearch": "🔎",
+    # Task management
+    "TodoWrite": "☰",
+    "Task": "📋",
+    # Other tools
+    "Skill": "⚡",
+    "Agent": "🤖",
+}
+
+# Default icon for tools not in the mapping
+DEFAULT_TOOL_ICON = "⚙"
+
+
+def get_tool_icon(tool_name):
+    """Get the appropriate icon for a tool name.
+
+    Args:
+        tool_name: The name of the tool.
+
+    Returns:
+        The icon string for the tool.
+    """
+    return TOOL_ICONS.get(tool_name, DEFAULT_TOOL_ICON)
+
 
 # Regex to strip ANSI escape sequences from terminal output
 ANSI_ESCAPE_PATTERN = re.compile(
@@ -141,6 +181,61 @@ def highlight_code(code, filename=None, language=None):
     return highlighted
 
 
+def calculate_message_metadata(message_data):
+    """Calculate metadata for a message.
+
+    Args:
+        message_data: Parsed message JSON data.
+
+    Returns:
+        Dict with char_count, token_estimate, and tool_counts.
+    """
+    content = message_data.get("content", "")
+
+    # Calculate character count from all text content
+    if isinstance(content, str):
+        char_count = len(content)
+    elif isinstance(content, list):
+        char_count = 0
+        for block in content:
+            if isinstance(block, dict):
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    char_count += len(block.get("text", ""))
+                elif block_type == "thinking":
+                    char_count += len(block.get("thinking", ""))
+                elif block_type == "tool_use":
+                    # Count the input JSON as text
+                    char_count += len(json.dumps(block.get("input", {})))
+                elif block_type == "tool_result":
+                    result_content = block.get("content", "")
+                    if isinstance(result_content, str):
+                        char_count += len(result_content)
+                    elif isinstance(result_content, list):
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                char_count += len(item.get("text", ""))
+    else:
+        char_count = len(str(content))
+
+    # Token estimate (approximately 4 characters per token)
+    token_estimate = char_count // 4
+
+    # Count tool calls
+    tool_counts = {}
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_name = block.get("name", "Unknown")
+                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+
+    return {
+        "char_count": char_count,
+        "token_estimate": token_estimate,
+        "tool_counts": tool_counts,
+    }
+
+
 def extract_text_from_content(content):
     """Extract plain text from message content.
 
@@ -167,8 +262,49 @@ def extract_text_from_content(content):
     return ""
 
 
-# Module-level variable for GitHub repo (set by generate_html)
+# Thread-safe context variable for GitHub repo (set by generate_html)
+# Using contextvars ensures thread-safety when processing multiple sessions concurrently
+_github_repo_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_github_repo", default=None
+)
+
+# Backward compatibility: module-level variable that tests may still access
+# This is deprecated - use get_github_repo() and set_github_repo() instead
 _github_repo = None
+
+
+def get_github_repo() -> str | None:
+    """Get the current GitHub repo from the thread-local context.
+
+    This is the thread-safe way to access the GitHub repo setting.
+    Falls back to the module-level _github_repo for backward compatibility.
+
+    Returns:
+        The GitHub repository in 'owner/repo' format, or None if not set.
+    """
+    ctx_value = _github_repo_var.get()
+    if ctx_value is not None:
+        return ctx_value
+    # Fallback for backward compatibility
+    return _github_repo
+
+
+def set_github_repo(repo: str | None) -> contextvars.Token[str | None]:
+    """Set the GitHub repo in the thread-local context.
+
+    This is the thread-safe way to set the GitHub repo. Also updates
+    the module-level _github_repo for backward compatibility.
+
+    Args:
+        repo: The GitHub repository in 'owner/repo' format, or None.
+
+    Returns:
+        A token that can be used to reset the value later.
+    """
+    global _github_repo
+    _github_repo = repo
+    return _github_repo_var.set(repo)
+
 
 # API constants
 API_BASE_URL = "https://api.anthropic.com/v1"
@@ -727,6 +863,63 @@ def render_markdown_text(text):
     return markdown.markdown(text, extensions=["fenced_code", "tables"])
 
 
+def render_json_with_markdown(obj, indent=0):
+    """Render a JSON object/dict with string values as Markdown.
+
+    Recursively traverses the object and renders string values as Markdown HTML.
+    Non-string values (numbers, booleans, null) are rendered as-is.
+    """
+    indent_str = "  " * indent
+    next_indent = "  " * (indent + 1)
+
+    if isinstance(obj, dict):
+        if not obj:
+            return "{}"
+        lines = ["{"]
+        items = list(obj.items())
+        for i, (key, value) in enumerate(items):
+            comma = "," if i < len(items) - 1 else ""
+            rendered_value = render_json_with_markdown(value, indent + 1)
+            lines.append(
+                f'{next_indent}<span class="json-key">"{html.escape(str(key))}"</span>: {rendered_value}{comma}'
+            )
+        lines.append(f"{indent_str}}}")
+        return "\n".join(lines)
+    elif isinstance(obj, list):
+        if not obj:
+            return "[]"
+        lines = ["["]
+        for i, item in enumerate(obj):
+            comma = "," if i < len(obj) - 1 else ""
+            rendered_item = render_json_with_markdown(item, indent + 1)
+            lines.append(f"{next_indent}{rendered_item}{comma}")
+        lines.append(f"{indent_str}]")
+        return "\n".join(lines)
+    elif isinstance(obj, str):
+        # Render string value as Markdown, wrap in a styled span
+        md_html = render_markdown_text(obj)
+        # Strip wrapping <p> tags for inline display if it's a single paragraph
+        if (
+            md_html.startswith("<p>")
+            and md_html.endswith("</p>")
+            and md_html.count("<p>") == 1
+        ):
+            md_html = md_html[3:-4]
+        return f'<span class="json-string-value">{md_html}</span>'
+    elif isinstance(obj, bool):
+        return (
+            '<span class="json-bool">true</span>'
+            if obj
+            else '<span class="json-bool">false</span>'
+        )
+    elif obj is None:
+        return '<span class="json-null">null</span>'
+    elif isinstance(obj, (int, float)):
+        return f'<span class="json-number">{obj}</span>'
+    else:
+        return f'<span class="json-value">{html.escape(str(obj))}</span>'
+
+
 def is_json_like(text):
     if not text or not isinstance(text, str):
         return False
@@ -740,7 +933,8 @@ def render_todo_write(tool_input, tool_id):
     todos = tool_input.get("todos", [])
     if not todos:
         return ""
-    return _macros.todo_list(todos, tool_id)
+    input_json_html = format_json(tool_input)
+    return _macros.todo_list(todos, input_json_html, tool_id)
 
 
 def render_write_tool(tool_input, tool_id):
@@ -749,7 +943,8 @@ def render_write_tool(tool_input, tool_id):
     content = tool_input.get("content", "")
     # Apply syntax highlighting based on file extension
     highlighted_content = highlight_code(content, filename=file_path)
-    return _macros.write_tool(file_path, highlighted_content, tool_id)
+    input_json_html = format_json(tool_input)
+    return _macros.write_tool(file_path, highlighted_content, input_json_html, tool_id)
 
 
 def render_edit_tool(tool_input, tool_id):
@@ -761,16 +956,24 @@ def render_edit_tool(tool_input, tool_id):
     # Apply syntax highlighting based on file extension
     highlighted_old = highlight_code(old_string, filename=file_path)
     highlighted_new = highlight_code(new_string, filename=file_path)
+    input_json_html = format_json(tool_input)
     return _macros.edit_tool(
-        file_path, highlighted_old, highlighted_new, replace_all, tool_id
+        file_path,
+        highlighted_old,
+        highlighted_new,
+        replace_all,
+        input_json_html,
+        tool_id,
     )
 
 
 def render_bash_tool(tool_input, tool_id):
-    """Render Bash tool calls with command as plain text."""
+    """Render Bash tool calls with command as plain text and description as Markdown."""
     command = tool_input.get("command", "")
     description = tool_input.get("description", "")
-    return _macros.bash_tool(command, description, tool_id)
+    description_html = render_markdown_text(description) if description else ""
+    input_json_html = format_json(tool_input)
+    return _macros.bash_tool(command, description_html, input_json_html, tool_id)
 
 
 def render_content_block(block):
@@ -801,13 +1004,31 @@ def render_content_block(block):
         if tool_name == "Bash":
             return render_bash_tool(tool_input, tool_id)
         description = tool_input.get("description", "")
+        description_html = render_markdown_text(description) if description else ""
         display_input = {k: v for k, v in tool_input.items() if k != "description"}
-        input_json = json.dumps(display_input, indent=2, ensure_ascii=False)
-        return _macros.tool_use(tool_name, description, input_json, tool_id)
+        input_markdown_html = render_json_with_markdown(display_input)
+        input_json_html = format_json(display_input)
+        tool_icon = get_tool_icon(tool_name)
+        return _macros.tool_use(
+            tool_name,
+            tool_icon,
+            description_html,
+            input_markdown_html,
+            input_json_html,
+            tool_id,
+        )
     elif block_type == "tool_result":
         content = block.get("content", "")
         is_error = block.get("is_error", False)
 
+        # Strip ANSI escape sequences from string content for both views
+        if isinstance(content, str) and not is_content_block_array(content):
+            content = strip_ansi(content)
+
+        # Generate JSON view (raw content as JSON)
+        content_json_html = format_json(content)
+
+        # Generate Markdown view (rendered content)
         # Check for git commits and render with styled cards
         if isinstance(content, str):
             # First, check if content is a JSON array of content blocks
@@ -816,14 +1037,12 @@ def render_content_block(block):
                     parsed_blocks = json.loads(content)
                     rendered = render_content_block_array(parsed_blocks)
                     if rendered:
-                        content_html = rendered
+                        content_markdown_html = rendered
                     else:
-                        content_html = format_json(content)
+                        content_markdown_html = format_json(content)
                 except (json.JSONDecodeError, TypeError):
-                    content_html = format_json(content)
+                    content_markdown_html = format_json(content)
             else:
-                # Strip ANSI escape sequences from terminal output
-                content = strip_ansi(content)
 
                 commits_found = list(COMMIT_PATTERN.finditer(content))
                 if commits_found:
@@ -839,7 +1058,9 @@ def render_content_block(block):
                         commit_hash = match.group(1)
                         commit_msg = match.group(2)
                         parts.append(
-                            _macros.commit_card(commit_hash, commit_msg, _github_repo)
+                            _macros.commit_card(
+                                commit_hash, commit_msg, get_github_repo()
+                            )
                         )
                         last_end = match.end()
 
@@ -848,14 +1069,19 @@ def render_content_block(block):
                     if after:
                         parts.append(f"<pre>{html.escape(after)}</pre>")
 
-                    content_html = "".join(parts)
+                    content_markdown_html = "".join(parts)
                 else:
-                    content_html = f"<pre>{html.escape(content)}</pre>"
+                    # Check if content looks like JSON - if so, format as JSON
+                    # Otherwise render as markdown
+                    if is_json_like(content):
+                        content_markdown_html = format_json(content)
+                    else:
+                        content_markdown_html = render_markdown_text(content)
         elif isinstance(content, list) or is_json_like(content):
-            content_html = format_json(content)
+            content_markdown_html = format_json(content)
         else:
-            content_html = format_json(content)
-        return _macros.tool_result(content_html, is_error)
+            content_markdown_html = format_json(content)
+        return _macros.tool_result(content_markdown_html, content_json_html, is_error)
     else:
         return format_json(block)
 
@@ -864,10 +1090,20 @@ def render_user_message_content(message_data):
     content = message_data.get("content", "")
     if isinstance(content, str):
         if is_json_like(content):
-            return _macros.user_content(format_json(content))
-        return _macros.user_content(render_markdown_text(content))
+            content_html = format_json(content)
+            raw_content = content
+        else:
+            content_html = render_markdown_text(content)
+            raw_content = content
+        # Wrap in collapsible cell (open by default)
+        return _macros.cell("user", "Message", content_html, True, 0, raw_content)
     elif isinstance(content, list):
-        return "".join(render_content_block(block) for block in content)
+        blocks_html = "".join(render_content_block(block) for block in content)
+        raw_content = "\n\n".join(
+            block.get("text", "") if block.get("type") == "text" else str(block)
+            for block in content
+        )
+        return _macros.cell("user", "Message", blocks_html, True, 0, raw_content)
     return f"<p>{html.escape(str(content))}</p>"
 
 
@@ -907,35 +1143,185 @@ def render_user_message_content_with_tool_pairs(message_data, paired_tool_ids):
     return f"<p>{html.escape(str(content))}</p>"
 
 
+def group_blocks_by_type(content_blocks):
+    """Group content blocks into thinking, text, and tool sections.
+
+    Returns a dict with 'thinking', 'text', and 'tools' keys,
+    each containing a list of blocks of that type.
+    """
+    thinking_blocks = []
+    text_blocks = []
+    tool_blocks = []
+
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type", "")
+        if block_type == "thinking":
+            thinking_blocks.append(block)
+        elif block_type == "text":
+            text_blocks.append(block)
+        elif block_type in ("tool_use", "tool_result"):
+            tool_blocks.append(block)
+
+    return {"thinking": thinking_blocks, "text": text_blocks, "tools": tool_blocks}
+
+
 def render_assistant_message_with_tool_pairs(
     message_data, tool_result_lookup, paired_tool_ids
 ):
+    """Render assistant message with tool_use/tool_result pairing and collapsible cells."""
     content = message_data.get("content", [])
     if not isinstance(content, list):
         return f"<p>{html.escape(str(content))}</p>"
-    parts = []
-    for block in content:
-        if not isinstance(block, dict):
-            parts.append(f"<p>{html.escape(str(block))}</p>")
-            continue
-        if block.get("type") == "tool_use":
-            tool_id = block.get("id", "")
-            tool_result = tool_result_lookup.get(tool_id)
-            if tool_result:
-                paired_tool_ids.add(tool_id)
-                tool_use_html = render_content_block(block)
-                tool_result_html = render_content_block(tool_result)
-                parts.append(_macros.tool_pair(tool_use_html, tool_result_html))
+
+    # Group blocks by type
+    groups = group_blocks_by_type(content)
+    cells = []
+
+    # Render thinking cell (closed by default)
+    if groups["thinking"]:
+        thinking_html = "".join(
+            render_content_block(block) for block in groups["thinking"]
+        )
+        # Extract raw thinking text for copy functionality
+        raw_thinking = "\n\n".join(
+            block.get("thinking", "") for block in groups["thinking"]
+        )
+        cells.append(
+            _macros.cell("thinking", "Thinking", thinking_html, False, 0, raw_thinking)
+        )
+
+    # Render response cell (open by default)
+    if groups["text"]:
+        text_html = "".join(render_content_block(block) for block in groups["text"])
+        # Extract raw text for copy functionality
+        raw_text = "\n\n".join(block.get("text", "") for block in groups["text"])
+        cells.append(_macros.cell("response", "Response", text_html, True, 0, raw_text))
+
+    # Render tools cell with pairing (closed by default)
+    if groups["tools"]:
+        tool_parts = []
+        raw_tool_parts = []
+        for block in groups["tools"]:
+            if not isinstance(block, dict):
+                tool_parts.append(f"<p>{html.escape(str(block))}</p>")
+                raw_tool_parts.append(str(block))
                 continue
-        parts.append(render_content_block(block))
-    return "".join(parts)
+            if block.get("type") == "tool_use":
+                tool_id = block.get("id", "")
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+                tool_result = tool_result_lookup.get(tool_id)
+                if tool_result:
+                    paired_tool_ids.add(tool_id)
+                    tool_use_html = render_content_block(block)
+                    tool_result_html = render_content_block(tool_result)
+                    tool_parts.append(
+                        _macros.tool_pair(tool_use_html, tool_result_html)
+                    )
+                    # Add raw content for tool use and result
+                    raw_tool_parts.append(
+                        f"Tool: {tool_name}\nInput: {json.dumps(tool_input, indent=2)}"
+                    )
+                    result_content = tool_result.get("content", "")
+                    if isinstance(result_content, list):
+                        result_texts = []
+                        for item in result_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                result_texts.append(item.get("text", ""))
+                        result_content = "\n".join(result_texts)
+                    raw_tool_parts.append(f"Result:\n{result_content}")
+                    continue
+                else:
+                    raw_tool_parts.append(
+                        f"Tool: {tool_name}\nInput: {json.dumps(tool_input, indent=2)}"
+                    )
+            elif block.get("type") == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_texts = []
+                    for item in result_content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            result_texts.append(item.get("text", ""))
+                    result_content = "\n".join(result_texts)
+                raw_tool_parts.append(f"Result:\n{result_content}")
+            tool_parts.append(render_content_block(block))
+        tools_html = "".join(tool_parts)
+        raw_tools = "\n\n".join(raw_tool_parts)
+        tool_count = len([b for b in groups["tools"] if b.get("type") == "tool_use"])
+        cells.append(
+            _macros.cell(
+                "tools", "Tool Calls", tools_html, False, tool_count, raw_tools
+            )
+        )
+
+    return "".join(cells)
 
 
 def render_assistant_message(message_data):
+    """Render assistant message with collapsible cells for thinking/response/tools."""
     content = message_data.get("content", [])
     if not isinstance(content, list):
         return f"<p>{html.escape(str(content))}</p>"
-    return "".join(render_content_block(block) for block in content)
+
+    # Group blocks by type
+    groups = group_blocks_by_type(content)
+    cells = []
+
+    # Render thinking cell (closed by default)
+    if groups["thinking"]:
+        thinking_html = "".join(
+            render_content_block(block) for block in groups["thinking"]
+        )
+        # Extract raw thinking text for copy functionality
+        raw_thinking = "\n\n".join(
+            block.get("thinking", "") for block in groups["thinking"]
+        )
+        cells.append(
+            _macros.cell("thinking", "Thinking", thinking_html, False, 0, raw_thinking)
+        )
+
+    # Render response cell (open by default)
+    if groups["text"]:
+        text_html = "".join(render_content_block(block) for block in groups["text"])
+        # Extract raw text for copy functionality
+        raw_text = "\n\n".join(block.get("text", "") for block in groups["text"])
+        cells.append(_macros.cell("response", "Response", text_html, True, 0, raw_text))
+
+    # Render tools cell (closed by default)
+    if groups["tools"]:
+        tools_html = "".join(render_content_block(block) for block in groups["tools"])
+        # Extract raw tool content for copy functionality
+        raw_tool_parts = []
+        for block in groups["tools"]:
+            if not isinstance(block, dict):
+                raw_tool_parts.append(str(block))
+                continue
+            if block.get("type") == "tool_use":
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+                raw_tool_parts.append(
+                    f"Tool: {tool_name}\nInput: {json.dumps(tool_input, indent=2)}"
+                )
+            elif block.get("type") == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_texts = []
+                    for item in result_content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            result_texts.append(item.get("text", ""))
+                    result_content = "\n".join(result_texts)
+                raw_tool_parts.append(f"Result:\n{result_content}")
+        raw_tools = "\n\n".join(raw_tool_parts)
+        tool_count = len([b for b in groups["tools"] if b.get("type") == "tool_use"])
+        cells.append(
+            _macros.cell(
+                "tools", "Tool Calls", tools_html, False, tool_count, raw_tools
+            )
+        )
+
+    return "".join(cells)
 
 
 def make_msg_id(timestamp):
@@ -1048,7 +1434,14 @@ def render_message(log_type, message_json, timestamp):
     if not content_html.strip():
         return ""
     msg_id = make_msg_id(timestamp)
-    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
+    # Calculate and render metadata
+    metadata = calculate_message_metadata(message_data)
+    metadata_html = _macros.metadata(
+        metadata["char_count"], metadata["token_estimate"], metadata["tool_counts"]
+    )
+    return _macros.message(
+        role_class, role_label, msg_id, timestamp, content_html, metadata_html
+    )
 
 
 def render_message_with_tool_pairs(
@@ -1076,25 +1469,113 @@ def render_message_with_tool_pairs(
     if not content_html.strip():
         return ""
     msg_id = make_msg_id(timestamp)
-    return _macros.message(role_class, role_label, msg_id, timestamp, content_html)
+    # Calculate and render metadata
+    metadata = calculate_message_metadata(message_data)
+    metadata_html = _macros.metadata(
+        metadata["char_count"], metadata["token_estimate"], metadata["tool_counts"]
+    )
+    return _macros.message(
+        role_class, role_label, msg_id, timestamp, content_html, metadata_html
+    )
 
 
 CSS = """
-:root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
+:root {
+  /* Backgrounds - Craft.do inspired warm palette */
+  --bg-primary: #faf9f7;           /* Warm off-white */
+  --bg-secondary: #f5f3f0;         /* Cream */
+  --bg-tertiary: #ebe8e4;          /* Soft gray-cream */
+  --bg-paper: #fffffe;             /* Pure paper white */
+
+  /* Text Colors */
+  --text-primary: #1a1a1a;         /* Deep charcoal */
+  --text-secondary: #4a4a4a;       /* Warm dark gray */
+  --text-muted: #7a7a7a;           /* Medium gray */
+  --text-subtle: #a0a0a0;          /* Light gray */
+
+  /* Accent Colors */
+  --accent-purple: #7c3aed;        /* Primary purple */
+  --accent-purple-light: #a78bfa;  /* Light purple */
+  --accent-purple-bg: rgba(124, 58, 237, 0.08);
+  --accent-blue: #0ea5e9;          /* Sky blue */
+  --accent-blue-light: #7dd3fc;
+  --accent-green: #10b981;         /* Success green */
+  --accent-green-bg: rgba(16, 185, 129, 0.08);
+  --accent-red: #ef4444;           /* Error red */
+  --accent-red-bg: rgba(239, 68, 68, 0.08);
+  --accent-orange: #f59e0b;        /* Warning orange */
+
+  /* Surface & Cards */
+  --card-bg: #fffffe;
+  --card-border: rgba(0, 0, 0, 0.06);
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+  --card-shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.04);
+
+  /* Borders & Dividers */
+  --border-light: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.1);
+  --border-radius-sm: 6px;
+  --border-radius-md: 10px;
+  --border-radius-lg: 14px;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Sticky Header Heights */
+  --sticky-level-0: 48px;  /* Message header */
+  --sticky-level-1: 44px;  /* Cell header */
+  --sticky-level-2: 40px;  /* Subcell header */
+
+  /* Frosted Glass Effect */
+  --glass-bg: rgba(255, 255, 254, 0.85);
+  --glass-blur: blur(12px);
+  --glass-border: rgba(255, 255, 255, 0.2);
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-medium: 0.25s ease;
+
+  /* Typography */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+
+  /* Legacy variable mappings for backward compatibility */
+  --bg-color: var(--bg-primary);
+  --user-bg: #e8f4fd;
+  --user-border: var(--accent-blue);
+  --assistant-bg: var(--bg-secondary);
+  --assistant-border: var(--border-medium);
+  --thinking-bg: #fef9e7;
+  --thinking-border: var(--accent-orange);
+  --thinking-text: var(--text-secondary);
+  --tool-bg: var(--accent-purple-bg);
+  --tool-border: var(--accent-purple);
+  --tool-result-bg: var(--accent-green-bg);
+  --tool-error-bg: var(--accent-red-bg);
+  --text-color: var(--text-primary);
+  --code-bg: #1e1e2e;
+  --code-text: #a6e3a1;
+}
 * { box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-primary); background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"); color: var(--text-primary); margin: 0; padding: var(--spacing-md); line-height: 1.6; }
 .container { max-width: 800px; margin: 0 auto; }
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
-.message { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.message { margin-bottom: var(--spacing-md); border-radius: var(--border-radius-lg); box-shadow: var(--card-shadow); transition: box-shadow var(--transition-fast); }
 .message.user { background: var(--user-bg); border-left: 4px solid var(--user-border); }
 .message.assistant { background: var(--card-bg); border-left: 4px solid var(--assistant-border); }
 .message.tool-reply { background: #fff8e1; border-left: 4px solid #ff9800; }
 .tool-reply .role-label { color: #e65100; }
 .tool-reply .tool-result { background: transparent; padding: 0; margin: 0; }
 .tool-reply .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
-.message-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
+.message-header { display: flex; justify-content: space-between; align-items: center; padding: var(--spacing-sm) var(--spacing-md); background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); font-size: var(--font-size-sm); border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0; position: sticky; top: 0; z-index: 30; }
 .role-label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .user .role-label { color: var(--user-border); }
 time { color: var(--text-muted); font-size: 0.8rem; }
@@ -1102,89 +1583,142 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .timestamp-link:hover { text-decoration: underline; }
 .message:target { animation: highlight 2s ease-out; }
 @keyframes highlight { 0% { background-color: rgba(25, 118, 210, 0.2); } 100% { background-color: transparent; } }
-.message-content { padding: 16px; }
+.message-content { padding: var(--spacing-md); }
 .message-content p { margin: 0 0 12px 0; }
 .message-content p:last-child { margin-bottom: 0; }
-.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 0.9rem; color: var(--thinking-text); }
-.thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
+.thinking { background: var(--thinking-bg); border: 1px solid var(--thinking-border); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; font-size: var(--font-size-sm); color: var(--thinking-text); }
+.thinking-label { font-size: var(--font-size-xs); font-weight: 600; text-transform: uppercase; color: var(--accent-orange); margin-bottom: var(--spacing-sm); }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
-.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
-.tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.tool-icon { font-size: 1.1rem; }
-.tool-description { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
-.tool-result { background: var(--tool-result-bg); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.cell { margin: var(--spacing-sm) 0; border-radius: var(--border-radius-md); overflow: visible; }
+.cell summary { cursor: pointer; padding: var(--spacing-sm) var(--spacing-md); display: flex; align-items: center; font-weight: 600; font-size: var(--font-size-sm); list-style: none; position: sticky; top: var(--sticky-level-0); z-index: 20; background: inherit; backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); gap: var(--spacing-sm); }
+.cell summary .cell-label { flex: 1; }
+.cell summary::-webkit-details-marker { display: none; }
+.cell summary::before { content: '▶'; font-size: var(--font-size-xs); margin-right: var(--spacing-sm); transition: transform var(--transition-fast); }
+.cell[open] summary::before { transform: rotate(90deg); }
+.thinking-cell summary { background: var(--thinking-bg); border: 1px solid var(--thinking-border); color: var(--accent-orange); border-radius: var(--border-radius-md); transition: background var(--transition-fast), border-color var(--transition-fast); }
+.thinking-cell summary:hover { background: rgba(254, 249, 231, 0.9); border-color: var(--accent-orange); }
+.thinking-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.response-cell summary { background: var(--border-light); border: 1px solid var(--assistant-border); color: var(--text-primary); border-radius: var(--border-radius-md); transition: background var(--transition-fast), border-color var(--transition-fast); }
+.response-cell summary:hover { background: var(--bg-tertiary); border-color: var(--border-medium); }
+.response-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.tools-cell summary { background: var(--tool-bg); border: 1px solid var(--tool-border); color: var(--accent-purple); border-radius: var(--border-radius-md); transition: background var(--transition-fast), border-color var(--transition-fast); }
+.tools-cell summary:hover { background: rgba(124, 58, 237, 0.12); border-color: var(--accent-purple); }
+.tools-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.user-cell summary { background: var(--user-bg); border: 1px solid var(--user-border); color: var(--accent-blue); border-radius: var(--border-radius-md); transition: var(--transition-fast); }
+.user-cell summary:hover { background: rgba(227, 242, 253, 0.9); border-color: var(--accent-blue); }
+.user-cell[open] summary { border-radius: var(--border-radius-md) var(--border-radius-md) 0 0; }
+.user-cell .cell-content { background: var(--user-bg); border-color: var(--user-border); }
+.cell-content { padding: var(--spacing-md); border: 1px solid var(--border-medium); border-top: none; border-radius: 0 0 var(--border-radius-md) var(--border-radius-md); background: var(--card-bg); }
+.thinking-cell .cell-content { background: var(--thinking-bg); border-color: var(--thinking-border); }
+.tools-cell .cell-content { background: var(--accent-purple-bg); border-color: var(--tool-border); }
+.cell-copy-btn { padding: var(--spacing-xs) var(--spacing-sm); background: var(--glass-bg); border: 1px solid var(--border-light); border-radius: var(--border-radius-sm); cursor: pointer; font-size: var(--font-size-xs); color: var(--text-muted); transition: all var(--transition-fast); margin-left: auto; }
+.cell-copy-btn:hover { background: var(--bg-paper); color: var(--text-primary); border-color: var(--border-medium); }
+.cell-copy-btn:focus { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.cell-copy-btn.copied { background: var(--accent-green-bg); color: var(--accent-green); border-color: var(--accent-green); }
+.tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
+.tool-header { font-weight: 600; color: var(--accent-purple); margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: var(--spacing-sm); position: sticky; top: calc(var(--sticky-level-0) + var(--sticky-level-1)); z-index: 10; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: var(--spacing-xs) 0; flex-wrap: wrap; }
+.tool-icon { font-size: var(--font-size-lg); min-width: 1.5em; text-align: center; }
+.tool-description { font-size: var(--font-size-sm); color: var(--text-muted); margin-bottom: var(--spacing-sm); font-style: italic; }
+.tool-description p { margin: 0; }
+.tool-input-rendered { font-family: monospace; white-space: pre-wrap; font-size: var(--font-size-sm); line-height: 1.5; }
+/* Tab-style view toggle (shadcn inspired) */
+.view-toggle { display: inline-flex; background: var(--bg-tertiary); border-radius: var(--border-radius-sm); padding: 2px; gap: 2px; margin-left: auto; }
+.view-toggle-tab { padding: var(--spacing-xs) var(--spacing-sm); font-size: var(--font-size-xs); font-weight: 500; color: var(--text-muted); background: transparent; border: none; border-radius: 4px; cursor: pointer; transition: var(--transition-fast); white-space: nowrap; }
+.view-toggle-tab:hover { color: var(--text-secondary); background: rgba(0, 0, 0, 0.04); }
+.view-toggle-tab.active { color: var(--text-primary); background: var(--bg-paper); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+.view-json { display: none; }
+.view-markdown { display: block; }
+.show-json .view-json { display: block; }
+.show-json .view-markdown { display: none; }
+.tool-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-sm); position: sticky; top: calc(var(--sticky-level-0) + var(--sticky-level-1)); z-index: 10; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); padding: var(--spacing-xs) 0; }
+.tool-result-label { font-weight: 600; font-size: var(--font-size-sm); color: var(--accent-green); display: flex; align-items: center; gap: var(--spacing-sm); }
+.tool-result.tool-error .tool-result-label { color: var(--accent-red); }
+.result-icon { font-size: var(--font-size-base); }
+.tool-call-label { font-weight: 600; font-size: var(--font-size-xs); color: var(--accent-purple); background: var(--accent-purple-bg); padding: 2px var(--spacing-sm); border-radius: var(--border-radius-sm); margin-right: var(--spacing-sm); display: inline-flex; align-items: center; gap: var(--spacing-xs); }
+.call-icon { font-size: var(--font-size-sm); }
+.json-key { color: var(--accent-purple); font-weight: 600; }
+.json-string-value { color: var(--accent-green); }
+.json-string-value p { display: inline; margin: 0; }
+.json-string-value code { background: var(--border-light); padding: 1px var(--spacing-xs); border-radius: 3px; }
+.json-string-value strong { font-weight: 600; }
+.json-string-value em { font-style: italic; }
+.json-string-value a { color: var(--accent-blue); text-decoration: underline; }
+.json-number { color: var(--accent-red); font-weight: 500; }
+.json-bool { color: var(--accent-blue); font-weight: 600; }
+.json-null { color: var(--text-muted); font-style: italic; }
+.tool-result { background: var(--tool-result-bg); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
 .tool-result.tool-error { background: var(--tool-error-bg); }
-.tool-pair { border: 1px solid var(--tool-border); border-radius: 8px; padding: 8px; margin: 12px 0; background: rgba(156, 39, 176, 0.06); }
-.tool-pair .tool-use, .tool-pair .tool-result { margin: 8px 0; }
-.file-tool { border-radius: 8px; padding: 12px; margin: 12px 0; }
-.write-tool { background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%); border: 1px solid #4caf50; }
-.edit-tool { background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%); border: 1px solid #ff9800; }
-.file-tool-header { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
-.write-header { color: #2e7d32; }
-.edit-header { color: #e65100; }
-.file-tool-icon { font-size: 1rem; }
-.file-tool-path { font-family: monospace; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 4px; }
-.file-tool-fullpath { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; word-break: break-all; }
+.tool-pair { border: 1px solid var(--tool-border); border-radius: var(--border-radius-md); padding: var(--spacing-sm); margin: var(--spacing-md) 0; background: var(--accent-purple-bg); }
+.tool-pair .tool-use, .tool-pair .tool-result { margin: var(--spacing-sm) 0; }
+.file-tool { border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
+.write-tool { background: linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%); border: 1px solid var(--accent-green); }
+.edit-tool { background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(239, 68, 68, 0.05) 100%); border: 1px solid var(--accent-orange); }
+.file-tool-header { font-weight: 600; margin-bottom: var(--spacing-xs); display: flex; align-items: center; gap: var(--spacing-sm); font-size: var(--font-size-sm); flex-wrap: wrap; }
+.write-header { color: var(--accent-green); }
+.edit-header { color: var(--accent-orange); }
+.file-tool-icon { font-size: var(--font-size-base); }
+.file-tool-path { font-family: monospace; background: var(--border-light); padding: 2px var(--spacing-sm); border-radius: var(--border-radius-sm); }
+.file-tool-fullpath { font-family: monospace; font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--spacing-sm); word-break: break-all; }
 .file-content { margin: 0; }
-.edit-section { display: flex; margin: 4px 0; border-radius: 4px; overflow: hidden; }
-.edit-label { padding: 8px 12px; font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
-.edit-old { background: #fce4ec; }
-.edit-old .edit-label { color: #b71c1c; background: #f8bbd9; }
-.edit-old .edit-content { color: #880e4f; }
-.edit-new { background: #e8f5e9; }
-.edit-new .edit-label { color: #1b5e20; background: #a5d6a7; }
-.edit-new .edit-content { color: #1b5e20; }
-.edit-content { margin: 0; flex: 1; background: transparent; font-size: 0.85rem; }
-.edit-replace-all { font-size: 0.75rem; font-weight: normal; color: var(--text-muted); }
-.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #e6f4ea); }
-.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff0e5); }
-.todo-list { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border: 1px solid #81c784; border-radius: 8px; padding: 12px; margin: 12px 0; }
-.todo-header { font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; font-size: 0.95rem; }
+.edit-section { display: flex; margin: var(--spacing-xs) 0; border-radius: var(--border-radius-sm); overflow: hidden; }
+.edit-label { padding: var(--spacing-sm) var(--spacing-md); font-weight: bold; font-family: monospace; display: flex; align-items: flex-start; }
+.edit-old { background: var(--accent-red-bg); }
+.edit-old .edit-label { color: var(--accent-red); background: rgba(239, 68, 68, 0.15); }
+.edit-old .edit-content { color: var(--accent-red); }
+.edit-new { background: var(--accent-green-bg); }
+.edit-new .edit-label { color: var(--accent-green); background: rgba(16, 185, 129, 0.15); }
+.edit-new .edit-content { color: var(--accent-green); }
+.edit-content { margin: 0; flex: 1; background: transparent; font-size: var(--font-size-sm); }
+.edit-replace-all { font-size: var(--font-size-xs); font-weight: normal; color: var(--text-muted); }
+.write-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, rgba(16, 185, 129, 0.08)); }
+.edit-tool .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, rgba(245, 158, 11, 0.08)); }
+.todo-list { background: linear-gradient(135deg, var(--accent-green-bg) 0%, rgba(16, 185, 129, 0.04) 100%); border: 1px solid var(--accent-green); border-radius: var(--border-radius-md); padding: var(--spacing-md); margin: var(--spacing-md) 0; }
+.todo-header { font-weight: 600; color: var(--accent-green); margin-bottom: var(--spacing-sm); display: flex; align-items: center; gap: var(--spacing-sm); font-size: var(--font-size-sm); flex-wrap: wrap; }
 .todo-items { list-style: none; margin: 0; padding: 0; }
-.todo-item { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 0.9rem; }
+.todo-item { display: flex; align-items: flex-start; gap: var(--spacing-sm); padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--border-light); font-size: var(--font-size-sm); }
 .todo-item:last-child { border-bottom: none; }
 .todo-icon { flex-shrink: 0; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-weight: bold; border-radius: 50%; }
-.todo-completed .todo-icon { color: #2e7d32; background: rgba(46, 125, 50, 0.15); }
-.todo-completed .todo-content { color: #558b2f; text-decoration: line-through; }
-.todo-in-progress .todo-icon { color: #f57c00; background: rgba(245, 124, 0, 0.15); }
-.todo-in-progress .todo-content { color: #e65100; font-weight: 500; }
-.todo-pending .todo-icon { color: #757575; background: rgba(0,0,0,0.05); }
-.todo-pending .todo-content { color: #616161; }
-pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
+.todo-completed .todo-icon { color: var(--accent-green); background: var(--accent-green-bg); }
+.todo-completed .todo-content { color: var(--accent-green); text-decoration: line-through; }
+.todo-in-progress .todo-icon { color: var(--accent-orange); background: rgba(245, 158, 11, 0.15); }
+.todo-in-progress .todo-content { color: var(--accent-orange); font-weight: 500; }
+.todo-pending .todo-icon { color: var(--text-muted); background: var(--border-light); }
+.todo-pending .todo-content { color: var(--text-secondary); }
+pre { background: var(--code-bg); color: var(--code-text); padding: var(--spacing-md); border-radius: var(--border-radius-sm); overflow-x: auto; font-size: var(--font-size-sm); line-height: 1.5; margin: var(--spacing-sm) 0; white-space: pre-wrap; word-wrap: break-word; }
 pre.json { color: #e0e0e0; }
 pre.highlight { color: #e0e0e0; }
-code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+code { background: var(--border-light); padding: 2px var(--spacing-sm); border-radius: var(--border-radius-sm); font-size: 0.9em; }
 pre code { background: none; padding: 0; }
 .highlight .hll { background-color: #49483e }
-.highlight .c { color: #75715e } /* Comment */
-.highlight .err { color: #f92672 } /* Error */
-.highlight .k { color: #66d9ef } /* Keyword */
-.highlight .l { color: #ae81ff } /* Literal */
-.highlight .n { color: #e0e0e0 } /* Name */
-.highlight .o { color: #f92672 } /* Operator */
-.highlight .p { color: #e0e0e0 } /* Punctuation */
-.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #75715e } /* Comments */
-.highlight .gd { color: #f92672 } /* Generic.Deleted */
-.highlight .gi { color: #a6e22e } /* Generic.Inserted */
-.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #66d9ef } /* Keywords */
-.highlight .ld { color: #e6db74 } /* Literal.Date */
-.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #ae81ff } /* Numbers */
-.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #e6db74 } /* Strings */
-.highlight .na { color: #a6e22e } /* Name.Attribute */
-.highlight .nb { color: #e0e0e0 } /* Name.Builtin */
-.highlight .nc { color: #a6e22e } /* Name.Class */
-.highlight .no { color: #66d9ef } /* Name.Constant */
-.highlight .nd { color: #a6e22e } /* Name.Decorator */
-.highlight .ne { color: #a6e22e } /* Name.Exception */
-.highlight .nf { color: #a6e22e } /* Name.Function */
-.highlight .nl { color: #e0e0e0 } /* Name.Label */
-.highlight .nn { color: #e0e0e0 } /* Name.Namespace */
-.highlight .nt { color: #f92672 } /* Name.Tag */
-.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #e0e0e0 } /* Variables */
-.highlight .ow { color: #f92672 } /* Operator.Word */
-.highlight .w { color: #e0e0e0 } /* Text.Whitespace */
-.user-content { margin: 0; }
+.highlight .c { color: #8a9a5b; font-style: italic; } /* Comment - softer green-gray, italic */
+.highlight .err { color: #ff6b6b } /* Error - softer red */
+.highlight .k { color: #ff79c6; font-weight: 600; } /* Keyword - pink, bold */
+.highlight .l { color: #bd93f9 } /* Literal - purple */
+.highlight .n { color: #f8f8f2 } /* Name - bright white */
+.highlight .o { color: #ff79c6 } /* Operator - pink */
+.highlight .p { color: #f8f8f2 } /* Punctuation - bright white */
+.highlight .ch, .highlight .cm, .highlight .c1, .highlight .cs, .highlight .cp, .highlight .cpf { color: #8a9a5b; font-style: italic; } /* Comments - softer green-gray, italic */
+.highlight .gd { color: #ff6b6b; background: rgba(255,107,107,0.15); } /* Generic.Deleted - red with bg */
+.highlight .gi { color: #50fa7b; background: rgba(80,250,123,0.15); } /* Generic.Inserted - green with bg */
+.highlight .kc, .highlight .kd, .highlight .kn, .highlight .kp, .highlight .kr, .highlight .kt { color: #8be9fd; font-weight: 600; } /* Keywords - cyan, bold */
+.highlight .ld { color: #f1fa8c } /* Literal.Date - yellow */
+.highlight .m, .highlight .mb, .highlight .mf, .highlight .mh, .highlight .mi, .highlight .mo { color: #bd93f9 } /* Numbers - purple */
+.highlight .s, .highlight .sa, .highlight .sb, .highlight .sc, .highlight .dl, .highlight .sd, .highlight .s2, .highlight .se, .highlight .sh, .highlight .si, .highlight .sx, .highlight .sr, .highlight .s1, .highlight .ss { color: #f1fa8c } /* Strings - yellow */
+.highlight .na { color: #50fa7b } /* Name.Attribute - green */
+.highlight .nb { color: #8be9fd } /* Name.Builtin - cyan */
+.highlight .nc { color: #50fa7b; font-weight: 600; } /* Name.Class - green, bold */
+.highlight .no { color: #8be9fd } /* Name.Constant - cyan */
+.highlight .nd { color: #ffb86c } /* Name.Decorator - orange */
+.highlight .ne { color: #ff79c6 } /* Name.Exception - pink */
+.highlight .nf { color: #50fa7b } /* Name.Function - green */
+.highlight .nl { color: #f8f8f2 } /* Name.Label - white */
+.highlight .nn { color: #f8f8f2 } /* Name.Namespace - white */
+.highlight .nt { color: #ff79c6 } /* Name.Tag - pink */
+.highlight .nv, .highlight .vc, .highlight .vg, .highlight .vi, .highlight .vm { color: #f8f8f2 } /* Variables - white */
+.highlight .ow { color: #ff79c6; font-weight: 600; } /* Operator.Word - pink, bold */
+.highlight .w { color: #f8f8f2 } /* Text.Whitespace */
+.user-content { margin: 0; overflow-wrap: break-word; word-break: break-word; }
 .truncatable { position: relative; }
 .truncatable.truncated .truncatable-content { max-height: 200px; overflow: hidden; }
 .truncatable.truncated::after { content: ''; position: absolute; bottom: 32px; left: 0; right: 0; height: 60px; background: linear-gradient(to bottom, transparent, var(--card-bg)); pointer-events: none; }
@@ -1192,69 +1726,108 @@ pre code { background: none; padding: 0; }
 .message.tool-reply .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, #fff8e1); }
 .tool-use .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-bg)); }
 .tool-result .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--tool-result-bg)); }
-.expand-btn { display: none; width: 100%; padding: 8px 16px; margin-top: 4px; background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
-.expand-btn:hover { background: rgba(0,0,0,0.1); }
+.expand-btn { display: none; width: 100%; padding: var(--spacing-sm) var(--spacing-md); margin-top: var(--spacing-xs); background: var(--border-light); border: 1px solid var(--border-medium); border-radius: var(--border-radius-sm); cursor: pointer; font-size: var(--font-size-sm); color: var(--text-muted); transition: background var(--transition-fast); }
+.expand-btn:hover { background: var(--bg-tertiary); }
 .truncatable.truncated .expand-btn, .truncatable.expanded .expand-btn { display: block; }
-.copy-btn { position: absolute; top: 8px; right: 8px; padding: 4px 8px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.2); border-radius: 4px; cursor: pointer; font-size: 0.75rem; color: var(--text-muted); opacity: 0; transition: opacity 0.2s; z-index: 10; }
-.copy-btn:hover { background: white; color: var(--text-color); }
-.copy-btn.copied { background: #c8e6c9; color: #2e7d32; }
+.copy-btn { position: absolute; top: var(--spacing-sm); right: var(--spacing-sm); padding: var(--spacing-xs) var(--spacing-sm); background: var(--glass-bg); border: 1px solid var(--border-light); border-radius: var(--border-radius-sm); cursor: pointer; font-size: var(--font-size-xs); color: var(--text-muted); opacity: 0; transition: opacity var(--transition-fast); z-index: 10; }
+.copy-btn:hover { background: var(--bg-paper); color: var(--text-primary); }
+.copy-btn.copied { background: var(--accent-green-bg); color: var(--accent-green); }
 pre:hover .copy-btn, .tool-result:hover .copy-btn, .truncatable:hover .copy-btn { opacity: 1; }
 .code-container { position: relative; }
-.pagination { display: flex; justify-content: center; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
-.pagination a, .pagination span { padding: 5px 10px; border-radius: 6px; text-decoration: none; font-size: 0.85rem; }
-.pagination a { background: var(--card-bg); color: var(--user-border); border: 1px solid var(--user-border); }
-.pagination a:hover { background: var(--user-bg); }
-.pagination .current { background: var(--user-border); color: white; }
-.pagination .disabled { color: var(--text-muted); border: 1px solid #ddd; }
-.pagination .index-link { background: var(--user-border); color: white; }
-details.continuation { margin-bottom: 16px; }
-details.continuation summary { cursor: pointer; padding: 12px 16px; background: var(--user-bg); border-left: 4px solid var(--user-border); border-radius: 12px; font-weight: 500; color: var(--text-muted); }
-details.continuation summary:hover { background: rgba(25, 118, 210, 0.15); }
-details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom: 0; }
-.index-item { margin-bottom: 16px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); background: var(--user-bg); border-left: 4px solid var(--user-border); }
+.pagination { display: flex; justify-content: center; gap: var(--spacing-sm); margin: var(--spacing-lg) 0; flex-wrap: wrap; }
+.pagination a, .pagination span { padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--border-radius-sm); text-decoration: none; font-size: var(--font-size-sm); }
+.pagination a { background: var(--card-bg); color: var(--accent-blue); border: 1px solid var(--accent-blue); transition: background var(--transition-fast); }
+.pagination a:hover { background: rgba(14, 165, 233, 0.1); }
+.pagination .current { background: var(--accent-blue); color: white; }
+.pagination .disabled { color: var(--text-muted); border: 1px solid var(--border-light); }
+.pagination .index-link { background: var(--accent-blue); color: white; }
+details.continuation { margin-bottom: var(--spacing-md); }
+details.continuation summary { cursor: pointer; padding: var(--spacing-md); background: var(--user-bg); border-left: 4px solid var(--accent-blue); border-radius: var(--border-radius-lg); font-weight: 500; color: var(--text-muted); transition: background var(--transition-fast); }
+details.continuation summary:hover { background: rgba(14, 165, 233, 0.15); }
+details.continuation[open] summary { border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0; margin-bottom: 0; }
+.index-item { margin-bottom: var(--spacing-md); border-radius: var(--border-radius-lg); overflow: hidden; box-shadow: var(--card-shadow); background: var(--user-bg); border-left: 4px solid var(--accent-blue); transition: box-shadow var(--transition-fast); }
+.index-item:hover { box-shadow: var(--card-shadow-hover); }
 .index-item a { display: block; text-decoration: none; color: inherit; }
-.index-item a:hover { background: rgba(25, 118, 210, 0.1); }
-.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.03); font-size: 0.85rem; }
-.index-item-number { font-weight: 600; color: var(--user-border); }
-.index-item-content { padding: 16px; }
-.index-item-stats { padding: 8px 16px 12px 32px; font-size: 0.85rem; color: var(--text-muted); border-top: 1px solid rgba(0,0,0,0.06); }
-.index-item-commit { margin-top: 6px; padding: 4px 8px; background: #fff3e0; border-radius: 4px; font-size: 0.85rem; color: #e65100; }
-.index-item-commit code { background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px; font-size: 0.8rem; margin-right: 6px; }
-.commit-card { margin: 8px 0; padding: 10px 14px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 6px; }
-.commit-card a { text-decoration: none; color: #5d4037; display: block; }
-.commit-card a:hover { color: #e65100; }
-.commit-card-hash { font-family: monospace; color: #e65100; font-weight: 600; margin-right: 8px; }
-.index-commit { margin-bottom: 12px; padding: 10px 16px; background: #fff3e0; border-left: 4px solid #ff9800; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.index-item a:hover { background: rgba(14, 165, 233, 0.08); }
+.index-item-header { display: flex; justify-content: space-between; align-items: center; padding: var(--spacing-sm) var(--spacing-md); background: var(--border-light); font-size: var(--font-size-sm); }
+.index-item-number { font-weight: 600; color: var(--accent-blue); }
+.index-item-content { padding: var(--spacing-md); }
+.index-item-stats { padding: var(--spacing-sm) var(--spacing-md) var(--spacing-md) var(--spacing-xl); font-size: var(--font-size-sm); color: var(--text-muted); border-top: 1px solid var(--border-light); }
+.index-item-commit { margin-top: var(--spacing-sm); padding: var(--spacing-xs) var(--spacing-sm); background: rgba(245, 158, 11, 0.1); border-radius: var(--border-radius-sm); font-size: var(--font-size-sm); color: var(--accent-orange); }
+.index-item-commit code { background: var(--border-light); padding: 1px var(--spacing-xs); border-radius: 3px; font-size: var(--font-size-xs); margin-right: var(--spacing-sm); }
+.commit-card { margin: var(--spacing-sm) 0; padding: var(--spacing-sm) var(--spacing-md); background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--accent-orange); border-radius: var(--border-radius-sm); }
+.commit-card a { text-decoration: none; color: var(--text-secondary); display: block; }
+.commit-card a:hover { color: var(--accent-orange); }
+.commit-card-hash { font-family: monospace; color: var(--accent-orange); font-weight: 600; margin-right: var(--spacing-sm); }
+.index-commit { margin-bottom: var(--spacing-md); padding: var(--spacing-sm) var(--spacing-md); background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--accent-orange); border-radius: var(--border-radius-md); box-shadow: var(--card-shadow); }
 .index-commit a { display: block; text-decoration: none; color: inherit; }
-.index-commit a:hover { background: rgba(255, 152, 0, 0.1); margin: -10px -16px; padding: 10px 16px; border-radius: 8px; }
-.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; margin-bottom: 4px; }
-.index-commit-hash { font-family: monospace; color: #e65100; font-weight: 600; }
-.index-commit-msg { color: #5d4037; }
-.index-item-long-text { margin-top: 8px; padding: 12px; background: var(--card-bg); border-radius: 8px; border-left: 3px solid var(--assistant-border); }
+.index-commit a:hover { background: rgba(245, 158, 11, 0.1); margin: calc(-1 * var(--spacing-sm)) calc(-1 * var(--spacing-md)); padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--border-radius-md); }
+.index-commit-header { display: flex; justify-content: space-between; align-items: center; font-size: var(--font-size-sm); margin-bottom: var(--spacing-xs); }
+.index-commit-hash { font-family: monospace; color: var(--accent-orange); font-weight: 600; }
+.index-commit-msg { color: var(--text-secondary); }
+.index-item-long-text { margin-top: var(--spacing-sm); padding: var(--spacing-md); background: var(--card-bg); border-radius: var(--border-radius-md); border-left: 3px solid var(--assistant-border); }
 .index-item-long-text .truncatable.truncated::after { background: linear-gradient(to bottom, transparent, var(--card-bg)); }
-.index-item-long-text-content { color: var(--text-color); }
-#search-box { display: none; align-items: center; gap: 8px; }
-#search-box input { padding: 6px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; width: 180px; }
-#search-box button, #modal-search-btn, #modal-close-btn { background: var(--user-border); color: white; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-#search-box button:hover, #modal-search-btn:hover { background: #1565c0; }
-#modal-close-btn { background: var(--text-muted); margin-left: 8px; }
-#modal-close-btn:hover { background: #616161; }
-#search-modal[open] { border: none; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
-#search-modal::backdrop { background: rgba(0,0,0,0.5); }
-.search-modal-header { display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--assistant-border); background: var(--bg-color); border-radius: 12px 12px 0 0; }
-.search-modal-header input { flex: 1; padding: 8px 12px; border: 1px solid var(--assistant-border); border-radius: 6px; font-size: 16px; }
-#search-status { padding: 8px 16px; font-size: 0.85rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-#search-results { flex: 1; overflow-y: auto; padding: 16px; }
-.search-result { margin-bottom: 16px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.index-item-long-text-content { color: var(--text-primary); }
+#search-box { display: none; align-items: center; gap: var(--spacing-sm); }
+#search-box input { padding: var(--spacing-sm) var(--spacing-md); border: 1px solid var(--border-medium); border-radius: var(--border-radius-sm); font-size: var(--font-size-base); width: 180px; transition: border-color var(--transition-fast); }
+#search-box input:focus { border-color: var(--accent-blue); outline: none; }
+#search-box button, #modal-search-btn, #modal-close-btn { background: var(--accent-blue); color: white; border: none; border-radius: var(--border-radius-sm); padding: var(--spacing-sm) var(--spacing-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--transition-fast); }
+#search-box button:hover, #modal-search-btn:hover { background: #0284c7; }
+#modal-close-btn { background: var(--text-muted); margin-left: var(--spacing-sm); }
+#modal-close-btn:hover { background: var(--text-secondary); }
+#search-modal[open] { border: none; border-radius: var(--border-radius-lg); box-shadow: 0 4px 24px rgba(0,0,0,0.15); padding: 0; width: 90vw; max-width: 900px; height: 80vh; max-height: 80vh; display: flex; flex-direction: column; }
+#search-modal::backdrop { background: rgba(0,0,0,0.4); }
+.search-modal-header { display: flex; align-items: center; gap: var(--spacing-sm); padding: var(--spacing-md); border-bottom: 1px solid var(--border-medium); background: var(--bg-primary); border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0; }
+.search-modal-header input { flex: 1; padding: var(--spacing-sm) var(--spacing-md); border: 1px solid var(--border-medium); border-radius: var(--border-radius-sm); font-size: var(--font-size-base); }
+#search-status { padding: var(--spacing-sm) var(--spacing-md); font-size: var(--font-size-sm); color: var(--text-muted); border-bottom: 1px solid var(--border-light); }
+#search-results { flex: 1; overflow-y: auto; padding: var(--spacing-md); }
+.search-result { margin-bottom: var(--spacing-md); border-radius: var(--border-radius-md); overflow: hidden; box-shadow: var(--card-shadow); }
 .search-result a { display: block; text-decoration: none; color: inherit; }
-.search-result a:hover { background: rgba(25, 118, 210, 0.05); }
-.search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
-.search-result-content { padding: 12px; }
-.search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
+.search-result a:hover { background: rgba(14, 165, 233, 0.05); }
+.search-result-page { padding: var(--spacing-sm) var(--spacing-md); background: var(--border-light); font-size: var(--font-size-xs); color: var(--text-muted); border-bottom: 1px solid var(--border-light); }
+.search-result-content { padding: var(--spacing-md); }
+.search-result mark { background: rgba(245, 158, 11, 0.3); padding: 1px 2px; border-radius: 2px; }
+/* Metadata subsection */
+.message-metadata { margin: 0; border-radius: var(--border-radius-sm); font-size: var(--font-size-xs); }
+.message-metadata summary { cursor: pointer; padding: var(--spacing-xs) var(--spacing-sm); color: var(--text-muted); list-style: none; display: flex; align-items: center; gap: var(--spacing-xs); }
+.message-metadata summary::-webkit-details-marker { display: none; }
+.message-metadata summary::before { content: 'i'; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; font-size: 10px; font-weight: 600; font-style: italic; font-family: Georgia, serif; background: var(--border-light); border-radius: 50%; color: var(--text-muted); }
+.message-metadata[open] summary { border-bottom: 1px solid var(--border-light); }
+.metadata-content { padding: var(--spacing-sm); background: var(--bg-secondary); border-radius: 0 0 var(--border-radius-sm) var(--border-radius-sm); display: flex; flex-wrap: wrap; gap: var(--spacing-sm) var(--spacing-md); }
+.metadata-item { display: flex; align-items: center; gap: var(--spacing-xs); }
+.metadata-label { color: var(--text-muted); font-weight: 500; }
+.metadata-value { color: var(--text-secondary); font-family: monospace; }
+@media (max-width: 600px) { body { padding: var(--spacing-sm); } .message, .index-item { border-radius: var(--border-radius-md); } .message-content, .index-item-content { padding: var(--spacing-md); } pre { font-size: var(--font-size-xs); padding: var(--spacing-sm); } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 """
 
 JS = """
+// Clipboard helper with fallback for older browsers
+function copyToClipboard(text) {
+    // Modern browsers: use Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    }
+    // Fallback: use execCommand('copy')
+    return new Promise(function(resolve, reject) {
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        textarea.setAttribute('readonly', '');
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            var success = document.execCommand('copy');
+            document.body.removeChild(textarea);
+            if (success) { resolve(); }
+            else { reject(new Error('execCommand copy failed')); }
+        } catch (err) {
+            document.body.removeChild(textarea);
+            reject(err);
+        }
+    });
+}
 document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
     const timestamp = el.getAttribute('data-timestamp');
     const date = new Date(timestamp);
@@ -1287,6 +1860,8 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
 document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command').forEach(function(el) {
     // Skip if already has a copy button
     if (el.querySelector('.copy-btn')) return;
+    // Skip if inside a cell (cell header has its own copy button)
+    if (el.closest('.cell-content')) return;
     // Make container relative if needed
     if (getComputedStyle(el).position === 'static') {
         el.style.position = 'relative';
@@ -1297,7 +1872,7 @@ document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command
     copyBtn.addEventListener('click', function(e) {
         e.stopPropagation();
         const textToCopy = el.textContent.replace(/^Copy$/, '').trim();
-        navigator.clipboard.writeText(textToCopy).then(function() {
+        copyToClipboard(textToCopy).then(function() {
             copyBtn.textContent = 'Copied!';
             copyBtn.classList.add('copied');
             setTimeout(function() {
@@ -1306,9 +1881,107 @@ document.querySelectorAll('pre, .tool-result .truncatable-content, .bash-command
             }, 2000);
         }).catch(function(err) {
             console.error('Failed to copy:', err);
+            copyBtn.textContent = 'Failed';
+            setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
         });
     });
     el.appendChild(copyBtn);
+});
+// Add copy functionality to cell headers
+document.querySelectorAll('.cell-copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        // Use raw content from data attribute if available, otherwise fall back to textContent
+        var textToCopy;
+        if (btn.dataset.copyContent) {
+            textToCopy = btn.dataset.copyContent;
+        } else {
+            const cell = btn.closest('.cell');
+            const content = cell.querySelector('.cell-content');
+            textToCopy = content.textContent.trim();
+        }
+        copyToClipboard(textToCopy).then(function() {
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(function() {
+                btn.textContent = 'Copy';
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(function(err) {
+            console.error('Failed to copy cell:', err);
+            btn.textContent = 'Failed';
+            setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+        });
+    });
+    // Keyboard accessibility
+    btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this.click();
+        }
+    });
+});
+// Tab-style view toggle for tool calls/results
+document.querySelectorAll('.view-toggle:not(.cell-view-toggle)').forEach(function(toggle) {
+    toggle.querySelectorAll('.view-toggle-tab').forEach(function(tab) {
+        tab.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var container = toggle.closest('.tool-use, .tool-result, .file-tool, .todo-list');
+            var viewType = tab.dataset.view;
+
+            // Update active tab styling
+            toggle.querySelectorAll('.view-toggle-tab').forEach(function(t) {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
+            tab.classList.add('active');
+            tab.setAttribute('aria-selected', 'true');
+
+            // Toggle view class
+            if (viewType === 'json') {
+                container.classList.add('show-json');
+            } else {
+                container.classList.remove('show-json');
+            }
+        });
+    });
+});
+// Cell-level master toggle for all subcells
+document.querySelectorAll('.cell-view-toggle').forEach(function(toggle) {
+    toggle.querySelectorAll('.view-toggle-tab').forEach(function(tab) {
+        tab.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var cell = toggle.closest('.cell');
+            var viewType = tab.dataset.view;
+
+            // Update active tab styling on master toggle
+            toggle.querySelectorAll('.view-toggle-tab').forEach(function(t) {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
+            tab.classList.add('active');
+            tab.setAttribute('aria-selected', 'true');
+
+            // Propagate to all child elements
+            cell.querySelectorAll('.tool-use, .tool-result, .file-tool, .todo-list').forEach(function(container) {
+                if (viewType === 'json') {
+                    container.classList.add('show-json');
+                } else {
+                    container.classList.remove('show-json');
+                }
+                // Update child toggle tabs
+                container.querySelectorAll('.view-toggle-tab').forEach(function(childTab) {
+                    childTab.classList.remove('active');
+                    childTab.setAttribute('aria-selected', 'false');
+                    if (childTab.dataset.view === viewType) {
+                        childTab.classList.add('active');
+                        childTab.setAttribute('aria-selected', 'true');
+                    }
+                });
+            });
+        });
+    });
 });
 """
 
@@ -1437,9 +2110,8 @@ def generate_html(json_path, output_dir, github_repo=None):
                 "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
             )
 
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
+    # Set thread-safe context variable for render functions
+    set_github_repo(github_repo)
 
     conversations = []
     current_conv = None
@@ -1593,7 +2265,7 @@ def generate_html(json_path, output_dir, github_repo=None):
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
         item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
+            commit_hash, commit_msg, commit_ts, get_github_repo()
         )
         timeline_items.append((commit_ts, "commit", item_html))
 
@@ -1935,9 +2607,8 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         if github_repo:
             click.echo(f"Auto-detected GitHub repo: {github_repo}")
 
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
+    # Set thread-safe context variable for render functions
+    set_github_repo(github_repo)
 
     conversations = []
     current_conv = None
@@ -2091,7 +2762,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
         item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
+            commit_hash, commit_msg, commit_ts, get_github_repo()
         )
         timeline_items.append((commit_ts, "commit", item_html))
 

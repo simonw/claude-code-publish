@@ -11,6 +11,7 @@ from claude_code_transcripts import (
     generate_html,
     detect_github_repo,
     render_markdown_text,
+    render_json_with_markdown,
     format_json,
     is_json_like,
     render_todo_write,
@@ -18,6 +19,8 @@ from claude_code_transcripts import (
     render_edit_tool,
     render_bash_tool,
     render_content_block,
+    render_assistant_message,
+    group_blocks_by_type,
     strip_ansi,
     analyze_conversation,
     format_tool_stats,
@@ -28,6 +31,7 @@ from claude_code_transcripts import (
     parse_session_file,
     get_session_summary,
     find_local_sessions,
+    calculate_message_metadata,
 )
 
 
@@ -213,6 +217,218 @@ class TestRenderFunctions:
         result = render_bash_tool(tool_input, "tool-123")
         assert result == snapshot_html
 
+    def test_render_bash_tool_markdown_description(self):
+        """Test Bash tool renders description as Markdown."""
+        tool_input = {
+            "command": "echo hello",
+            "description": "This is **bold** and _italic_ text",
+        }
+        result = render_bash_tool(tool_input, "tool-123")
+        assert "<strong>bold</strong>" in result
+        assert "<em>italic</em>" in result
+
+    def test_render_json_with_markdown_simple(self):
+        """Test JSON rendering with Markdown in string values."""
+        obj = {"key": "This is **bold** text"}
+        result = render_json_with_markdown(obj)
+        assert "json-key" in result
+        assert "json-string-value" in result
+        assert "<strong>bold</strong>" in result
+
+    def test_render_json_with_markdown_nested(self):
+        """Test nested JSON rendering with Markdown."""
+        obj = {
+            "outer": {"inner": "Contains `code` markup"},
+            "list": ["item with **bold**", "plain item"],
+        }
+        result = render_json_with_markdown(obj)
+        assert "<code>code</code>" in result
+        assert "<strong>bold</strong>" in result
+
+    def test_render_json_with_markdown_types(self):
+        """Test JSON rendering preserves non-string types."""
+        obj = {
+            "string": "text",
+            "number": 42,
+            "float": 3.14,
+            "bool_true": True,
+            "bool_false": False,
+            "null": None,
+        }
+        result = render_json_with_markdown(obj)
+        assert "json-number" in result
+        assert "json-bool" in result
+        assert "json-null" in result
+
+
+class TestCellStructure:
+    """Tests for collapsible cell structure in assistant messages."""
+
+    def test_group_blocks_by_type(self):
+        """Test that blocks are correctly grouped by type."""
+        blocks = [
+            {"type": "thinking", "thinking": "planning..."},
+            {"type": "text", "text": "Hello!"},
+            {"type": "tool_use", "name": "Bash", "input": {}, "id": "tool-1"},
+            {"type": "text", "text": "More text"},
+            {"type": "thinking", "thinking": "more planning"},
+        ]
+        groups = group_blocks_by_type(blocks)
+        assert len(groups["thinking"]) == 2
+        assert len(groups["text"]) == 2
+        assert len(groups["tools"]) == 1
+
+    def test_cell_structure_in_assistant_message(self):
+        """Test that assistant messages contain cell structure."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Let me think..."},
+                {"type": "text", "text": "Here is my response."},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert "thinking-cell" in result
+        assert "response-cell" in result
+        assert '<details class="cell thinking-cell">' in result
+        assert '<details class="cell response-cell" open>' in result
+
+    def test_thinking_cell_closed_by_default(self):
+        """Test that thinking cell is closed by default."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Private thoughts"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert '<details class="cell thinking-cell">' in result
+        assert "open" not in result.split("thinking-cell")[1].split(">")[0]
+
+    def test_response_cell_open_by_default(self):
+        """Test that response cell is open by default."""
+        message_data = {
+            "content": [
+                {"type": "text", "text": "Hello!"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert '<details class="cell response-cell" open>' in result
+
+    def test_tools_cell_shows_count(self):
+        """Test that tools cell shows tool count."""
+        message_data = {
+            "content": [
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t1"},
+                {"type": "tool_use", "name": "Read", "input": {}, "id": "t2"},
+                {"type": "tool_use", "name": "Glob", "input": {}, "id": "t3"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert "tools-cell" in result
+        assert "Tool Calls (3)" in result
+
+    def test_cell_has_copy_button(self):
+        """Test that each cell has a copy button."""
+        message_data = {
+            "content": [
+                {"type": "text", "text": "Hello!"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert 'class="cell-copy-btn"' in result
+        assert 'aria-label="Copy Response"' in result
+
+    def test_cell_copy_button_aria_label(self):
+        """Test that cell copy buttons have appropriate ARIA labels."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Planning..."},
+                {"type": "text", "text": "Hello!"},
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t1"},
+            ]
+        }
+        result = render_assistant_message(message_data)
+        assert 'aria-label="Copy Thinking"' in result
+        assert 'aria-label="Copy Response"' in result
+        assert 'aria-label="Copy Tool Calls"' in result
+
+
+class TestMessageMetadata:
+    """Tests for message metadata calculation and rendering."""
+
+    def test_calculate_metadata_string_content(self):
+        """Test metadata calculation for string content."""
+        message_data = {"content": "Hello, world!"}
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 13
+        assert metadata["token_estimate"] == 3  # 13 // 4 = 3
+        assert metadata["tool_counts"] == {}
+
+    def test_calculate_metadata_text_blocks(self):
+        """Test metadata calculation for text blocks."""
+        message_data = {
+            "content": [
+                {"type": "text", "text": "Hello!"},  # 6 chars
+                {"type": "text", "text": "World!"},  # 6 chars
+            ]
+        }
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 12
+        assert metadata["token_estimate"] == 3  # 12 // 4 = 3
+        assert metadata["tool_counts"] == {}
+
+    def test_calculate_metadata_thinking_blocks(self):
+        """Test metadata includes thinking block content."""
+        message_data = {
+            "content": [
+                {"type": "thinking", "thinking": "Let me think..."},  # 15 chars
+            ]
+        }
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 15
+        assert metadata["token_estimate"] == 3  # 15 // 4 = 3
+
+    def test_calculate_metadata_tool_counts(self):
+        """Test tool counting in metadata."""
+        message_data = {
+            "content": [
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t1"},
+                {"type": "tool_use", "name": "Bash", "input": {}, "id": "t2"},
+                {"type": "tool_use", "name": "Read", "input": {}, "id": "t3"},
+            ]
+        }
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["tool_counts"] == {"Bash": 2, "Read": 1}
+
+    def test_calculate_metadata_empty_content(self):
+        """Test metadata for empty content."""
+        message_data = {"content": ""}
+        metadata = calculate_message_metadata(message_data)
+        assert metadata["char_count"] == 0
+        assert metadata["token_estimate"] == 0
+        assert metadata["tool_counts"] == {}
+
+    def test_metadata_in_rendered_message(self, output_dir):
+        """Test that metadata section appears in rendered messages."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+        assert 'class="message-metadata"' in page_html
+        assert 'class="metadata-content"' in page_html
+        assert 'class="metadata-label"' in page_html
+        assert 'class="metadata-value"' in page_html
+
+    def test_metadata_css_present(self, output_dir):
+        """Test that metadata CSS classes are defined."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+        assert ".message-metadata" in page_html
+        assert ".metadata-item" in page_html
+        assert ".metadata-label" in page_html
+        assert ".metadata-value" in page_html
+
 
 class TestRenderContentBlock:
     """Tests for render_content_block function."""
@@ -310,11 +526,12 @@ class TestRenderContentBlock:
 
     def test_tool_result_with_commit(self, snapshot_html):
         """Test tool result with git commit output."""
-        # Need to set the global _github_repo for commit link rendering
+        # Need to set the github repo for commit link rendering
+        # Using the thread-safe set_github_repo function
         import claude_code_transcripts
 
-        old_repo = claude_code_transcripts._github_repo
-        claude_code_transcripts._github_repo = "example/repo"
+        old_repo = claude_code_transcripts.get_github_repo()
+        claude_code_transcripts.set_github_repo("example/repo")
         try:
             block = {
                 "type": "tool_result",
@@ -324,10 +541,14 @@ class TestRenderContentBlock:
             result = render_content_block(block)
             assert result == snapshot_html
         finally:
-            claude_code_transcripts._github_repo = old_repo
+            claude_code_transcripts.set_github_repo(old_repo)
 
-    def test_tool_result_with_ansi_codes(self, snapshot_html):
-        """Test that ANSI escape codes are stripped from tool results."""
+    def test_tool_result_with_ansi_codes_snapshot(self, snapshot_html):
+        """Test ANSI escape code stripping with snapshot comparison.
+
+        This is a snapshot test companion to test_tool_result_with_ansi_codes
+        that verifies the complete HTML output structure.
+        """
         block = {
             "type": "tool_result",
             "content": "\x1b[38;2;166;172;186mTests passed:\x1b[0m \x1b[32m✓\x1b[0m All 5 tests passed\n\x1b[1;31mError:\x1b[0m None",

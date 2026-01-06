@@ -1,5 +1,28 @@
-<div class="tool-result"><div class="truncatable"><div class="truncatable-content">
+<div class="tool-result"><div class="tool-result-header"><span class="tool-result-label"><span class="result-icon">←</span> Result</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown">
 <div class="tool-use bash-tool" data-tool-id="toolu_123">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-<div class="tool-description">List files</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">ls -la</pre></div><button class="expand-btn">Show more</button></div>
-</div></div><button class="expand-btn">Show more</button></div></div>
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="tool-description"><p>List files</p></div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">ls -la</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+<pre class="json">{
+  &quot;command&quot;: &quot;ls -la&quot;,
+  &quot;description&quot;: &quot;List files&quot;
+}</pre>
+</div>
+</div></div><div class="view-json"><pre class="json">[
+  {
+    &quot;type&quot;: &quot;tool_use&quot;,
+    &quot;id&quot;: &quot;toolu_123&quot;,
+    &quot;name&quot;: &quot;Bash&quot;,
+    &quot;input&quot;: {
+      &quot;command&quot;: &quot;ls -la&quot;,
+      &quot;description&quot;: &quot;List files&quot;
+    }
+  }
+]</pre></div></div><button class="expand-btn">Show more</button></div></div>

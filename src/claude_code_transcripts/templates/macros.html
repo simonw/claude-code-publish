@@ -46,9 +46,17 @@
 {%- endif %}
 {% endmacro %}
 
-{# Todo list #}
-{% macro todo_list(todos, tool_id) %}
-<div class="todo-list" data-tool-id="{{ tool_id }}"><div class="todo-header"><span class="todo-header-icon">☰</span> Task List</div><ul class="todo-items">
+{# Todo list - input_json_html is pre-rendered JSON so needs |safe #}
+{% macro todo_list(todos, input_json_html, tool_id) %}
+<div class="todo-list" data-tool-id="{{ tool_id }}">
+<div class="todo-header"><span class="todo-header-icon">☰</span> Task List
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<ul class="todo-items">
 {%- for todo in todos -%}
 {%- set status = todo.status|default('pending') -%}
 {%- set content = todo.content|default('') -%}
@@ -64,61 +72,113 @@
 {%- endif -%}
 <li class="todo-item {{ status_class }}"><span class="todo-icon">{{ icon }}</span><span class="todo-content">{{ content }}</span></li>
 {%- endfor -%}
-</ul></div>
-{%- endmacro %}
-
-{# Write tool - content is pre-highlighted so needs |safe #}
-{% macro write_tool(file_path, content, tool_id) %}
-{%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
-<div class="file-tool write-tool" data-tool-id="{{ tool_id }}">
-<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{{ filename }}</span></div>
-<div class="file-tool-fullpath">{{ file_path }}</div>
-<div class="truncatable"><div class="truncatable-content"><pre class="file-content highlight">{{ content|safe }}</pre></div><button class="expand-btn">Show more</button></div>
+</ul>
+</div>
+<div class="view-json">
+{{ input_json_html|safe }}
+</div>
 </div>
 {%- endmacro %}
 
-{# Edit tool - old/new strings are pre-highlighted so need |safe #}
-{% macro edit_tool(file_path, old_string, new_string, replace_all, tool_id) %}
+{# Write tool - content is pre-highlighted so needs |safe, input_json_html is pre-rendered JSON so needs |safe #}
+{% macro write_tool(file_path, content, input_json_html, tool_id) %}
+{%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
+<div class="file-tool write-tool" data-tool-id="{{ tool_id }}">
+<div class="file-tool-header write-header"><span class="file-tool-icon">📝</span> Write <span class="file-tool-path">{{ filename }}</span>
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+<div class="file-tool-fullpath">{{ file_path }}</div>
+<div class="truncatable"><div class="truncatable-content"><pre class="file-content highlight">{{ content|safe }}</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+{{ input_json_html|safe }}
+</div>
+</div>
+{%- endmacro %}
+
+{# Edit tool - old/new strings are pre-highlighted so need |safe, input_json_html is pre-rendered JSON so needs |safe #}
+{% macro edit_tool(file_path, old_string, new_string, replace_all, input_json_html, tool_id) %}
 {%- set filename = file_path.split('/')[-1] if '/' in file_path else file_path -%}
 <div class="file-tool edit-tool" data-tool-id="{{ tool_id }}">
-<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{{ filename }}</span>{% if replace_all %} <span class="edit-replace-all">(replace all)</span>{% endif %}</div>
+<div class="file-tool-header edit-header"><span class="file-tool-icon">✏️</span> Edit <span class="file-tool-path">{{ filename }}</span>{% if replace_all %} <span class="edit-replace-all">(replace all)</span>{% endif %}
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
 <div class="file-tool-fullpath">{{ file_path }}</div>
 <div class="truncatable"><div class="truncatable-content">
 <div class="edit-section edit-old"><div class="edit-label">−</div><pre class="edit-content highlight">{{ old_string|safe }}</pre></div>
 <div class="edit-section edit-new"><div class="edit-label">+</div><pre class="edit-content highlight">{{ new_string|safe }}</pre></div>
 </div><button class="expand-btn">Show more</button></div>
 </div>
-{%- endmacro %}
-
-{# Bash tool #}
-{% macro bash_tool(command, description, tool_id) %}
-<div class="tool-use bash-tool" data-tool-id="{{ tool_id }}">
-<div class="tool-header"><span class="tool-icon">$</span> Bash</div>
-{%- if description %}
-<div class="tool-description">{{ description }}</div>
-{%- endif -%}
-<div class="truncatable"><div class="truncatable-content"><pre class="bash-command">{{ command }}</pre></div><button class="expand-btn">Show more</button></div>
+<div class="view-json">
+{{ input_json_html|safe }}
+</div>
 </div>
 {%- endmacro %}
 
-{# Generic tool use - input_json is pre-formatted so needs |safe #}
-{% macro tool_use(tool_name, description, input_json, tool_id) %}
-<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-icon">⚙</span> {{ tool_name }}</div>
-{%- if description -%}
-<div class="tool-description">{{ description }}</div>
+{# Bash tool - description_html is pre-rendered markdown so needs |safe, input_json_html is pre-rendered JSON so needs |safe #}
+{% macro bash_tool(command, description_html, input_json_html, tool_id) %}
+<div class="tool-use bash-tool" data-tool-id="{{ tool_id }}">
+<div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">$</span> Bash
+<div class="view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">JSON</button>
+</div>
+</div>
+<div class="view-markdown">
+{%- if description_html %}
+<div class="tool-description">{{ description_html|safe }}</div>
 {%- endif -%}
-<div class="truncatable"><div class="truncatable-content"><pre class="json">{{ input_json }}</pre></div><button class="expand-btn">Show more</button></div></div>
+<div class="truncatable"><div class="truncatable-content"><pre class="bash-command">{{ command }}</pre></div><button class="expand-btn">Show more</button></div>
+</div>
+<div class="view-json">
+{{ input_json_html|safe }}
+</div>
+</div>
 {%- endmacro %}
 
-{# Tool result - content_html is pre-rendered so needs |safe #}
-{% macro tool_result(content_html, is_error) %}
+{# Generic tool use - description_html, input_markdown_html, input_json_html are pre-rendered so need |safe #}
+{% macro tool_use(tool_name, tool_icon, description_html, input_markdown_html, input_json_html, tool_id) %}
+<div class="tool-use" data-tool-id="{{ tool_id }}"><div class="tool-header"><span class="tool-call-label"><span class="call-icon">→</span> Call</span><span class="tool-icon">{{ tool_icon }}</span> {{ tool_name }}<div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div>
+{%- if description_html -%}
+<div class="tool-description">{{ description_html|safe }}</div>
+{%- endif -%}
+<div class="truncatable"><div class="truncatable-content"><div class="view-markdown tool-input-rendered">{{ input_markdown_html|safe }}</div><div class="view-json tool-input-rendered">{{ input_json_html|safe }}</div></div><button class="expand-btn">Show more</button></div></div>
+{%- endmacro %}
+
+{# Tool result - content_markdown_html and content_json_html are pre-rendered so need |safe #}
+{% macro tool_result(content_markdown_html, content_json_html, is_error) %}
 {%- set error_class = ' tool-error' if is_error else '' -%}
-<div class="tool-result{{ error_class }}"><div class="truncatable"><div class="truncatable-content">{{ content_html|safe }}</div><button class="expand-btn">Show more</button></div></div>
+<div class="tool-result{{ error_class }}"><div class="tool-result-header"><span class="tool-result-label">{% if is_error %}<span class="result-icon">✗</span> Error{% else %}<span class="result-icon">←</span> Result{% endif %}</span><div class="view-toggle" role="tablist"><button class="view-toggle-tab active" role="tab" aria-selected="true" data-view="markdown">Markdown</button><button class="view-toggle-tab" role="tab" aria-selected="false" data-view="json">JSON</button></div></div><div class="truncatable"><div class="truncatable-content"><div class="view-markdown">{{ content_markdown_html|safe }}</div><div class="view-json">{{ content_json_html|safe }}</div></div><button class="expand-btn">Show more</button></div></div>
 {%- endmacro %}
 
 {# Tool pair wrapper - tool_use_html/tool_result_html are pre-rendered #}
 {% macro tool_pair(tool_use_html, tool_result_html) %}
 <div class="tool-pair">{{ tool_use_html|safe }}{{ tool_result_html|safe }}</div>
+{%- endmacro %}
+
+{# Collapsible cell wrapper for message sections #}
+{% macro cell(cell_type, label, content_html, open_by_default=false, count=0, raw_content="") %}
+<details class="cell {{ cell_type }}-cell"{% if open_by_default %} open{% endif %}>
+<summary class="cell-header">
+<span class="cell-label">{{ label }}{% if count %} ({{ count }}){% endif %}</span>
+{% if cell_type == 'tools' %}
+<div class="view-toggle cell-view-toggle" role="tablist">
+<button class="view-toggle-tab active" role="tab" data-view="markdown">All Markdown</button>
+<button class="view-toggle-tab" role="tab" data-view="json">All JSON</button>
+</div>
+{% endif %}
+<button class="cell-copy-btn" aria-label="Copy {{ label }}" tabindex="0"{% if raw_content %} data-copy-content="{{ raw_content | e }}"{% endif %}>Copy</button>
+</summary>
+<div class="cell-content">{{ content_html|safe }}</div>
+</details>
 {%- endmacro %}
 
 {# Thinking block - content_html is pre-rendered markdown so needs |safe #}
@@ -151,9 +211,25 @@
 {%- endif %}
 {%- endmacro %}
 
-{# Message wrapper - content_html is pre-rendered so needs |safe #}
-{% macro message(role_class, role_label, msg_id, timestamp, content_html) %}
-<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></div><div class="message-content">{{ content_html|safe }}</div></div>
+{# Message metadata subsection #}
+{% macro metadata(char_count, token_estimate, tool_counts) %}
+<details class="message-metadata">
+<summary>Metadata</summary>
+<div class="metadata-content">
+<div class="metadata-item"><span class="metadata-label">Chars:</span><span class="metadata-value">{{ char_count }}</span></div>
+<div class="metadata-item"><span class="metadata-label">Tokens:</span><span class="metadata-value">~{{ token_estimate }}</span></div>
+{%- if tool_counts %}
+{%- for tool_name, count in tool_counts.items() %}
+<div class="metadata-item"><span class="metadata-label">{{ tool_name }}:</span><span class="metadata-value">{{ count }}</span></div>
+{%- endfor %}
+{%- endif %}
+</div>
+</details>
+{%- endmacro %}
+
+{# Message wrapper - content_html is pre-rendered so needs |safe, metadata_html is optional #}
+{% macro message(role_class, role_label, msg_id, timestamp, content_html, metadata_html="") %}
+<div class="message {{ role_class }}" id="{{ msg_id }}"><div class="message-header"><span class="role-label">{{ role_label }}</span><a href="#{{ msg_id }}" class="timestamp-link"><time datetime="{{ timestamp }}" data-timestamp="{{ timestamp }}">{{ timestamp }}</time></a></div>{{ metadata_html|safe }}<div class="message-content">{{ content_html|safe }}</div></div>
 {%- endmacro %}
 
 {# Continuation wrapper - content_html is pre-rendered so needs |safe #}
