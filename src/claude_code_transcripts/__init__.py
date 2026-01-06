@@ -1,5 +1,6 @@
 """Convert Claude Code session JSON to a clean mobile-friendly HTML page with pagination."""
 
+import contextvars
 import json
 import html
 import os
@@ -261,8 +262,48 @@ def extract_text_from_content(content):
     return ""
 
 
-# Module-level variable for GitHub repo (set by generate_html)
+# Thread-safe context variable for GitHub repo (set by generate_html)
+# Using contextvars ensures thread-safety when processing multiple sessions concurrently
+_github_repo_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_github_repo", default=None
+)
+
+# Backward compatibility: module-level variable that tests may still access
+# This is deprecated - use get_github_repo() and set_github_repo() instead
 _github_repo = None
+
+
+def get_github_repo() -> str | None:
+    """Get the current GitHub repo from the thread-local context.
+
+    This is the thread-safe way to access the GitHub repo setting.
+    Falls back to the module-level _github_repo for backward compatibility.
+
+    Returns:
+        The GitHub repository in 'owner/repo' format, or None if not set.
+    """
+    ctx_value = _github_repo_var.get()
+    if ctx_value is not None:
+        return ctx_value
+    # Fallback for backward compatibility
+    return _github_repo
+
+
+def set_github_repo(repo: str | None) -> contextvars.Token[str | None]:
+    """Set the GitHub repo in the thread-local context.
+
+    This is the thread-safe way to set the GitHub repo. Also updates
+    the module-level _github_repo for backward compatibility.
+
+    Args:
+        repo: The GitHub repository in 'owner/repo' format, or None.
+
+    Returns:
+        A token that can be used to reset the value later.
+    """
+    global _github_repo
+    _github_repo = repo
+    return _github_repo_var.set(repo)
 
 # API constants
 API_BASE_URL = "https://api.anthropic.com/v1"
@@ -1016,7 +1057,9 @@ def render_content_block(block):
                         commit_hash = match.group(1)
                         commit_msg = match.group(2)
                         parts.append(
-                            _macros.commit_card(commit_hash, commit_msg, _github_repo)
+                            _macros.commit_card(
+                                commit_hash, commit_msg, get_github_repo()
+                            )
                         )
                         last_end = match.end()
 
@@ -2035,9 +2078,8 @@ def generate_html(json_path, output_dir, github_repo=None):
                 "Warning: Could not auto-detect GitHub repo. Commit links will be disabled."
             )
 
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
+    # Set thread-safe context variable for render functions
+    set_github_repo(github_repo)
 
     conversations = []
     current_conv = None
@@ -2191,7 +2233,7 @@ def generate_html(json_path, output_dir, github_repo=None):
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
         item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
+            commit_hash, commit_msg, commit_ts, get_github_repo()
         )
         timeline_items.append((commit_ts, "commit", item_html))
 
@@ -2533,9 +2575,8 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         if github_repo:
             click.echo(f"Auto-detected GitHub repo: {github_repo}")
 
-    # Set module-level variable for render functions
-    global _github_repo
-    _github_repo = github_repo
+    # Set thread-safe context variable for render functions
+    set_github_repo(github_repo)
 
     conversations = []
     current_conv = None
@@ -2689,7 +2730,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
     # Add commits as separate timeline items
     for commit_ts, commit_hash, commit_msg, page_num, conv_idx in all_commits:
         item_html = _macros.index_commit(
-            commit_hash, commit_msg, commit_ts, _github_repo
+            commit_hash, commit_msg, commit_ts, get_github_repo()
         )
         timeline_items.append((commit_ts, "commit", item_html))
 

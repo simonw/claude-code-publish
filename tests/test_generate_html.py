@@ -526,11 +526,12 @@ class TestRenderContentBlock:
 
     def test_tool_result_with_commit(self, snapshot_html):
         """Test tool result with git commit output."""
-        # Need to set the global _github_repo for commit link rendering
+        # Need to set the github repo for commit link rendering
+        # Using the thread-safe set_github_repo function
         import claude_code_transcripts
 
-        old_repo = claude_code_transcripts._github_repo
-        claude_code_transcripts._github_repo = "example/repo"
+        old_repo = claude_code_transcripts.get_github_repo()
+        claude_code_transcripts.set_github_repo("example/repo")
         try:
             block = {
                 "type": "tool_result",
@@ -540,7 +541,7 @@ class TestRenderContentBlock:
             result = render_content_block(block)
             assert result == snapshot_html
         finally:
-            claude_code_transcripts._github_repo = old_repo
+            claude_code_transcripts.set_github_repo(old_repo)
 
     def test_tool_result_with_ansi_codes_snapshot(self, snapshot_html):
         """Test ANSI escape code stripping with snapshot comparison.
