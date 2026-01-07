@@ -15,6 +15,7 @@ dependencies = [
     "jinja2",
     "markdown",
     "questionary",
+    "watchdog",
 ]
 
 [project.urls]
