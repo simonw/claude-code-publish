@@ -17,10 +17,34 @@ Install this tool using `uv`:
 ```bash
 uv tool install claude-code-transcripts
 ```
-Or run it without installing:
+Or run the latest version from PyPI without installing:
 ```bash
 uvx claude-code-transcripts --help
 ```
+
+### Running the forked version
+
+If you have cloned this repository and want to run your local version:
+
+1. **Using `uv run`**:
+   Run the command from within the repository directory:
+   ```bash
+   cd claude-code-transcripts
+   uv run claude-code-transcripts --help
+   ```
+
+2. **Using `uvx` with the local directory**:
+   You can run the local version using `uvx` by pointing it to the current directory:
+   ```bash
+   uvx --from . claude-code-transcripts --help
+   ```
+
+3. **Install as an editable tool**:
+   To install your local fork as a global tool that updates as you edit the code:
+   ```bash
+   uv tool install --editable .
+   ```
+   Now you can just run `claude-code-transcripts` from anywhere.
 
 ## Usage
 
