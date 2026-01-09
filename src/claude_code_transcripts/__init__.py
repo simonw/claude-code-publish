@@ -1182,6 +1182,97 @@ def is_tool_result_message(message_data):
     )
 
 
+def _normalize_preview_text(text):
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _truncate_preview_text(text, max_length):
+    text = _normalize_preview_text(text)
+    if not text:
+        return ""
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
+def extract_assistant_preview(messages, max_length=140):
+    """Extract a short assistant preview from a list of (type, json, timestamp)."""
+    for log_type, message_json, _timestamp in messages:
+        if log_type != "assistant" or not message_json:
+            continue
+        try:
+            message_data = json.loads(message_json)
+        except json.JSONDecodeError:
+            continue
+        text = extract_text_from_content(message_data.get("content", []))
+        preview = _truncate_preview_text(text, max_length)
+        if preview:
+            return preview
+    return ""
+
+
+def format_tool_stats_sidebar(tool_counts):
+    """Format tool counts for compact display (e.g., '3 bash · 1 write')."""
+    if not tool_counts:
+        return ""
+
+    abbrev = {
+        "Bash": "bash",
+        "Read": "read",
+        "Write": "write",
+        "Edit": "edit",
+        "Glob": "glob",
+        "Grep": "grep",
+        "Task": "task",
+        "TodoWrite": "todo",
+        "WebFetch": "fetch",
+        "WebSearch": "search",
+    }
+
+    parts = []
+    for name, count in sorted(tool_counts.items(), key=lambda x: (-x[1], x[0])):
+        short_name = abbrev.get(name, name.lower())
+        parts.append(f"{count} {short_name}")
+    return " · ".join(parts)
+
+
+def render_turn_item(
+    turn_num,
+    msg_id,
+    timestamp,
+    user_preview,
+    tool_counts,
+    assistant_preview,
+    is_continuation=False,
+):
+    """Render a single sidebar turn summary item as HTML."""
+    user_preview = _truncate_preview_text(user_preview, 120)
+    assistant_preview = _truncate_preview_text(assistant_preview, 160)
+
+    tool_total = sum(tool_counts.values()) if tool_counts else 0
+    tool_stats = format_tool_stats_sidebar(tool_counts)
+    if tool_total and tool_stats:
+        tool_line = f"{tool_total} tools: {tool_stats}"
+    else:
+        tool_line = f"{tool_total} tools"
+
+    badge_html = (
+        ' <span class="turn-badge">continuation</span>' if is_continuation else ""
+    )
+
+    return (
+        f'<a class="turn-item" href="#{html.escape(msg_id)}">'
+        f'<div class="turn-item-header"><span>Turn #{turn_num}{badge_html}</span>'
+        f'<time datetime="{html.escape(timestamp)}" data-timestamp="{html.escape(timestamp)}">{html.escape(timestamp)}</time></div>'
+        f'<div class="turn-item-user">{html.escape(user_preview)}</div>'
+        f'<div class="turn-item-meta">{html.escape(tool_line)}</div>'
+        f'<div class="turn-item-assistant">{html.escape(assistant_preview)}</div>'
+        f"</a>"
+    )
+
+
 def render_message(log_type, message_json, timestamp):
     if not message_json:
         return ""
@@ -1211,21 +1302,7 @@ CSS = """
 :root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
-.container { max-width: 800px; margin: 0 auto; }
-.app { display: flex; gap: 16px; align-items: flex-start; max-width: 1200px; margin: 0 auto; }
-.main { flex: 1; min-width: 0; }
-.sidebar { width: 280px; flex: 0 0 280px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; background: var(--card-bg); border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-.sidebar-section + .sidebar-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.08); }
-.sidebar-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: 8px; }
-.sidebar-toggle-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 8px; cursor: pointer; user-select: none; }
-.sidebar-toggle-row:hover { background: rgba(0,0,0,0.03); }
-.sidebar-toggle-row input { margin: 0; }
-.outline-list { list-style: none; padding: 0; margin: 0; }
-.outline-list a { display: block; padding: 6px 8px; border-radius: 8px; color: inherit; text-decoration: none; font-size: 0.9rem; }
-.outline-list a:hover { background: rgba(25,118,210,0.08); }
-.outline-empty { color: var(--text-muted); font-size: 0.85rem; padding: 6px 8px; }
-.sidebar-toggle { display: none; }
-.sidebar-backdrop { display: none; }
+
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
@@ -1390,203 +1467,7 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         });
     }
 });
-(function() {
-    var STORAGE_KEY = 'cct.sidebar.state.v1';
-    var DEFAULT_STATE = {
-        filters: { user: true, assistant: true, tool_use: true, tool_result: true, thinking: true },
-        sidebarOpen: false,
-    };
 
-    function loadState() {
-        try {
-            var raw = window.localStorage.getItem(STORAGE_KEY);
-            if (!raw) return JSON.parse(JSON.stringify(DEFAULT_STATE));
-            var parsed = JSON.parse(raw);
-            if (!parsed || typeof parsed !== 'object') return JSON.parse(JSON.stringify(DEFAULT_STATE));
-            parsed.filters = parsed.filters || {};
-            return {
-                filters: {
-                    user: parsed.filters.user !== false,
-                    assistant: parsed.filters.assistant !== false,
-                    tool_use: parsed.filters.tool_use !== false,
-                    tool_result: parsed.filters.tool_result !== false,
-                    thinking: parsed.filters.thinking !== false,
-                },
-                sidebarOpen: !!parsed.sidebarOpen,
-            };
-        } catch (e) {
-            return JSON.parse(JSON.stringify(DEFAULT_STATE));
-        }
-    }
-
-    function saveState(state) {
-        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-    }
-
-    function prefersReducedMotion() {
-        return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    }
-
-    function setHidden(el, hidden) {
-        if (!el) return;
-        el.hidden = !!hidden;
-    }
-
-    function messageHasVisibleContent(msg) {
-        var content = msg.querySelector('.message-content');
-        if (!content) return false;
-        for (var i = 0; i < content.childNodes.length; i++) {
-            var node = content.childNodes[i];
-            if (node.nodeType === 1) { // ELEMENT_NODE
-                if (!node.hidden) return true;
-            } else if (node.nodeType === 3) { // TEXT_NODE
-                if (node.textContent && node.textContent.trim()) return true;
-            }
-        }
-        return false;
-    }
-
-    function applyFilters(state) {
-        // User messages
-        document.querySelectorAll('.message.user').forEach(function(el) {
-            setHidden(el, !state.filters.user);
-        });
-
-        // Assistant text blocks (tools/thinking are filtered separately)
-        document.querySelectorAll('.message.assistant .assistant-text').forEach(function(el) {
-            setHidden(el, !state.filters.assistant);
-        });
-
-        // Tool uses (inputs)
-        document.querySelectorAll('.tool-use, .file-tool, .todo-list').forEach(function(el) {
-            setHidden(el, !state.filters.tool_use);
-        });
-
-        // Tool results (outputs)
-        document.querySelectorAll('.tool-result').forEach(function(el) {
-            setHidden(el, !state.filters.tool_result);
-        });
-        document.querySelectorAll('.message.tool-reply').forEach(function(el) {
-            setHidden(el, !state.filters.tool_result);
-        });
-
-        // Thinking blocks
-        document.querySelectorAll('.thinking').forEach(function(el) {
-            setHidden(el, !state.filters.thinking);
-        });
-
-        // Hide assistant messages that became empty after filtering.
-        document.querySelectorAll('.message.assistant').forEach(function(el) {
-            setHidden(el, !messageHasVisibleContent(el));
-        });
-    }
-
-    function buildOutline() {
-        var list = document.getElementById('cc-outline-list');
-        if (!list) return;
-        list.innerHTML = '';
-
-        var turns = Array.from(document.querySelectorAll('.message.user')).filter(function(el) { return !el.hidden; });
-        if (!turns.length) {
-            var empty = document.createElement('li');
-            empty.className = 'outline-empty';
-            empty.textContent = 'No turns on this page';
-            list.appendChild(empty);
-            return;
-        }
-
-        turns.forEach(function(msg, idx) {
-            var id = msg.id;
-            if (!id) return;
-            var text = '';
-            var content = msg.querySelector('.message-content');
-            if (content) text = (content.innerText || '').trim();
-            var firstLine = text ? text.split('\\n')[0].trim() : '';
-            var title = firstLine || (msg.querySelector('time') ? msg.querySelector('time').getAttribute('data-timestamp') : '') || id;
-            if (title.length > 80) title = title.slice(0, 77) + '...';
-
-            var li = document.createElement('li');
-            var a = document.createElement('a');
-            a.href = '#' + id;
-            a.textContent = '#' + (idx + 1) + ' ' + title;
-            a.addEventListener('click', function(e) {
-                var target = document.getElementById(id);
-                if (!target) return;
-                e.preventDefault();
-                history.pushState(null, '', '#' + id);
-                target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
-
-                // Close the sidebar on mobile after navigation.
-                setSidebarOpen(false);
-            });
-            li.appendChild(a);
-            list.appendChild(li);
-        });
-    }
-
-    function scrollToHashIfPresent() {
-        var hash = window.location.hash;
-        if (!hash || hash.length < 2) return;
-        var id = hash.slice(1);
-        var el = document.getElementById(id);
-        if (!el || el.hidden) return;
-        el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
-    }
-
-    var state = loadState();
-    var sidebar = document.getElementById('cc-sidebar');
-    var toggleBtn = document.getElementById('cc-sidebar-toggle');
-    var backdrop = document.getElementById('cc-sidebar-backdrop');
-
-    function setSidebarOpen(open) {
-        if (!sidebar) return;
-        var isOpen = !!open;
-        document.body.classList.toggle('cc-sidebar-open', isOpen);
-        if (toggleBtn) toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-        if (backdrop) backdrop.hidden = !isOpen;
-        state.sidebarOpen = isOpen;
-        saveState(state);
-    }
-
-    function initControls() {
-        document.querySelectorAll('input[data-cc-filter]').forEach(function(input) {
-            var key = input.getAttribute('data-cc-filter');
-            if (!key) return;
-            input.checked = state.filters[key] !== false;
-            input.addEventListener('change', function() {
-                state.filters[key] = !!input.checked;
-                saveState(state);
-                applyFilters(state);
-                buildOutline();
-                scrollToHashIfPresent();
-            });
-        });
-
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', function() {
-                setSidebarOpen(!document.body.classList.contains('cc-sidebar-open'));
-            });
-        }
-        if (backdrop) {
-            backdrop.addEventListener('click', function() {
-                setSidebarOpen(false);
-            });
-        }
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') setSidebarOpen(false);
-        });
-    }
-
-    function init() {
-        initControls();
-        applyFilters(state);
-        buildOutline();
-        scrollToHashIfPresent();
-    }
-
-    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); }
-    else { init(); }
-})();
 """
 
 # JavaScript to fix relative URLs when served via gisthost.github.io or gistpreview.github.io
@@ -1807,6 +1688,22 @@ def generate_html(json_path, output_dir, github_repo=None):
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
         page_convs = conversations[start_idx:end_idx]
         messages_html = []
+        turn_items_html = []
+        for conv_offset, conv in enumerate(page_convs):
+            stats = analyze_conversation(conv["messages"])
+            assistant_preview = extract_assistant_preview(conv["messages"])
+            msg_id = make_msg_id(conv["timestamp"])
+            turn_items_html.append(
+                render_turn_item(
+                    start_idx + conv_offset + 1,
+                    msg_id,
+                    conv["timestamp"],
+                    conv["user_text"],
+                    stats["tool_counts"],
+                    assistant_preview,
+                    is_continuation=bool(conv.get("is_continuation")),
+                )
+            )
         for conv in page_convs:
             is_first = True
             for log_type, message_json, timestamp in conv["messages"]:
@@ -1826,6 +1723,7 @@ def generate_html(json_path, output_dir, github_repo=None):
             total_pages=total_pages,
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
+            turns_html="".join(turn_items_html),
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -2281,6 +2179,22 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
         page_convs = conversations[start_idx:end_idx]
         messages_html = []
+        turn_items_html = []
+        for conv_offset, conv in enumerate(page_convs):
+            stats = analyze_conversation(conv["messages"])
+            assistant_preview = extract_assistant_preview(conv["messages"])
+            msg_id = make_msg_id(conv["timestamp"])
+            turn_items_html.append(
+                render_turn_item(
+                    start_idx + conv_offset + 1,
+                    msg_id,
+                    conv["timestamp"],
+                    conv["user_text"],
+                    stats["tool_counts"],
+                    assistant_preview,
+                    is_continuation=bool(conv.get("is_continuation")),
+                )
+            )
         for conv in page_convs:
             is_first = True
             for log_type, message_json, timestamp in conv["messages"]:
@@ -2300,6 +2214,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
             total_pages=total_pages,
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
+            turns_html="".join(turn_items_html),
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
