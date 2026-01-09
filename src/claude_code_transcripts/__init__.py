@@ -746,6 +746,55 @@ def render_content_block(block):
         return format_json(block)
 
 
+def render_user_content_block(block):
+    """Render a content block for user messages, using user-text class instead of assistant-text."""
+    if not isinstance(block, dict):
+        return f"<p>{html.escape(str(block))}</p>"
+    block_type = block.get("type", "")
+    if block_type == "image":
+        source = block.get("source", {})
+        media_type = source.get("media_type", "image/png")
+        data = source.get("data", "")
+        return _macros.image_block(media_type, data)
+    elif block_type == "text":
+        text = block.get("text", "")
+        # Check for system info patterns and separate them
+        system_info_pattern = re.compile(
+            r"<(ide_opened_file|system_reminder|context_info|system-reminder)>(.*?)</\1>",
+            re.DOTALL,
+        )
+        matches = system_info_pattern.findall(text)
+        system_parts = []
+        user_text = text
+
+        for tag_name, tag_content in matches:
+            full_tag = f"<{tag_name}>{tag_content}</{tag_name}>"
+            user_text = user_text.replace(full_tag, "").strip()
+            label = tag_name.replace("_", " ").replace("-", " ").title()
+            system_parts.append(
+                f'<div class="system-info"><div class="system-info-label">{label}</div><p>{html.escape(tag_content.strip())}</p></div>'
+            )
+
+        result = ""
+        if system_parts:
+            result += "".join(system_parts)
+        if user_text:
+            content_html = render_markdown_text(user_text)
+            result += _macros.user_text(content_html)
+        return result
+    elif block_type == "tool_result":
+        # Tool results in user messages
+        content = block.get("content", "")
+        is_error = block.get("is_error", False)
+        if isinstance(content, str):
+            content_html = f"<pre>{html.escape(content)}</pre>"
+        else:
+            content_html = format_json(content)
+        return _macros.tool_result(content_html, is_error)
+    else:
+        return format_json(block)
+
+
 def render_user_message_content(message_data):
     content = message_data.get("content", "")
     if isinstance(content, str):
@@ -753,7 +802,7 @@ def render_user_message_content(message_data):
             return _macros.user_content(format_json(content))
         return _macros.user_content(render_markdown_text(content))
     elif isinstance(content, list):
-        return "".join(render_content_block(block) for block in content)
+        return "".join(render_user_content_block(block) for block in content)
     return f"<p>{html.escape(str(content))}</p>"
 
 
@@ -907,6 +956,7 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
+.user-text { margin: 8px 0; }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .tool-icon { font-size: 1.1rem; }
@@ -2748,7 +2798,7 @@ def render_user_message_content_unified(message_data):
 
         return result if result else _macros.user_content("")
     elif isinstance(content, list):
-        return "".join(render_content_block(block) for block in content)
+        return "".join(render_user_content_block(block) for block in content)
     return f"<p>{html.escape(str(content))}</p>"
 
 
@@ -2863,9 +2913,17 @@ def generate_unified_html(json_path, output_dir, github_repo=None):
         for tool, count in stats["tool_counts"].items():
             total_tool_counts[tool] = total_tool_counts.get(tool, 0) + count
 
-        # Create navigation item
-        preview_text = conv["user_text"][:60]
-        if len(conv["user_text"]) > 60:
+        # Create navigation item - strip system info tags from preview
+        clean_user_text = re.sub(
+            r"<(ide_opened_file|system_reminder|context_info|system-reminder)>.*?</\1>",
+            "",
+            conv["user_text"],
+            flags=re.DOTALL,
+        ).strip()
+        preview_text = (
+            clean_user_text[:60] if clean_user_text else conv["user_text"][:60]
+        )
+        if len(clean_user_text or conv["user_text"]) > 60:
             preview_text += "..."
         nav_items.append(
             {

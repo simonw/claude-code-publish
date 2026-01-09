@@ -34,6 +34,7 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .thinking-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #f57c00; margin-bottom: 8px; }
 .thinking p { margin: 8px 0; }
 .assistant-text { margin: 8px 0; }
+.user-text { margin: 8px 0; }
 .tool-use { background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 12px; margin: 12px 0; }
 .tool-header { font-weight: 600; color: var(--tool-border); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .tool-icon { font-size: 1.1rem; }
@@ -194,7 +195,8 @@ tests/test_math.py ..  [100%]
 <div class="tool-header"><span class="tool-icon">$</span> Bash</div>
 <div class="tool-description">Commit changes</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add math_utils with add function&#39;</pre></div><button class="expand-btn">Show more</button></div>
 </div></div></div>
-<div class="message tool-reply" id="msg-2025-12-24T10-00-40-000Z"><div class="message-header"><span class="role-label">Tool reply</span><a href="#msg-2025-12-24T10-00-40-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:40.000Z" data-timestamp="2025-12-24T10:00:40.000Z">2025-12-24T10:00:40.000Z</time></a></div><div class="message-content"><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><div class="commit-card"><a href="https://github.com/example/project/commit/abc1234"><span class="commit-card-hash">abc1234</span> Add math_utils with add function</a></div><pre>1 file changed, 5 insertions(+)</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+<div class="message tool-reply" id="msg-2025-12-24T10-00-40-000Z"><div class="message-header"><span class="role-label">Tool reply</span><a href="#msg-2025-12-24T10-00-40-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:40.000Z" data-timestamp="2025-12-24T10:00:40.000Z">2025-12-24T10:00:40.000Z</time></a></div><div class="message-content"><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>[main abc1234] Add math_utils with add function
+ 1 file changed, 5 insertions(+)</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-00-45-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-00-45-000Z" class="timestamp-link"><time datetime="2025-12-24T10:00:45.000Z" data-timestamp="2025-12-24T10:00:45.000Z">2025-12-24T10:00:45.000Z</time></a></div><div class="message-content">
 <div class="assistant-text"><p>Committed! Now pushing to remote.</p></div>
 <div class="tool-use bash-tool" data-tool-id="toolu_bash_003">
@@ -275,7 +277,8 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <div class="tool-header"><span class="tool-icon">$</span> Bash</div>
 <div class="tool-description">Commit the fix</div><div class="truncatable"><div class="truncatable-content"><pre class="bash-command">git add . &amp;&amp; git commit -m &#39;Add subtract function and fix tests&#39;</pre></div><button class="expand-btn">Show more</button></div>
 </div></div></div>
-<div class="message tool-reply" id="msg-2025-12-24T10-03-20-000Z"><div class="message-header"><span class="role-label">Tool reply</span><a href="#msg-2025-12-24T10-03-20-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:20.000Z" data-timestamp="2025-12-24T10:03:20.000Z">2025-12-24T10:03:20.000Z</time></a></div><div class="message-content"><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><div class="commit-card"><a href="https://github.com/example/project/commit/def5678"><span class="commit-card-hash">def5678</span> Add subtract function and fix tests</a></div><pre>2 files changed, 10 insertions(+), 1 deletion(-)</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
+<div class="message tool-reply" id="msg-2025-12-24T10-03-20-000Z"><div class="message-header"><span class="role-label">Tool reply</span><a href="#msg-2025-12-24T10-03-20-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:20.000Z" data-timestamp="2025-12-24T10:03:20.000Z">2025-12-24T10:03:20.000Z</time></a></div><div class="message-content"><div class="tool-result"><div class="truncatable"><div class="truncatable-content"><pre>[main def5678] Add subtract function and fix tests
+ 2 files changed, 10 insertions(+), 1 deletion(-)</pre></div><button class="expand-btn">Show more</button></div></div></div></div>
 <div class="message assistant" id="msg-2025-12-24T10-03-25-000Z"><div class="message-header"><span class="role-label">Assistant</span><a href="#msg-2025-12-24T10-03-25-000Z" class="timestamp-link"><time datetime="2025-12-24T10:03:25.000Z" data-timestamp="2025-12-24T10:03:25.000Z">2025-12-24T10:03:25.000Z</time></a></div><div class="message-content">
 <div class="assistant-text"><p>Done! The subtract function is now working and committed.</p></div></div></div><details class="continuation"><summary>Session continuation summary</summary>
 <div class="message user" id="msg-2025-12-24T10-04-00-000Z"><div class="message-header"><span class="role-label">User</span><a href="#msg-2025-12-24T10-04-00-000Z" class="timestamp-link"><time datetime="2025-12-24T10:04:00.000Z" data-timestamp="2025-12-24T10:04:00.000Z">2025-12-24T10:04:00.000Z</time></a></div><div class="message-content">

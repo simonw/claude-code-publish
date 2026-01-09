@@ -131,6 +131,11 @@
 <div class="user-content">{{ content_html|safe }}</div>
 {%- endmacro %}
 
+{# User text block - for text inside user messages #}
+{% macro user_text(content_html) %}
+<div class="user-text">{{ content_html|safe }}</div>
+{%- endmacro %}
+
 {# Image block with base64 data URL #}
 {% macro image_block(media_type, data) %}
 <div class="image-block"><img src="data:{{ media_type }};base64,{{ data }}" style="max-width: 100%"></div>
