@@ -556,9 +556,218 @@ def parse_session_file(filepath):
     if filepath.suffix == ".jsonl":
         return _parse_jsonl_file(filepath)
     else:
-        # Standard JSON format
+        # Standard JSON format (and supported exports)
         with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # Already in normalized format
+        if isinstance(data, dict) and "loglines" in data:
+            return data
+        # Antigravity export format
+        if _is_antigravity_export_data(data):
+            return _parse_antigravity_export_data(data)
+        return data
+
+
+def _is_antigravity_export_data(data):
+    """Detect Antigravity transcript/export JSON format."""
+    if not isinstance(data, dict):
+        return False
+    marker = (
+        data.get("app")
+        or data.get("application")
+        or data.get("exporter")
+        or data.get("source")
+        or ""
+    )
+    if not isinstance(marker, str) or "antigravity" not in marker.lower():
+        return False
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        return True
+    conversation = data.get("conversation")
+    if isinstance(conversation, dict) and isinstance(
+        conversation.get("messages"), list
+    ):
+        return True
+    chat = data.get("chat")
+    if isinstance(chat, dict) and isinstance(chat.get("messages"), list):
+        return True
+    return False
+
+
+def _parse_antigravity_export_data(data):
+    """Parse Antigravity export JSON into Claude Code-style {\"loglines\": [...]}."""
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        conversation = data.get("conversation")
+        if isinstance(conversation, dict):
+            messages = conversation.get("messages")
+    if not isinstance(messages, list):
+        chat = data.get("chat")
+        if isinstance(chat, dict):
+            messages = chat.get("messages")
+    if not isinstance(messages, list):
+        return {"loglines": []}
+
+    loglines = []
+
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+
+        role = msg.get("role")
+        timestamp = (
+            msg.get("created_at")
+            or msg.get("timestamp")
+            or msg.get("time")
+            or msg.get("date")
+            or ""
+        )
+
+        # OpenAI-style tool result messages
+        if role == "tool":
+            tool_use_id = (
+                msg.get("tool_call_id") or msg.get("tool_use_id") or msg.get("id", "")
+            )
+            output = msg.get("content", "")
+            is_error = bool(msg.get("is_error") or msg.get("error"))
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": timestamp,
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool_use_id,
+                                "content": output,
+                                "is_error": is_error,
+                            }
+                        ],
+                    },
+                }
+            )
+            continue
+
+        if role not in ("user", "assistant"):
+            continue
+
+        if role == "user":
+            content = msg.get("content", "")
+            normalized_content = _normalize_antigravity_content(content)
+            loglines.append(
+                {
+                    "type": "user",
+                    "timestamp": timestamp,
+                    "message": {"role": "user", "content": normalized_content},
+                }
+            )
+            continue
+
+        # Assistant message
+        blocks = []
+
+        content = msg.get("content", "")
+        if content not in (None, ""):
+            normalized = _normalize_antigravity_content(content, prefer_blocks=True)
+            if isinstance(normalized, list):
+                blocks.extend(normalized)
+            else:
+                blocks.append({"type": "text", "text": str(normalized)})
+
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tool_call in tool_calls:
+                block = _convert_antigravity_tool_call_to_block(tool_call)
+                if block:
+                    blocks.append(block)
+
+        function_call = msg.get("function_call")
+        if isinstance(function_call, dict):
+            block = _convert_antigravity_tool_call_to_block(
+                {
+                    "id": function_call.get("id", ""),
+                    "type": "function",
+                    "function": function_call,
+                }
+            )
+            if block:
+                blocks.append(block)
+
+        loglines.append(
+            {
+                "type": "assistant",
+                "timestamp": timestamp,
+                "message": {"role": "assistant", "content": blocks},
+            }
+        )
+
+    return {"loglines": loglines}
+
+
+def _normalize_antigravity_content(content, prefer_blocks=False):
+    """Normalize Antigravity message content to Claude Code message.content."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        blocks = []
+        for part in content:
+            if isinstance(part, dict):
+                part_type = part.get("type")
+                if part_type in ("text", "input_text", "output_text"):
+                    blocks.append({"type": "text", "text": part.get("text", "")})
+                else:
+                    # Pass through unknown blocks as-is
+                    blocks.append(part)
+            elif part is not None:
+                blocks.append({"type": "text", "text": str(part)})
+        if prefer_blocks:
+            return blocks
+        # For user content, allow simple string when it's just text
+        if len(blocks) == 1 and blocks[0].get("type") == "text":
+            return blocks[0].get("text", "")
+        return blocks
+    if prefer_blocks and content is not None:
+        return [{"type": "text", "text": str(content)}]
+    return "" if content is None else str(content)
+
+
+def _convert_antigravity_tool_call_to_block(tool_call):
+    """Convert an Antigravity/OpenAI-style tool call to a Claude Code tool_use block."""
+    if not isinstance(tool_call, dict):
+        return None
+
+    call_id = tool_call.get("id") or tool_call.get("call_id") or ""
+
+    name = tool_call.get("name")
+    arguments = tool_call.get("arguments")
+
+    function = tool_call.get("function")
+    if isinstance(function, dict):
+        name = function.get("name", name)
+        arguments = function.get("arguments", arguments)
+
+    if not isinstance(name, str) or not name:
+        return None
+
+    if isinstance(arguments, str):
+        try:
+            tool_input = json.loads(arguments)
+        except json.JSONDecodeError:
+            tool_input = {}
+    elif isinstance(arguments, dict):
+        tool_input = arguments
+    else:
+        tool_input = {}
+
+    tool_name = _map_codex_tool_to_claude(name)
+    return {
+        "type": "tool_use",
+        "id": call_id,
+        "name": tool_name,
+        "input": tool_input,
+    }
 
 
 def _is_codex_cli_format(filepath):

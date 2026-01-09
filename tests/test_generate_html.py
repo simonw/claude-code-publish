@@ -1078,6 +1078,29 @@ class TestParseSessionFile:
         assert "hello world" in index_html.lower()
         assert index_html == snapshot_html
 
+    def test_parses_antigravity_export_format(self):
+        """Test that Antigravity exports are detected and normalized."""
+        fixture_path = Path(__file__).parent / "sample_antigravity_export.json"
+        result = parse_session_file(fixture_path)
+
+        assert result["loglines"][0]["type"] == "user"
+        assert result["loglines"][0]["message"]["content"] == "Say hi"
+
+        assistant = result["loglines"][1]
+        assert assistant["type"] == "assistant"
+        assert assistant["message"]["role"] == "assistant"
+        assert isinstance(assistant["message"]["content"], list)
+        assert any(
+            b.get("type") == "tool_use" and b.get("id") == "call_1"
+            for b in assistant["message"]["content"]
+        )
+
+        tool_result = result["loglines"][2]
+        assert tool_result["type"] == "user"
+        assert tool_result["message"]["role"] == "user"
+        assert tool_result["message"]["content"][0]["type"] == "tool_result"
+        assert tool_result["message"]["content"][0]["tool_use_id"] == "call_1"
+
 
 class TestGetSessionSummary:
     """Tests for get_session_summary which extracts summary from session files."""
