@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -111,6 +111,10 @@ def get_session_summary(filepath, max_length=200):
             # For JSON files, try to get first user message
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if isinstance(data, dict) and "loglines" not in data:
+                normalized = _try_normalize_foreign_export(data)
+                if normalized is not None:
+                    data = normalized
             loglines = data.get("loglines", [])
             for entry in loglines:
                 if entry.get("type") == "user":
@@ -556,9 +560,221 @@ def parse_session_file(filepath):
     if filepath.suffix == ".jsonl":
         return _parse_jsonl_file(filepath)
     else:
-        # Standard JSON format
         with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+
+        # Standard JSON format (already normalized)
+        if isinstance(data, dict) and "loglines" in data:
+            return data
+
+        # Attempt to normalize other export formats (e.g. Windsurf chat exports)
+        normalized = _try_normalize_foreign_export(data)
+        if normalized is not None:
+            return normalized
+
+        # Fall back to returning raw JSON for backwards compatibility
+        return data
+
+
+def _to_iso_timestamp(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        # Heuristic: milliseconds vs seconds
+        seconds = float(value)
+        if seconds > 10_000_000_000:  # ~year 2286 in seconds, likely ms
+            seconds = seconds / 1000.0
+        try:
+            return (
+                datetime.fromtimestamp(seconds, tz=timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+        except (OverflowError, OSError, ValueError):
+            return str(value)
+    if isinstance(value, dict):
+        # Common protobuf-ish shapes
+        if "seconds" in value:
+            try:
+                seconds = float(value.get("seconds", 0))
+                nanos = float(value.get("nanos", 0))
+                return (
+                    datetime.fromtimestamp(seconds + nanos / 1e9, tz=timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z")
+                )
+            except (OverflowError, OSError, ValueError, TypeError):
+                return ""
+    return ""
+
+
+def _first_present(mapping, keys):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _normalize_role(raw_role):
+    if not isinstance(raw_role, str):
+        return None
+    role = raw_role.strip().lower()
+    if role in ("user", "human"):
+        return "user"
+    if role in ("assistant", "ai", "bot", "model"):
+        return "assistant"
+    return None
+
+
+def _coerce_parts_to_text(parts):
+    if parts is None:
+        return ""
+    if isinstance(parts, str):
+        return parts
+    if isinstance(parts, list):
+        texts = []
+        for part in parts:
+            if isinstance(part, str):
+                if part:
+                    texts.append(part)
+                continue
+            if isinstance(part, dict):
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    texts.append(part["text"])
+                    continue
+                # Generic fallbacks used by some exporters
+                for k in ("text", "content", "value", "message"):
+                    v = part.get(k)
+                    if isinstance(v, str) and v:
+                        texts.append(v)
+                        break
+        return "".join(texts)
+    if isinstance(parts, dict):
+        for k in ("text", "content", "value", "message"):
+            v = parts.get(k)
+            if isinstance(v, str):
+                return v
+    return str(parts)
+
+
+def _message_to_normalized_content(role, msg):
+    # Common shapes:
+    # - {"content": "..."} or {"text": "..."}
+    # - {"parts": [{"type":"text","text":"..."}]}
+    # - {"content": [{"type":"text","text":"..."}]}
+    raw_content = _first_present(msg, ("content", "text", "message", "body", "value"))
+    raw_parts = _first_present(msg, ("parts", "contentParts", "segments"))
+
+    if role == "user":
+        if isinstance(raw_content, str):
+            return raw_content
+        if isinstance(raw_content, list):
+            return _coerce_parts_to_text(raw_content)
+        if raw_parts is not None:
+            return _coerce_parts_to_text(raw_parts)
+        if raw_content is None:
+            return ""
+        return _coerce_parts_to_text(raw_content)
+
+    # Assistant: return content blocks where possible
+    if isinstance(raw_content, list):
+        blocks = []
+        for part in raw_content:
+            if isinstance(part, dict) and "type" in part:
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    blocks.append({"type": "text", "text": part.get("text", "")})
+                    continue
+            text = _coerce_parts_to_text(part)
+            if text:
+                blocks.append({"type": "text", "text": text})
+        if blocks:
+            return blocks
+
+    if raw_parts is not None:
+        text = _coerce_parts_to_text(raw_parts)
+        return [{"type": "text", "text": text}] if text else []
+
+    if isinstance(raw_content, str):
+        return [{"type": "text", "text": raw_content}] if raw_content else []
+
+    if raw_content is None:
+        return []
+
+    return [{"type": "text", "text": _coerce_parts_to_text(raw_content)}]
+
+
+def _extract_message_list_from_foreign_export(data):
+    # Windsurf-style wrapper objects commonly contain nested "conversation.messages"
+    if isinstance(data, dict):
+        if isinstance(data.get("conversation"), dict) and isinstance(
+            data["conversation"].get("messages"), list
+        ):
+            return data["conversation"]["messages"]
+        if isinstance(data.get("messages"), list):
+            return data["messages"]
+        if isinstance(data.get("chat"), dict) and isinstance(
+            data["chat"].get("messages"), list
+        ):
+            return data["chat"]["messages"]
+    if isinstance(data, list):
+        return data
+    return None
+
+
+def _try_normalize_foreign_export(data):
+    messages = _extract_message_list_from_foreign_export(data)
+    if not messages:
+        return None
+
+    loglines = []
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            continue
+
+        role = _normalize_role(
+            _first_present(
+                msg,
+                (
+                    "role",
+                    "sender",
+                    "author",
+                    "from",
+                    "speaker",
+                    "type",
+                ),
+            )
+        )
+        if role not in ("user", "assistant"):
+            continue
+
+        timestamp = _to_iso_timestamp(
+            _first_present(
+                msg,
+                (
+                    "timestamp",
+                    "createdAt",
+                    "created_at",
+                    "time",
+                    "date",
+                    "ts",
+                ),
+            )
+        )
+        content = _message_to_normalized_content(role, msg)
+        loglines.append(
+            {
+                "type": role,
+                "timestamp": timestamp,
+                "message": {"role": role, "content": content},
+            }
+        )
+
+    if not loglines:
+        return None
+
+    return {"loglines": loglines}
 
 
 def _is_codex_cli_format(filepath):

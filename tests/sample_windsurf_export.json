@@ -1,0 +1,36 @@
+{
+  "app": "Windsurf",
+  "schemaVersion": 1,
+  "conversation": {
+    "id": "conv_test_001",
+    "title": "Sample Windsurf export",
+    "createdAt": "2026-01-01T12:00:00Z",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a function that returns 'hello world'.",
+        "createdAt": "2026-01-01T12:00:01Z"
+      },
+      {
+        "role": "assistant",
+        "content": "Sure.\n\n```python\ndef hello_world():\n    return \"hello world\"\n```",
+        "createdAt": "2026-01-01T12:00:02Z"
+      },
+      {
+        "sender": "user",
+        "parts": [
+          { "type": "text", "text": "Now add a simple test." }
+        ],
+        "timestamp": 1767268803000
+      },
+      {
+        "sender": "assistant",
+        "parts": [
+          { "type": "text", "text": "Here's a pytest example:" },
+          { "type": "text", "text": "\n```python\nfrom your_module import hello_world\n\ndef test_hello_world():\n    assert hello_world() == \"hello world\"\n```\n" }
+        ],
+        "timestamp": 1767268804000
+      }
+    ]
+  }
+}
