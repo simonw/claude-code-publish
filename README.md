@@ -60,6 +60,8 @@ The generated output includes:
 - `index.html` - an index page with a timeline of prompts and commits
 - `page-001.html`, `page-002.html`, etc. - paginated transcript pages
 
+Transcript pages include a left sidebar with filter toggles (user/assistant/tools/tool results/thinking) and an in-page outline of turns. Filter settings persist across pages using `localStorage`.
+
 ### Local sessions
 
 Local Claude Code sessions are stored as JSONL files in `~/.claude/projects`. Run with no arguments to select from recent sessions:
