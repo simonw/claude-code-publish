@@ -9,6 +9,20 @@
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
 .container { max-width: 800px; margin: 0 auto; }
+.app { display: flex; gap: 16px; align-items: flex-start; max-width: 1200px; margin: 0 auto; }
+.main { flex: 1; min-width: 0; }
+.sidebar { width: 280px; flex: 0 0 280px; position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; background: var(--card-bg); border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.sidebar-section + .sidebar-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.08); }
+.sidebar-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: 8px; }
+.sidebar-toggle-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 8px; cursor: pointer; user-select: none; }
+.sidebar-toggle-row:hover { background: rgba(0,0,0,0.03); }
+.sidebar-toggle-row input { margin: 0; }
+.outline-list { list-style: none; padding: 0; margin: 0; }
+.outline-list a { display: block; padding: 6px 8px; border-radius: 8px; color: inherit; text-decoration: none; font-size: 0.9rem; }
+.outline-list a:hover { background: rgba(25,118,210,0.08); }
+.outline-empty { color: var(--text-muted); font-size: 0.85rem; padding: 6px 8px; }
+.sidebar-toggle { display: none; }
+.sidebar-backdrop { display: none; }
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
@@ -140,11 +154,82 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
 .search-result-content { padding: 12px; }
 .search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
+@media (max-width: 900px) { body { padding-top: 60px; } .app { display: block; } .sidebar { position: fixed; left: 0; top: 0; bottom: 0; max-height: none; transform: translateX(-110%); transition: transform 150ms ease-out; z-index: 2000; border-radius: 0 12px 12px 0; } body.cc-sidebar-open .sidebar { transform: translateX(0); } .sidebar-toggle { display: flex; position: fixed; top: 12px; left: 12px; z-index: 2100; align-items: center; justify-content: center; width: 44px; height: 40px; border: 1px solid rgba(0,0,0,0.12); background: var(--card-bg); color: var(--text-color); border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); cursor: pointer; } .sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1900; } body.cc-sidebar-open .sidebar-backdrop { display: block; } }
+@media (max-width: 600px) { body { padding: 8px; padding-top: 60px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 </style>
 </head>
 <body>
-    <div class="container">
+    <button
+        id="cc-sidebar-toggle"
+        class="sidebar-toggle"
+        type="button"
+        aria-label="Open sidebar"
+        aria-controls="cc-sidebar"
+        aria-expanded="false"
+    >
+        &#9776;
+    </button>
+    <div id="cc-sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+    <div class="app">
+        <aside id="cc-sidebar" class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title">Filters</div>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-user"
+                        type="checkbox"
+                        data-cc-filter="user"
+                        checked
+                    />
+                    User
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-assistant"
+                        type="checkbox"
+                        data-cc-filter="assistant"
+                        checked
+                    />
+                    Assistant
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-tool-use"
+                        type="checkbox"
+                        data-cc-filter="tool_use"
+                        checked
+                    />
+                    Tool uses
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-tool-result"
+                        type="checkbox"
+                        data-cc-filter="tool_result"
+                        checked
+                    />
+                    Tool results
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-thinking"
+                        type="checkbox"
+                        data-cc-filter="thinking"
+                        checked
+                    />
+                    Thinking
+                </label>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">Outline</div>
+                <ol id="cc-outline-list" class="outline-list"></ol>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div class="container">
         <h1><a href="index.html" style="color: inherit; text-decoration: none;">Claude Code transcript</a> - page 1/2</h1>
         
 
@@ -290,6 +375,8 @@ test_subtract - AssertionError: expected 5 but got None</pre></div><button class
 <a href="page-002.html">Next &rarr;</a>
 </div>
 
+            </div>
+        </main>
     </div>
     <script>
 document.querySelectorAll('time[data-timestamp]').forEach(function(el) {
@@ -320,6 +407,203 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         });
     }
 });
+(function() {
+    var STORAGE_KEY = 'cct.sidebar.state.v1';
+    var DEFAULT_STATE = {
+        filters: { user: true, assistant: true, tool_use: true, tool_result: true, thinking: true },
+        sidebarOpen: false,
+    };
+
+    function loadState() {
+        try {
+            var raw = window.localStorage.getItem(STORAGE_KEY);
+            if (!raw) return JSON.parse(JSON.stringify(DEFAULT_STATE));
+            var parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return JSON.parse(JSON.stringify(DEFAULT_STATE));
+            parsed.filters = parsed.filters || {};
+            return {
+                filters: {
+                    user: parsed.filters.user !== false,
+                    assistant: parsed.filters.assistant !== false,
+                    tool_use: parsed.filters.tool_use !== false,
+                    tool_result: parsed.filters.tool_result !== false,
+                    thinking: parsed.filters.thinking !== false,
+                },
+                sidebarOpen: !!parsed.sidebarOpen,
+            };
+        } catch (e) {
+            return JSON.parse(JSON.stringify(DEFAULT_STATE));
+        }
+    }
+
+    function saveState(state) {
+        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    }
+
+    function prefersReducedMotion() {
+        return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    function setHidden(el, hidden) {
+        if (!el) return;
+        el.hidden = !!hidden;
+    }
+
+    function messageHasVisibleContent(msg) {
+        var content = msg.querySelector('.message-content');
+        if (!content) return false;
+        for (var i = 0; i < content.childNodes.length; i++) {
+            var node = content.childNodes[i];
+            if (node.nodeType === 1) { // ELEMENT_NODE
+                if (!node.hidden) return true;
+            } else if (node.nodeType === 3) { // TEXT_NODE
+                if (node.textContent && node.textContent.trim()) return true;
+            }
+        }
+        return false;
+    }
+
+    function applyFilters(state) {
+        // User messages
+        document.querySelectorAll('.message.user').forEach(function(el) {
+            setHidden(el, !state.filters.user);
+        });
+
+        // Assistant text blocks (tools/thinking are filtered separately)
+        document.querySelectorAll('.message.assistant .assistant-text').forEach(function(el) {
+            setHidden(el, !state.filters.assistant);
+        });
+
+        // Tool uses (inputs)
+        document.querySelectorAll('.tool-use, .file-tool, .todo-list').forEach(function(el) {
+            setHidden(el, !state.filters.tool_use);
+        });
+
+        // Tool results (outputs)
+        document.querySelectorAll('.tool-result').forEach(function(el) {
+            setHidden(el, !state.filters.tool_result);
+        });
+        document.querySelectorAll('.message.tool-reply').forEach(function(el) {
+            setHidden(el, !state.filters.tool_result);
+        });
+
+        // Thinking blocks
+        document.querySelectorAll('.thinking').forEach(function(el) {
+            setHidden(el, !state.filters.thinking);
+        });
+
+        // Hide assistant messages that became empty after filtering.
+        document.querySelectorAll('.message.assistant').forEach(function(el) {
+            setHidden(el, !messageHasVisibleContent(el));
+        });
+    }
+
+    function buildOutline() {
+        var list = document.getElementById('cc-outline-list');
+        if (!list) return;
+        list.innerHTML = '';
+
+        var turns = Array.from(document.querySelectorAll('.message.user')).filter(function(el) { return !el.hidden; });
+        if (!turns.length) {
+            var empty = document.createElement('li');
+            empty.className = 'outline-empty';
+            empty.textContent = 'No turns on this page';
+            list.appendChild(empty);
+            return;
+        }
+
+        turns.forEach(function(msg, idx) {
+            var id = msg.id;
+            if (!id) return;
+            var text = '';
+            var content = msg.querySelector('.message-content');
+            if (content) text = (content.innerText || '').trim();
+            var firstLine = text ? text.split('\n')[0].trim() : '';
+            var title = firstLine || (msg.querySelector('time') ? msg.querySelector('time').getAttribute('data-timestamp') : '') || id;
+            if (title.length > 80) title = title.slice(0, 77) + '...';
+
+            var li = document.createElement('li');
+            var a = document.createElement('a');
+            a.href = '#' + id;
+            a.textContent = '#' + (idx + 1) + ' ' + title;
+            a.addEventListener('click', function(e) {
+                var target = document.getElementById(id);
+                if (!target) return;
+                e.preventDefault();
+                history.pushState(null, '', '#' + id);
+                target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+
+                // Close the sidebar on mobile after navigation.
+                setSidebarOpen(false);
+            });
+            li.appendChild(a);
+            list.appendChild(li);
+        });
+    }
+
+    function scrollToHashIfPresent() {
+        var hash = window.location.hash;
+        if (!hash || hash.length < 2) return;
+        var id = hash.slice(1);
+        var el = document.getElementById(id);
+        if (!el || el.hidden) return;
+        el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
+    }
+
+    var state = loadState();
+    var sidebar = document.getElementById('cc-sidebar');
+    var toggleBtn = document.getElementById('cc-sidebar-toggle');
+    var backdrop = document.getElementById('cc-sidebar-backdrop');
+
+    function setSidebarOpen(open) {
+        if (!sidebar) return;
+        var isOpen = !!open;
+        document.body.classList.toggle('cc-sidebar-open', isOpen);
+        if (toggleBtn) toggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        if (backdrop) backdrop.hidden = !isOpen;
+        state.sidebarOpen = isOpen;
+        saveState(state);
+    }
+
+    function initControls() {
+        document.querySelectorAll('input[data-cc-filter]').forEach(function(input) {
+            var key = input.getAttribute('data-cc-filter');
+            if (!key) return;
+            input.checked = state.filters[key] !== false;
+            input.addEventListener('change', function() {
+                state.filters[key] = !!input.checked;
+                saveState(state);
+                applyFilters(state);
+                buildOutline();
+                scrollToHashIfPresent();
+            });
+        });
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', function() {
+                setSidebarOpen(!document.body.classList.contains('cc-sidebar-open'));
+            });
+        }
+        if (backdrop) {
+            backdrop.addEventListener('click', function() {
+                setSidebarOpen(false);
+            });
+        }
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') setSidebarOpen(false);
+        });
+    }
+
+    function init() {
+        initControls();
+        applyFilters(state);
+        buildOutline();
+        scrollToHashIfPresent();
+    }
+
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); }
+    else { init(); }
+})();
 </script>
 </body>
 </html>

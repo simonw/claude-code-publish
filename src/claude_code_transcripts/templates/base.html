@@ -7,8 +7,80 @@
     <style>{{ css|safe }}</style>
 </head>
 <body>
-    <div class="container">
+    <button
+        id="cc-sidebar-toggle"
+        class="sidebar-toggle"
+        type="button"
+        aria-label="Open sidebar"
+        aria-controls="cc-sidebar"
+        aria-expanded="false"
+    >
+        &#9776;
+    </button>
+    <div id="cc-sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+    <div class="app">
+        <aside id="cc-sidebar" class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title">Filters</div>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-user"
+                        type="checkbox"
+                        data-cc-filter="user"
+                        checked
+                    />
+                    User
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-assistant"
+                        type="checkbox"
+                        data-cc-filter="assistant"
+                        checked
+                    />
+                    Assistant
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-tool-use"
+                        type="checkbox"
+                        data-cc-filter="tool_use"
+                        checked
+                    />
+                    Tool uses
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-tool-result"
+                        type="checkbox"
+                        data-cc-filter="tool_result"
+                        checked
+                    />
+                    Tool results
+                </label>
+                <label class="sidebar-toggle-row">
+                    <input
+                        id="cc-filter-thinking"
+                        type="checkbox"
+                        data-cc-filter="thinking"
+                        checked
+                    />
+                    Thinking
+                </label>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-title">Outline</div>
+                <ol id="cc-outline-list" class="outline-list"></ol>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div class="container">
 {%- block content %}{% endblock %}
+            </div>
+        </main>
     </div>
     <script>{{ js|safe }}</script>
 </body>
