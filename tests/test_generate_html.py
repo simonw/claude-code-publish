@@ -1051,6 +1051,42 @@ class TestParseSessionFile:
         assert "timestamp" in first
         assert "message" in first
 
+    def test_parses_kiro_export_format(self, output_dir):
+        """Test that Kiro (save/export) JSON format is parsed and normalized."""
+        fixture_path = Path(__file__).parent / "sample_kiro_export.json"
+        result = parse_session_file(fixture_path)
+
+        assert "loglines" in result
+        assert [e["type"] for e in result["loglines"][:3]] == [
+            "user",
+            "assistant",
+            "user",
+        ]
+
+        first_user = result["loglines"][0]
+        assert first_user["message"]["role"] == "user"
+        assert first_user["message"]["content"] == "List files in the current directory"
+
+        first_assistant = result["loglines"][1]
+        assert first_assistant["message"]["role"] == "assistant"
+        content_blocks = first_assistant["message"]["content"]
+        assert any(
+            block.get("type") == "tool_use" and block.get("name") == "fs_ls"
+            for block in content_blocks
+        )
+
+        tool_result_msg = result["loglines"][2]
+        assert tool_result_msg["message"]["role"] == "user"
+        tool_result_blocks = tool_result_msg["message"]["content"]
+        assert tool_result_blocks[0]["type"] == "tool_result"
+        assert tool_result_blocks[0]["tool_use_id"] == "tool-use-1"
+        assert "README.md" in tool_result_blocks[0]["content"]
+
+        # Smoke test the full HTML generation pipeline for this format
+        generate_html(fixture_path, output_dir)
+        index_html = (output_dir / "index.html").read_text(encoding="utf-8")
+        assert "list files" in index_html.lower()
+
     def test_parses_jsonl_format(self):
         """Test that JSONL format is parsed and converted to standard format."""
         fixture_path = Path(__file__).parent / "sample_session.jsonl"

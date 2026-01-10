@@ -1,0 +1,63 @@
+{
+  "conversation_id": "kiro-conv-123",
+  "history": [
+    {
+      "user": {
+        "content": {
+          "Prompt": "List files in the current directory"
+        },
+        "additional_context": null,
+        "timestamp": "2026-01-09T12:00:00Z",
+        "user_env_context": null
+      },
+      "assistant": {
+        "ToolUse": {
+          "message_id": "msg-1",
+          "content": "I'll list the files.",
+          "tool_uses": [
+            {
+              "id": "tool-use-1",
+              "name": "fs_ls",
+              "orig_name": "fs_ls",
+              "args": {
+                "path": "."
+              },
+              "orig_args": {
+                "path": "."
+              }
+            }
+          ]
+        }
+      },
+      "request_metadata": null
+    },
+    {
+      "user": {
+        "content": {
+          "ToolUseResults": [
+            {
+              "tool_use_id": "tool-use-1",
+              "content": [
+                {
+                  "Text": "README.md\nsrc/\ntests/\n"
+                }
+              ],
+              "status": "Success"
+            }
+          ]
+        },
+        "additional_context": null,
+        "timestamp": "2026-01-09T12:00:01Z",
+        "user_env_context": null
+      },
+      "assistant": {
+        "Response": {
+          "message_id": "msg-2",
+          "content": "Here are the files I found: README.md, src/, tests/."
+        }
+      },
+      "request_metadata": null
+    }
+  ]
+}
+

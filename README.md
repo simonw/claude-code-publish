@@ -29,6 +29,7 @@ This tool converts Claude Code and Codex CLI session files into browseable multi
 **Supported formats:**
 - Claude Code session files (JSONL format from `~/.claude/projects`)
 - Codex CLI session files (JSONL format from `~/.codex/sessions`) - automatically detected and converted
+- Kiro CLI saved chat sessions (JSON export from `/save session.json`) - automatically detected and converted
 
 
 There are four commands available:
@@ -158,7 +159,7 @@ Convert a specific session file directly:
 claude-code-transcripts json session.json -o output-directory/
 claude-code-transcripts json session.jsonl --open
 ```
-This works with both JSONL files in the `~/.claude/projects/` folder and JSON session files extracted from Claude Code for web.
+This works with JSONL files in the `~/.claude/projects/` folder, JSON session files extracted from Claude Code for web, and Kiro CLI saved sessions (created using `/save session.json`).
 
 The `json` command can take a URL to a JSON or JSONL file as an alternative to a path on disk.
 
