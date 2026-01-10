@@ -1,6 +1,7 @@
 """Tests for HTML generation from Claude Code session JSON."""
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -76,6 +77,20 @@ class TestGenerateHtml:
 
         page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
         assert page_html == snapshot_html
+
+    def test_page_includes_turn_sidebar(self, output_dir):
+        """Page HTML includes a right sidebar with per-turn summaries."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        assert 'class="turn-sidebar"' in page_html
+        assert len(re.findall(r"class=\"turn-item\"", page_html)) == 5
+        assert 'href="#msg-2025-12-24T10-00-00-000Z"' in page_html
+        assert "Create a simple Python function to add two numbers" in page_html
+        assert "I'll create a simple Python function for you." in page_html
+        assert "3 bash" in page_html
 
     def test_generates_page_002_html(self, output_dir, snapshot_html):
         """Test page-002.html generation (continuation page)."""
@@ -1115,6 +1130,8 @@ class TestParseSessionFile:
         assert index_html == snapshot_html
 
 
+
+
 class TestGetSessionSummary:
     """Tests for get_session_summary which extracts summary from session files."""
 
@@ -1620,3 +1637,36 @@ class TestSearchFeature:
 
         # Total pages should be embedded for JS to know how many pages to fetch
         assert "totalPages" in index_html or "total_pages" in index_html
+
+
+class TestSidebarFeature:
+    """Tests for the left sidebar filters + outline UI."""
+
+    def test_sidebar_present_on_transcript_pages(self, output_dir):
+        """Transcript pages should include a left sidebar with filter toggles."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        assert 'id="cc-sidebar"' in page_html
+        assert 'id="cc-sidebar-toggle"' in page_html
+
+        assert 'id="cc-filter-user"' in page_html
+        assert 'id="cc-filter-assistant"' in page_html
+        assert 'id="cc-filter-tool-use"' in page_html
+        assert 'id="cc-filter-tool-result"' in page_html
+        assert 'id="cc-filter-thinking"' in page_html
+
+        # Outline container should exist for per-turn anchors.
+        assert 'id="cc-outline-list"' in page_html
+
+    def test_sidebar_state_persists_via_local_storage(self, output_dir):
+        """Sidebar filter state should persist via localStorage."""
+        fixture_path = Path(__file__).parent / "sample_session.json"
+        generate_html(fixture_path, output_dir, github_repo="example/project")
+
+        page_html = (output_dir / "page-001.html").read_text(encoding="utf-8")
+
+        # This is a smoke test that the persistence key is embedded in the JS bundle.
+        assert "cct.sidebar.state.v1" in page_html

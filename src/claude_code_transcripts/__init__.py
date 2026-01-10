@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -111,6 +111,10 @@ def get_session_summary(filepath, max_length=200):
             # For JSON files, try to get first user message
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if isinstance(data, dict) and "loglines" not in data:
+                normalized = _try_normalize_foreign_export(data)
+                if normalized is not None:
+                    data = normalized
             loglines = data.get("loglines", [])
             for entry in loglines:
                 if entry.get("type") == "user":
@@ -556,227 +560,7 @@ def parse_session_file(filepath):
     if filepath.suffix == ".jsonl":
         return _parse_jsonl_file(filepath)
     else:
-        # Standard JSON format (plus Kiro save/export JSON)
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if _is_kiro_export_data(data):
-            return _parse_kiro_export_data(data)
-        return data
 
-
-def _is_kiro_export_data(data):
-    """Detect Kiro (Kiro CLI /save, Amazon Q CLI /save) JSON exports.
-
-    These exports serialize a conversation state with a top-level `history` array of
-    `{ user: ..., assistant: ... }` pairs. User content is stored as a tagged enum
-    like `{ "Prompt": "..." }` or `{ "ToolUseResults": [...] }`.
-    """
-    if not isinstance(data, dict):
-        return False
-    history = data.get("history")
-    if not isinstance(history, list) or not history:
-        return False
-
-    # Presence of an ID is a helpful marker, but not required.
-    if not any(k in data for k in ("conversation_id", "conversationId")):
-        # Many other things can have a "history" list; require stronger evidence.
-        pass
-
-    # Validate a handful of entries for shape.
-    checked = 0
-    for entry in history[:5]:
-        if not isinstance(entry, dict):
-            return False
-        user = entry.get("user")
-        assistant = entry.get("assistant")
-        if not isinstance(user, dict) or not isinstance(assistant, dict):
-            return False
-        content = user.get("content")
-        if not isinstance(content, dict) or not content:
-            return False
-        if not any(
-            k in content for k in ("Prompt", "ToolUseResults", "CancelledToolUses")
-        ):
-            return False
-        if not any(k in assistant for k in ("Response", "ToolUse")):
-            return False
-        checked += 1
-    return checked > 0
-
-
-def _parse_kiro_export_data(data):
-    """Parse Kiro save/export JSON and normalize to Claude Code-style loglines."""
-    loglines = []
-    history = data.get("history", [])
-    if not isinstance(history, list):
-        return {"loglines": []}
-
-    for entry in history:
-        if not isinstance(entry, dict):
-            continue
-
-        user = entry.get("user") or {}
-        assistant = entry.get("assistant") or {}
-        timestamp = ""
-        if isinstance(user, dict):
-            timestamp = user.get("timestamp", "") or ""
-
-        user_message = _convert_kiro_user_message(user)
-        if user_message is not None:
-            loglines.append(
-                {
-                    "type": "user",
-                    "timestamp": timestamp,
-                    "message": user_message,
-                }
-            )
-
-        assistant_message = _convert_kiro_assistant_message(assistant)
-        if assistant_message is not None:
-            loglines.append(
-                {
-                    "type": "assistant",
-                    "timestamp": timestamp,
-                    "message": assistant_message,
-                }
-            )
-
-    return {"loglines": loglines}
-
-
-def _convert_kiro_user_message(user):
-    if not isinstance(user, dict):
-        return None
-
-    content = user.get("content")
-    if not isinstance(content, dict):
-        return None
-
-    if "Prompt" in content:
-        prompt = content.get("Prompt")
-        if prompt is None:
-            prompt = ""
-        return {"role": "user", "content": str(prompt)}
-
-    # Tool results (and cancellations) are represented as a special user content type.
-    tool_use_results = None
-    if "ToolUseResults" in content:
-        tool_use_results = content.get("ToolUseResults")
-    elif "CancelledToolUses" in content:
-        cancelled = content.get("CancelledToolUses")
-        if isinstance(cancelled, dict):
-            tool_use_results = cancelled.get("tool_use_results")
-            prompt = cancelled.get("prompt")
-            if prompt:
-                # Preserve any prompt text that came along with the cancellation.
-                # Keep this as plain user content rather than mixing with tool_result blocks.
-                return {"role": "user", "content": str(prompt)}
-
-    if isinstance(tool_use_results, list):
-        blocks = []
-        for result in tool_use_results:
-            block = _convert_kiro_tool_use_result(result)
-            if block is not None:
-                blocks.append(block)
-        return {"role": "user", "content": blocks}
-
-    return None
-
-
-def _convert_kiro_tool_use_result(result):
-    if not isinstance(result, dict):
-        return None
-    tool_use_id = result.get("tool_use_id") or result.get("toolUseId") or ""
-    status = result.get("status")
-    is_error = False
-    if isinstance(status, str):
-        is_error = status.lower() not in ("success", "ok")
-    content = _convert_kiro_tool_result_content(result.get("content"))
-    return {
-        "type": "tool_result",
-        "tool_use_id": tool_use_id,
-        "content": content,
-        "is_error": is_error,
-    }
-
-
-def _convert_kiro_tool_result_content(content):
-    # Kiro/Q CLI serializes tool result content as a list of tagged blocks:
-    #   [{"Text": "..."}, {"Json": {...}}]
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return content
-
-    text_parts = []
-    json_parts = []
-    for block in content:
-        if not isinstance(block, dict) or not block:
-            continue
-        if "Text" in block:
-            text_parts.append(str(block.get("Text", "")))
-        elif "Json" in block:
-            json_parts.append(block.get("Json"))
-
-    if text_parts and not json_parts:
-        return "\n".join(text_parts).strip("\n")
-    if len(json_parts) == 1 and not text_parts:
-        return json_parts[0]
-
-    merged_parts = []
-    if text_parts:
-        merged_parts.append("\n".join(text_parts).strip("\n"))
-    for jp in json_parts:
-        try:
-            merged_parts.append(json.dumps(jp, indent=2, ensure_ascii=False))
-        except TypeError:
-            merged_parts.append(str(jp))
-    return "\n\n".join(p for p in merged_parts if p)
-
-
-def _convert_kiro_assistant_message(assistant):
-    if not isinstance(assistant, dict) or not assistant:
-        return None
-
-    if "Response" in assistant:
-        response = assistant.get("Response") or {}
-        if not isinstance(response, dict):
-            return None
-        text = response.get("content", "")
-        return {
-            "role": "assistant",
-            "content": [{"type": "text", "text": str(text)}],
-        }
-
-    if "ToolUse" in assistant:
-        tool_use = assistant.get("ToolUse") or {}
-        if not isinstance(tool_use, dict):
-            return None
-
-        blocks = []
-        text = tool_use.get("content")
-        if text:
-            blocks.append({"type": "text", "text": str(text)})
-
-        tool_uses = tool_use.get("tool_uses")
-        if isinstance(tool_uses, list):
-            for tu in tool_uses:
-                if not isinstance(tu, dict):
-                    continue
-                blocks.append(
-                    {
-                        "type": "tool_use",
-                        "id": tu.get("id", ""),
-                        "name": tu.get("name") or tu.get("orig_name") or "Unknown tool",
-                        "input": tu.get("args") or {},
-                    }
-                )
-
-        return {"role": "assistant", "content": blocks}
-
-    return None
 
 
 def _is_codex_cli_format(filepath):
@@ -864,6 +648,15 @@ def _convert_codex_content_to_claude(content_blocks):
         block_type = block.get("type")
         if block_type == "input_text":
             claude_blocks.append({"type": "text", "text": block.get("text", "")})
+        elif block_type == "reasoning":
+            reasoning_text = (
+                block.get("text")
+                or block.get("reasoning")
+                or block.get("content")
+                or ""
+            )
+            if reasoning_text:
+                claude_blocks.append({"type": "thinking", "thinking": reasoning_text})
         elif block_type == "output_text":
             claude_blocks.append({"type": "text", "text": block.get("text", "")})
         elif block_type == "text":
@@ -941,6 +734,20 @@ def _parse_codex_jsonl_file(filepath):
             }
         )
 
+    def add_thinking(thinking, timestamp):
+        if not thinking:
+            return
+        loglines.append(
+            {
+                "type": "assistant",
+                "timestamp": timestamp,
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "thinking", "thinking": thinking}],
+                },
+            }
+        )
+
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -975,6 +782,14 @@ def _parse_codex_jsonl_file(filepath):
                             timestamp,
                             bool(payload.get("is_error")),
                         )
+                    elif payload_type == "reasoning":
+                        add_thinking(
+                            payload.get("text")
+                            or payload.get("reasoning")
+                            or payload.get("content")
+                            or "",
+                            timestamp,
+                        )
                 elif record_type == "message":
                     add_message(
                         obj.get("role"),
@@ -996,6 +811,14 @@ def _parse_codex_jsonl_file(filepath):
                         obj.get("output", ""),
                         timestamp,
                         bool(obj.get("is_error")),
+                    )
+                elif record_type == "reasoning":
+                    add_thinking(
+                        obj.get("text")
+                        or obj.get("reasoning")
+                        or obj.get("content")
+                        or "",
+                        timestamp,
                     )
 
             except json.JSONDecodeError:
@@ -1400,6 +1223,97 @@ def is_tool_result_message(message_data):
     )
 
 
+def _normalize_preview_text(text):
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _truncate_preview_text(text, max_length):
+    text = _normalize_preview_text(text)
+    if not text:
+        return ""
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
+def extract_assistant_preview(messages, max_length=140):
+    """Extract a short assistant preview from a list of (type, json, timestamp)."""
+    for log_type, message_json, _timestamp in messages:
+        if log_type != "assistant" or not message_json:
+            continue
+        try:
+            message_data = json.loads(message_json)
+        except json.JSONDecodeError:
+            continue
+        text = extract_text_from_content(message_data.get("content", []))
+        preview = _truncate_preview_text(text, max_length)
+        if preview:
+            return preview
+    return ""
+
+
+def format_tool_stats_sidebar(tool_counts):
+    """Format tool counts for compact display (e.g., '3 bash · 1 write')."""
+    if not tool_counts:
+        return ""
+
+    abbrev = {
+        "Bash": "bash",
+        "Read": "read",
+        "Write": "write",
+        "Edit": "edit",
+        "Glob": "glob",
+        "Grep": "grep",
+        "Task": "task",
+        "TodoWrite": "todo",
+        "WebFetch": "fetch",
+        "WebSearch": "search",
+    }
+
+    parts = []
+    for name, count in sorted(tool_counts.items(), key=lambda x: (-x[1], x[0])):
+        short_name = abbrev.get(name, name.lower())
+        parts.append(f"{count} {short_name}")
+    return " · ".join(parts)
+
+
+def render_turn_item(
+    turn_num,
+    msg_id,
+    timestamp,
+    user_preview,
+    tool_counts,
+    assistant_preview,
+    is_continuation=False,
+):
+    """Render a single sidebar turn summary item as HTML."""
+    user_preview = _truncate_preview_text(user_preview, 120)
+    assistant_preview = _truncate_preview_text(assistant_preview, 160)
+
+    tool_total = sum(tool_counts.values()) if tool_counts else 0
+    tool_stats = format_tool_stats_sidebar(tool_counts)
+    if tool_total and tool_stats:
+        tool_line = f"{tool_total} tools: {tool_stats}"
+    else:
+        tool_line = f"{tool_total} tools"
+
+    badge_html = (
+        ' <span class="turn-badge">continuation</span>' if is_continuation else ""
+    )
+
+    return (
+        f'<a class="turn-item" href="#{html.escape(msg_id)}">'
+        f'<div class="turn-item-header"><span>Turn #{turn_num}{badge_html}</span>'
+        f'<time datetime="{html.escape(timestamp)}" data-timestamp="{html.escape(timestamp)}">{html.escape(timestamp)}</time></div>'
+        f'<div class="turn-item-user">{html.escape(user_preview)}</div>'
+        f'<div class="turn-item-meta">{html.escape(tool_line)}</div>'
+        f'<div class="turn-item-assistant">{html.escape(assistant_preview)}</div>'
+        f"</a>"
+    )
+
+
 def render_message(log_type, message_json, timestamp):
     if not message_json:
         return ""
@@ -1429,7 +1343,7 @@ CSS = """
 :root { --bg-color: #f5f5f5; --card-bg: #ffffff; --user-bg: #e3f2fd; --user-border: #1976d2; --assistant-bg: #f5f5f5; --assistant-border: #9e9e9e; --thinking-bg: #fff8e1; --thinking-border: #ffc107; --thinking-text: #666; --tool-bg: #f3e5f5; --tool-border: #9c27b0; --tool-result-bg: #e8f5e9; --tool-error-bg: #ffebee; --text-color: #212121; --text-muted: #757575; --code-bg: #263238; --code-text: #aed581; }
 * { box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); margin: 0; padding: 16px; line-height: 1.6; }
-.container { max-width: 800px; margin: 0 auto; }
+
 h1 { font-size: 1.5rem; margin-bottom: 24px; padding-bottom: 8px; border-bottom: 2px solid var(--user-border); }
 .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 2px solid var(--user-border); padding-bottom: 8px; margin-bottom: 24px; }
 .header-row h1 { border-bottom: none; padding-bottom: 0; margin-bottom: 0; flex: 1; min-width: 200px; }
@@ -1561,7 +1475,8 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
 .search-result-content { padding: 12px; }
 .search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
-@media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
+@media (max-width: 900px) { body { padding-top: 60px; } .app { display: block; } .sidebar { position: fixed; left: 0; top: 0; bottom: 0; max-height: none; transform: translateX(-110%); transition: transform 150ms ease-out; z-index: 2000; border-radius: 0 12px 12px 0; } body.cc-sidebar-open .sidebar { transform: translateX(0); } .sidebar-toggle { display: flex; position: fixed; top: 12px; left: 12px; z-index: 2100; align-items: center; justify-content: center; width: 44px; height: 40px; border: 1px solid rgba(0,0,0,0.12); background: var(--card-bg); color: var(--text-color); border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); cursor: pointer; } .sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 1900; } body.cc-sidebar-open .sidebar-backdrop { display: block; } }
+@media (max-width: 600px) { body { padding: 8px; padding-top: 60px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 """
 
 JS = """
@@ -1593,6 +1508,7 @@ document.querySelectorAll('.truncatable').forEach(function(wrapper) {
         });
     }
 });
+
 """
 
 # JavaScript to fix relative URLs when served via gisthost.github.io or gistpreview.github.io
@@ -1813,6 +1729,22 @@ def generate_html(json_path, output_dir, github_repo=None):
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
         page_convs = conversations[start_idx:end_idx]
         messages_html = []
+        turn_items_html = []
+        for conv_offset, conv in enumerate(page_convs):
+            stats = analyze_conversation(conv["messages"])
+            assistant_preview = extract_assistant_preview(conv["messages"])
+            msg_id = make_msg_id(conv["timestamp"])
+            turn_items_html.append(
+                render_turn_item(
+                    start_idx + conv_offset + 1,
+                    msg_id,
+                    conv["timestamp"],
+                    conv["user_text"],
+                    stats["tool_counts"],
+                    assistant_preview,
+                    is_continuation=bool(conv.get("is_continuation")),
+                )
+            )
         for conv in page_convs:
             is_first = True
             for log_type, message_json, timestamp in conv["messages"]:
@@ -1832,6 +1764,7 @@ def generate_html(json_path, output_dir, github_repo=None):
             total_pages=total_pages,
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
+            turns_html="".join(turn_items_html),
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"
@@ -2287,6 +2220,22 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         end_idx = min(start_idx + PROMPTS_PER_PAGE, total_convs)
         page_convs = conversations[start_idx:end_idx]
         messages_html = []
+        turn_items_html = []
+        for conv_offset, conv in enumerate(page_convs):
+            stats = analyze_conversation(conv["messages"])
+            assistant_preview = extract_assistant_preview(conv["messages"])
+            msg_id = make_msg_id(conv["timestamp"])
+            turn_items_html.append(
+                render_turn_item(
+                    start_idx + conv_offset + 1,
+                    msg_id,
+                    conv["timestamp"],
+                    conv["user_text"],
+                    stats["tool_counts"],
+                    assistant_preview,
+                    is_continuation=bool(conv.get("is_continuation")),
+                )
+            )
         for conv in page_convs:
             is_first = True
             for log_type, message_json, timestamp in conv["messages"]:
@@ -2306,6 +2255,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
             total_pages=total_pages,
             pagination_html=pagination_html,
             messages_html="".join(messages_html),
+            turns_html="".join(turn_items_html),
         )
         (output_dir / f"page-{page_num:03d}.html").write_text(
             page_content, encoding="utf-8"

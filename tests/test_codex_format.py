@@ -124,6 +124,54 @@ class TestCodexCliMessageParsing:
         finally:
             temp_file.unlink()
 
+    def test_parses_reasoning_block_as_thinking(self):
+        """Test that Codex reasoning blocks convert to Claude thinking blocks."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(
+                '{"timestamp":"2025-12-28T12:18:40.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"reasoning","text":"Let me reason about this."},{"type":"text","text":"Answer."}]}}\n'
+            )
+            temp_file = Path(f.name)
+
+        try:
+            data = parse_session_file(temp_file)
+            loglines = data["loglines"]
+            assert len(loglines) == 1
+
+            entry = loglines[0]
+            assert entry["type"] == "assistant"
+            blocks = entry["message"]["content"]
+            assert blocks[0]["type"] == "thinking"
+            assert blocks[0]["thinking"] == "Let me reason about this."
+            assert blocks[1]["type"] == "text"
+            assert blocks[1]["text"] == "Answer."
+        finally:
+            temp_file.unlink()
+
+    def test_parses_reasoning_record_old_format(self):
+        """Test that old-format Codex reasoning records convert to thinking blocks."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+            f.write(
+                '{"id":"test-id","timestamp":"2025-08-31T20:48:31.616Z","instructions":null}\n'
+            )
+            f.write('{"record_type":"state"}\n')
+            f.write(
+                '{"type":"reasoning","timestamp":"2025-08-31T20:48:32.000Z","text":"Old-format reasoning."}\n'
+            )
+            temp_file = Path(f.name)
+
+        try:
+            data = parse_session_file(temp_file)
+            loglines = data["loglines"]
+            assert len(loglines) == 1
+
+            entry = loglines[0]
+            assert entry["type"] == "assistant"
+            assert entry["timestamp"] == "2025-08-31T20:48:32.000Z"
+            blocks = entry["message"]["content"]
+            assert blocks == [{"type": "thinking", "thinking": "Old-format reasoning."}]
+        finally:
+            temp_file.unlink()
+
     def test_skips_non_message_records(self):
         """Test that non-message records (session_meta, turn_context, etc.) are skipped."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
