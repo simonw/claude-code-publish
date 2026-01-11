@@ -75,6 +75,524 @@ def extract_text_from_content(content):
     return ""
 
 
+def is_context_output(content):
+    """Detect if content is /context command output.
+
+    /context output is identified by:
+    - Being wrapped in <local-command-stdout> tags
+    - Containing the "Context Usage" header
+
+    Args:
+        content: String content to check
+
+    Returns:
+        True if this is /context output, False otherwise
+    """
+    if not isinstance(content, str):
+        return False
+    return (
+        "<local-command-stdout>" in content
+        and "</local-command-stdout>" in content
+        and "Context Usage" in content
+    )
+
+
+def extract_context_content(content):
+    """Extract /context output by removing wrapper tags.
+
+    Args:
+        content: String content with <local-command-stdout> wrapper
+
+    Returns:
+        Content with wrapper tags removed
+    """
+    if not isinstance(content, str):
+        return content
+
+    # Remove opening tag
+    content = re.sub(r"<local-command-stdout>", "", content)
+    # Remove closing tag
+    content = re.sub(r"</local-command-stdout>", "", content)
+
+    return content
+
+
+class AnsiState:
+    """State for ANSI SGR (Select Graphic Rendition) attributes."""
+
+    def __init__(self):
+        self.bold = False
+        self.dim = False
+        self.italic = False
+        self.underline = False
+        self.reverse = False
+        self.fg_color = None  # None or tuple: (r,g,b) for truecolor, (idx,) for 256-color
+        self.bg_color = None  # None or tuple: (r,g,b) for truecolor, (idx,) for 256-color
+
+    def reset(self):
+        """Reset all attributes to default."""
+        self.bold = False
+        self.dim = False
+        self.italic = False
+        self.underline = False
+        self.reverse = False
+        self.fg_color = None
+        self.bg_color = None
+
+    def copy(self):
+        """Create a copy of this state."""
+        new_state = AnsiState()
+        new_state.bold = self.bold
+        new_state.dim = self.dim
+        new_state.italic = self.italic
+        new_state.underline = self.underline
+        new_state.reverse = self.reverse
+        new_state.fg_color = self.fg_color
+        new_state.bg_color = self.bg_color
+        return new_state
+
+
+def parse_ansi_sgr(params, state):
+    """Parse SGR (Select Graphic Rendition) parameters and update state.
+
+    Supports:
+    - Reset (0)
+    - Bold (1), dim (2), italic (3), underline (4), reverse (7)
+    - Unbold/undim (22), unitalic (23), no underline (24), unreverse (27)
+    - 256-color foreground (38;5;n) and background (48;5;n)
+    - Truecolor foreground (38;2;r;g;b) and background (48;2;r;g;b)
+    - Default foreground (39) and background (49)
+
+    Args:
+        params: List of integer SGR parameters
+        state: AnsiState object to update
+    """
+    i = 0
+    while i < len(params):
+        code = params[i]
+
+        if code == 0:  # Reset
+            state.reset()
+        elif code == 1:  # Bold
+            state.bold = True
+        elif code == 2:  # Dim
+            state.dim = True
+        elif code == 3:  # Italic
+            state.italic = True
+        elif code == 4:  # Underline
+            state.underline = True
+        elif code == 7:  # Reverse
+            state.reverse = True
+        elif code == 22:  # Unbold/undim
+            state.bold = False
+            state.dim = False
+        elif code == 23:  # Unitalic
+            state.italic = False
+        elif code == 24:  # No underline
+            state.underline = False
+        elif code == 27:  # Unreverse
+            state.reverse = False
+        elif code == 39:  # Default foreground
+            state.fg_color = None
+        elif code == 49:  # Default background
+            state.bg_color = None
+        elif code == 38:  # Foreground color
+            if i + 2 < len(params) and params[i + 1] == 5:
+                # 256-color: 38;5;n
+                state.fg_color = (params[i + 2],)
+                i += 2
+            elif i + 4 < len(params) and params[i + 1] == 2:
+                # Truecolor: 38;2;r;g;b
+                state.fg_color = (params[i + 2], params[i + 3], params[i + 4])
+                i += 4
+        elif code == 48:  # Background color
+            if i + 2 < len(params) and params[i + 1] == 5:
+                # 256-color: 48;5;n
+                state.bg_color = (params[i + 2],)
+                i += 2
+            elif i + 4 < len(params) and params[i + 1] == 2:
+                # Truecolor: 48;2;r;g;b
+                state.bg_color = (params[i + 2], params[i + 3], params[i + 4])
+                i += 4
+
+        i += 1
+
+
+# 256-color palette (xterm colors)
+# Colors 0-15: standard colors, 16-231: 6x6x6 RGB cube, 232-255: grayscale
+ANSI_256_PALETTE = None  # Lazy-loaded
+
+
+def get_256_color_palette():
+    """Get or create the 256-color palette."""
+    global ANSI_256_PALETTE
+    if ANSI_256_PALETTE is None:
+        palette = []
+        # Colors 0-15: standard colors (simplified)
+        standard = [
+            (0, 0, 0), (128, 0, 0), (0, 128, 0), (128, 128, 0),
+            (0, 0, 128), (128, 0, 128), (0, 128, 128), (192, 192, 192),
+            (128, 128, 128), (255, 0, 0), (0, 255, 0), (255, 255, 0),
+            (0, 0, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
+        ]
+        palette.extend(standard)
+
+        # Colors 16-231: 6x6x6 RGB cube
+        for r in range(6):
+            for g in range(6):
+                for b in range(6):
+                    palette.append((
+                        0 if r == 0 else 55 + r * 40,
+                        0 if g == 0 else 55 + g * 40,
+                        0 if b == 0 else 55 + b * 40,
+                    ))
+
+        # Colors 232-255: grayscale ramp
+        for i in range(24):
+            gray = 8 + i * 10
+            palette.append((gray, gray, gray))
+
+        ANSI_256_PALETTE = palette
+    return ANSI_256_PALETTE
+
+
+class AnsiParser:
+    """Parser for ANSI escape sequences with screen buffer simulation."""
+
+    # ANSI CSI pattern: ESC [ params letter
+    CSI_PATTERN = re.compile(r'\x1b\[([0-9;?]*?)([A-Za-z])')
+
+    def __init__(self):
+        self.buffer = [[]]  # List of lists: each inner list is a line of (char, state) tuples
+        self.cursor_row = 0
+        self.cursor_col = 0
+        self.current_state = AnsiState()
+        self.saved_cursor = (0, 0)
+
+    def parse(self, text):
+        """Parse text with ANSI codes and return plain text representation.
+
+        This simulates a terminal screen buffer, processing cursor movements
+        and erases to produce the final output.
+
+        Args:
+            text: Text with ANSI escape sequences
+
+        Returns:
+            Plain text with ANSI codes processed (for now - will add HTML later)
+        """
+        pos = 0
+        while pos < len(text):
+            # Look for CSI sequence
+            match = self.CSI_PATTERN.search(text, pos)
+            if match:
+                # Process text before the escape sequence
+                before_text = text[pos:match.start()]
+                self._write_text(before_text)
+
+                # Process the escape sequence
+                params_str = match.group(1)
+                command = match.group(2)
+                self._process_csi(params_str, command)
+
+                pos = match.end()
+            else:
+                # No more escape sequences, write remaining text
+                self._write_text(text[pos:])
+                break
+
+        return self._render_buffer()
+
+    def _write_text(self, text):
+        """Write text to buffer at current cursor position."""
+        for char in text:
+            if char == '\n':
+                self.cursor_row += 1
+                self.cursor_col = 0
+                self._ensure_row(self.cursor_row)
+            elif char == '\r':
+                self.cursor_col = 0
+            else:
+                # Ensure row exists
+                self._ensure_row(self.cursor_row)
+                # Ensure column exists (fill with spaces if needed)
+                while len(self.buffer[self.cursor_row]) < self.cursor_col:
+                    self.buffer[self.cursor_row].append((' ', self.current_state.copy()))
+                # Write or overwrite character
+                if self.cursor_col < len(self.buffer[self.cursor_row]):
+                    self.buffer[self.cursor_row][self.cursor_col] = (char, self.current_state.copy())
+                else:
+                    self.buffer[self.cursor_row].append((char, self.current_state.copy()))
+                self.cursor_col += 1
+
+    def _ensure_row(self, row):
+        """Ensure buffer has enough rows."""
+        while len(self.buffer) <= row:
+            self.buffer.append([])
+
+    def _process_csi(self, params_str, command):
+        """Process a CSI escape sequence."""
+        # Parse parameters
+        if params_str == '':
+            params = []
+        elif '?' in params_str:
+            # Private mode sequences (e.g., ?2026h) - ignore
+            params = []
+        else:
+            params = [int(p) if p else 0 for p in params_str.split(';')]
+
+        if command == 'm':  # SGR - Select Graphic Rendition
+            if not params:
+                params = [0]
+            parse_ansi_sgr(params, self.current_state)
+        elif command == 'A':  # Cursor Up
+            n = params[0] if params else 1
+            self.cursor_row = max(0, self.cursor_row - n)
+        elif command == 'B':  # Cursor Down
+            n = params[0] if params else 1
+            self.cursor_row += n
+            self._ensure_row(self.cursor_row)
+        elif command == 'C':  # Cursor Forward
+            n = params[0] if params else 1
+            self.cursor_col += n
+        elif command == 'D':  # Cursor Backward
+            n = params[0] if params else 1
+            self.cursor_col = max(0, self.cursor_col - n)
+        elif command in ('H', 'f'):  # Cursor Position
+            row = (params[0] - 1) if params and params[0] > 0 else 0
+            col = (params[1] - 1) if len(params) > 1 and params[1] > 0 else 0
+            self.cursor_row = row
+            self.cursor_col = col
+            self._ensure_row(self.cursor_row)
+        elif command == 'G':  # Cursor Horizontal Absolute
+            col = (params[0] - 1) if params and params[0] > 0 else 0
+            self.cursor_col = col
+        elif command == 's':  # Save Cursor Position
+            self.saved_cursor = (self.cursor_row, self.cursor_col)
+        elif command == 'u':  # Restore Cursor Position
+            self.cursor_row, self.cursor_col = self.saved_cursor
+            self._ensure_row(self.cursor_row)
+        elif command == 'K':  # Erase in Line
+            mode = params[0] if params else 0
+            self._erase_in_line(mode)
+        elif command == 'J':  # Erase in Display
+            mode = params[0] if params else 0
+            self._erase_in_display(mode)
+        elif command == 'h' or command == 'l':
+            # Mode set/reset - ignore (e.g., bracketed paste ?2026h/l)
+            pass
+
+    def _erase_in_line(self, mode):
+        """Erase in line: 0=to end, 1=to beginning, 2=entire line."""
+        self._ensure_row(self.cursor_row)
+        line = self.buffer[self.cursor_row]
+
+        if mode == 0:  # Erase to end of line
+            self.buffer[self.cursor_row] = line[:self.cursor_col]
+        elif mode == 1:  # Erase to beginning of line
+            # Replace beginning with spaces
+            for i in range(min(self.cursor_col + 1, len(line))):
+                line[i] = (' ', self.current_state.copy())
+        elif mode == 2:  # Erase entire line
+            self.buffer[self.cursor_row] = []
+
+    def _erase_in_display(self, mode):
+        """Erase in display: 0=below, 1=above, 2=entire screen."""
+        if mode == 0:  # Erase below
+            # Erase from cursor to end of current line
+            self._erase_in_line(0)
+            # Erase all lines below
+            self.buffer = self.buffer[:self.cursor_row + 1]
+        elif mode == 1:  # Erase above
+            # Erase all lines above
+            self.buffer = [[]] * self.cursor_row + [self.buffer[self.cursor_row]]
+            # Erase from beginning of current line to cursor
+            self._erase_in_line(1)
+        elif mode == 2:  # Erase entire screen
+            self.buffer = [[]]
+            self.cursor_row = 0
+            self.cursor_col = 0
+
+    def _render_buffer(self, html_mode=False):
+        """Render buffer to plain text or HTML.
+
+        Args:
+            html_mode: If True, render as HTML with styled spans
+
+        Returns:
+            Rendered output as string
+        """
+        if not html_mode:
+            # Plain text mode
+            lines = []
+            for row in self.buffer:
+                line_chars = []
+                for char, state in row:
+                    line_chars.append(char)
+                lines.append(''.join(line_chars))
+            return '\n'.join(lines)
+
+        # HTML mode
+        lines = []
+        for row in self.buffer:
+            if not row:
+                lines.append('')
+                continue
+
+            line_html = []
+            current_run = []
+            current_state = None
+
+            for char, state in row:
+                # Check if state changed
+                if current_state is None:
+                    current_state = state
+                elif not self._states_equal(current_state, state):
+                    # Flush current run
+                    if current_run:
+                        line_html.append(self._render_run(current_run, current_state))
+                        current_run = []
+                    current_state = state
+
+                current_run.append(char)
+
+            # Flush remaining run
+            if current_run:
+                line_html.append(self._render_run(current_run, current_state))
+
+            lines.append(''.join(line_html))
+
+        return '\n'.join(lines)
+
+    def _states_equal(self, s1, s2):
+        """Check if two AnsiState objects are equal."""
+        if s1 is None or s2 is None:
+            return s1 == s2
+        return (
+            s1.bold == s2.bold and
+            s1.dim == s2.dim and
+            s1.italic == s2.italic and
+            s1.underline == s2.underline and
+            s1.reverse == s2.reverse and
+            s1.fg_color == s2.fg_color and
+            s1.bg_color == s2.bg_color
+        )
+
+    def _render_run(self, chars, state):
+        """Render a run of characters with the same style.
+
+        Args:
+            chars: List of characters
+            state: AnsiState for this run
+
+        Returns:
+            HTML string
+        """
+        text = ''.join(chars)
+        # Escape HTML
+        text = html.escape(text)
+
+        # If no styles, return plain text
+        if not state or not self._has_any_style(state):
+            return text
+
+        # Build inline style
+        styles = []
+
+        # Handle reverse video by swapping fg/bg
+        fg = state.bg_color if state.reverse else state.fg_color
+        bg = state.fg_color if state.reverse else state.bg_color
+
+        if fg:
+            if len(fg) == 1:
+                # 256-color
+                palette = get_256_color_palette()
+                if 0 <= fg[0] < len(palette):
+                    r, g, b = palette[fg[0]]
+                    styles.append(f'color: rgb({r}, {g}, {b})')
+            else:
+                # Truecolor
+                r, g, b = fg
+                styles.append(f'color: rgb({r}, {g}, {b})')
+
+        if bg:
+            if len(bg) == 1:
+                # 256-color
+                palette = get_256_color_palette()
+                if 0 <= bg[0] < len(palette):
+                    r, g, b = palette[bg[0]]
+                    styles.append(f'background-color: rgb({r}, {g}, {b})')
+            else:
+                # Truecolor
+                r, g, b = bg
+                styles.append(f'background-color: rgb({r}, {g}, {b})')
+
+        if state.bold:
+            styles.append('font-weight: bold')
+
+        if state.dim:
+            styles.append('opacity: 0.6')
+
+        if state.italic:
+            styles.append('font-style: italic')
+
+        if state.underline:
+            styles.append('text-decoration: underline')
+
+        style_str = '; '.join(styles)
+        return f'<span style="{style_str}">{text}</span>'
+
+    def _has_any_style(self, state):
+        """Check if state has any non-default styling."""
+        return (
+            state.bold or
+            state.dim or
+            state.italic or
+            state.underline or
+            state.reverse or
+            state.fg_color is not None or
+            state.bg_color is not None
+        )
+
+
+def render_ansi_to_html(text):
+    """Render text with ANSI escape sequences as styled HTML.
+
+    Args:
+        text: Text with ANSI escape sequences
+
+    Returns:
+        HTML string with <pre> wrapper and styled spans
+    """
+    parser = AnsiParser()
+    # Override parse to return HTML
+    pos = 0
+    while pos < len(text):
+        # Look for CSI sequence
+        match = parser.CSI_PATTERN.search(text, pos)
+        if match:
+            # Process text before the escape sequence
+            before_text = text[pos:match.start()]
+            parser._write_text(before_text)
+
+            # Process the escape sequence
+            params_str = match.group(1)
+            command = match.group(2)
+            parser._process_csi(params_str, command)
+
+            pos = match.end()
+        else:
+            # No more escape sequences, write remaining text
+            parser._write_text(text[pos:])
+            break
+
+    # Render as HTML
+    content = parser._render_buffer(html_mode=True)
+
+    # Wrap in pre tag with ansi-context class
+    return f'<pre class="ansi-context">{content}</pre>'
+
+
 # Module-level variable for GitHub repo (set by generate_html)
 _github_repo = None
 
@@ -749,7 +1267,12 @@ def render_content_block(block):
 def render_user_message_content(message_data):
     content = message_data.get("content", "")
     if isinstance(content, str):
-        if is_json_like(content):
+        # Check if this is /context output
+        if is_context_output(content):
+            extracted = extract_context_content(content)
+            ansi_html = render_ansi_to_html(extracted)
+            return _macros.user_content(ansi_html)
+        elif is_json_like(content):
             return _macros.user_content(format_json(content))
         return _macros.user_content(render_markdown_text(content))
     elif isinstance(content, list):
@@ -949,6 +1472,7 @@ time { color: var(--text-muted); font-size: 0.8rem; }
 .todo-pending .todo-content { color: #616161; }
 pre { background: var(--code-bg); color: var(--code-text); padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 8px 0; white-space: pre-wrap; word-wrap: break-word; }
 pre.json { color: #e0e0e0; }
+pre.ansi-context { background: #0d1117; color: #c9d1d9; font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', 'Droid Sans Mono', 'Source Code Pro', monospace; white-space: pre; padding: 16px; font-size: 0.8rem; line-height: 1.4; border: 1px solid #30363d; overflow-x: auto; }
 code { background: rgba(0,0,0,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 pre code { background: none; padding: 0; }
 .user-content { margin: 0; }
@@ -1319,7 +1843,12 @@ def generate_html(json_path, output_dir, github_repo=None):
         page_num = (i // PROMPTS_PER_PAGE) + 1
         msg_id = make_msg_id(conv["timestamp"])
         link = f"page-{page_num:03d}.html#{msg_id}"
-        rendered_content = render_markdown_text(conv["user_text"])
+        # Check if this is /context output and render appropriately
+        if is_context_output(conv["user_text"]):
+            extracted = extract_context_content(conv["user_text"])
+            rendered_content = render_ansi_to_html(extracted)
+        else:
+            rendered_content = render_markdown_text(conv["user_text"])
 
         # Collect all messages including from subsequent continuation conversations
         # This ensures long_texts from continuations appear with the original prompt
@@ -1789,7 +2318,12 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         page_num = (i // PROMPTS_PER_PAGE) + 1
         msg_id = make_msg_id(conv["timestamp"])
         link = f"page-{page_num:03d}.html#{msg_id}"
-        rendered_content = render_markdown_text(conv["user_text"])
+        # Check if this is /context output and render appropriately
+        if is_context_output(conv["user_text"]):
+            extracted = extract_context_content(conv["user_text"])
+            rendered_content = render_ansi_to_html(extracted)
+        else:
+            rendered_content = render_markdown_text(conv["user_text"])
 
         # Collect all messages including from subsequent continuation conversations
         # This ensures long_texts from continuations appear with the original prompt
