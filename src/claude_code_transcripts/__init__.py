@@ -126,8 +126,12 @@ class AnsiState:
         self.italic = False
         self.underline = False
         self.reverse = False
-        self.fg_color = None  # None or tuple: (r,g,b) for truecolor, (idx,) for 256-color
-        self.bg_color = None  # None or tuple: (r,g,b) for truecolor, (idx,) for 256-color
+        self.fg_color = (
+            None  # None or tuple: (r,g,b) for truecolor, (idx,) for 256-color
+        )
+        self.bg_color = (
+            None  # None or tuple: (r,g,b) for truecolor, (idx,) for 256-color
+        )
 
     def reset(self):
         """Reset all attributes to default."""
@@ -230,10 +234,22 @@ def get_256_color_palette():
         palette = []
         # Colors 0-15: standard colors (simplified)
         standard = [
-            (0, 0, 0), (128, 0, 0), (0, 128, 0), (128, 128, 0),
-            (0, 0, 128), (128, 0, 128), (0, 128, 128), (192, 192, 192),
-            (128, 128, 128), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-            (0, 0, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
+            (0, 0, 0),
+            (128, 0, 0),
+            (0, 128, 0),
+            (128, 128, 0),
+            (0, 0, 128),
+            (128, 0, 128),
+            (0, 128, 128),
+            (192, 192, 192),
+            (128, 128, 128),
+            (255, 0, 0),
+            (0, 255, 0),
+            (255, 255, 0),
+            (0, 0, 255),
+            (255, 0, 255),
+            (0, 255, 255),
+            (255, 255, 255),
         ]
         palette.extend(standard)
 
@@ -241,11 +257,13 @@ def get_256_color_palette():
         for r in range(6):
             for g in range(6):
                 for b in range(6):
-                    palette.append((
-                        0 if r == 0 else 55 + r * 40,
-                        0 if g == 0 else 55 + g * 40,
-                        0 if b == 0 else 55 + b * 40,
-                    ))
+                    palette.append(
+                        (
+                            0 if r == 0 else 55 + r * 40,
+                            0 if g == 0 else 55 + g * 40,
+                            0 if b == 0 else 55 + b * 40,
+                        )
+                    )
 
         # Colors 232-255: grayscale ramp
         for i in range(24):
@@ -260,10 +278,12 @@ class AnsiParser:
     """Parser for ANSI escape sequences with screen buffer simulation."""
 
     # ANSI CSI pattern: ESC [ params letter
-    CSI_PATTERN = re.compile(r'\x1b\[([0-9;?]*?)([A-Za-z])')
+    CSI_PATTERN = re.compile(r"\x1b\[([0-9;?]*?)([A-Za-z])")
 
     def __init__(self):
-        self.buffer = [[]]  # List of lists: each inner list is a line of (char, state) tuples
+        self.buffer = [
+            []
+        ]  # List of lists: each inner list is a line of (char, state) tuples
         self.cursor_row = 0
         self.cursor_col = 0
         self.current_state = AnsiState()
@@ -287,7 +307,7 @@ class AnsiParser:
             match = self.CSI_PATTERN.search(text, pos)
             if match:
                 # Process text before the escape sequence
-                before_text = text[pos:match.start()]
+                before_text = text[pos : match.start()]
                 self._write_text(before_text)
 
                 # Process the escape sequence
@@ -306,23 +326,30 @@ class AnsiParser:
     def _write_text(self, text):
         """Write text to buffer at current cursor position."""
         for char in text:
-            if char == '\n':
+            if char == "\n":
                 self.cursor_row += 1
                 self.cursor_col = 0
                 self._ensure_row(self.cursor_row)
-            elif char == '\r':
+            elif char == "\r":
                 self.cursor_col = 0
             else:
                 # Ensure row exists
                 self._ensure_row(self.cursor_row)
                 # Ensure column exists (fill with spaces if needed)
                 while len(self.buffer[self.cursor_row]) < self.cursor_col:
-                    self.buffer[self.cursor_row].append((' ', self.current_state.copy()))
+                    self.buffer[self.cursor_row].append(
+                        (" ", self.current_state.copy())
+                    )
                 # Write or overwrite character
                 if self.cursor_col < len(self.buffer[self.cursor_row]):
-                    self.buffer[self.cursor_row][self.cursor_col] = (char, self.current_state.copy())
+                    self.buffer[self.cursor_row][self.cursor_col] = (
+                        char,
+                        self.current_state.copy(),
+                    )
                 else:
-                    self.buffer[self.cursor_row].append((char, self.current_state.copy()))
+                    self.buffer[self.cursor_row].append(
+                        (char, self.current_state.copy())
+                    )
                 self.cursor_col += 1
 
     def _ensure_row(self, row):
@@ -333,52 +360,52 @@ class AnsiParser:
     def _process_csi(self, params_str, command):
         """Process a CSI escape sequence."""
         # Parse parameters
-        if params_str == '':
+        if params_str == "":
             params = []
-        elif '?' in params_str:
+        elif "?" in params_str:
             # Private mode sequences (e.g., ?2026h) - ignore
             params = []
         else:
-            params = [int(p) if p else 0 for p in params_str.split(';')]
+            params = [int(p) if p else 0 for p in params_str.split(";")]
 
-        if command == 'm':  # SGR - Select Graphic Rendition
+        if command == "m":  # SGR - Select Graphic Rendition
             if not params:
                 params = [0]
             parse_ansi_sgr(params, self.current_state)
-        elif command == 'A':  # Cursor Up
+        elif command == "A":  # Cursor Up
             n = params[0] if params else 1
             self.cursor_row = max(0, self.cursor_row - n)
-        elif command == 'B':  # Cursor Down
+        elif command == "B":  # Cursor Down
             n = params[0] if params else 1
             self.cursor_row += n
             self._ensure_row(self.cursor_row)
-        elif command == 'C':  # Cursor Forward
+        elif command == "C":  # Cursor Forward
             n = params[0] if params else 1
             self.cursor_col += n
-        elif command == 'D':  # Cursor Backward
+        elif command == "D":  # Cursor Backward
             n = params[0] if params else 1
             self.cursor_col = max(0, self.cursor_col - n)
-        elif command in ('H', 'f'):  # Cursor Position
+        elif command in ("H", "f"):  # Cursor Position
             row = (params[0] - 1) if params and params[0] > 0 else 0
             col = (params[1] - 1) if len(params) > 1 and params[1] > 0 else 0
             self.cursor_row = row
             self.cursor_col = col
             self._ensure_row(self.cursor_row)
-        elif command == 'G':  # Cursor Horizontal Absolute
+        elif command == "G":  # Cursor Horizontal Absolute
             col = (params[0] - 1) if params and params[0] > 0 else 0
             self.cursor_col = col
-        elif command == 's':  # Save Cursor Position
+        elif command == "s":  # Save Cursor Position
             self.saved_cursor = (self.cursor_row, self.cursor_col)
-        elif command == 'u':  # Restore Cursor Position
+        elif command == "u":  # Restore Cursor Position
             self.cursor_row, self.cursor_col = self.saved_cursor
             self._ensure_row(self.cursor_row)
-        elif command == 'K':  # Erase in Line
+        elif command == "K":  # Erase in Line
             mode = params[0] if params else 0
             self._erase_in_line(mode)
-        elif command == 'J':  # Erase in Display
+        elif command == "J":  # Erase in Display
             mode = params[0] if params else 0
             self._erase_in_display(mode)
-        elif command == 'h' or command == 'l':
+        elif command == "h" or command == "l":
             # Mode set/reset - ignore (e.g., bracketed paste ?2026h/l)
             pass
 
@@ -388,11 +415,11 @@ class AnsiParser:
         line = self.buffer[self.cursor_row]
 
         if mode == 0:  # Erase to end of line
-            self.buffer[self.cursor_row] = line[:self.cursor_col]
+            self.buffer[self.cursor_row] = line[: self.cursor_col]
         elif mode == 1:  # Erase to beginning of line
             # Replace beginning with spaces
             for i in range(min(self.cursor_col + 1, len(line))):
-                line[i] = (' ', self.current_state.copy())
+                line[i] = (" ", self.current_state.copy())
         elif mode == 2:  # Erase entire line
             self.buffer[self.cursor_row] = []
 
@@ -402,7 +429,7 @@ class AnsiParser:
             # Erase from cursor to end of current line
             self._erase_in_line(0)
             # Erase all lines below
-            self.buffer = self.buffer[:self.cursor_row + 1]
+            self.buffer = self.buffer[: self.cursor_row + 1]
         elif mode == 1:  # Erase above
             # Erase all lines above
             self.buffer = [[]] * self.cursor_row + [self.buffer[self.cursor_row]]
@@ -429,14 +456,14 @@ class AnsiParser:
                 line_chars = []
                 for char, state in row:
                     line_chars.append(char)
-                lines.append(''.join(line_chars))
-            return '\n'.join(lines)
+                lines.append("".join(line_chars))
+            return "\n".join(lines)
 
         # HTML mode
         lines = []
         for row in self.buffer:
             if not row:
-                lines.append('')
+                lines.append("")
                 continue
 
             line_html = []
@@ -460,22 +487,22 @@ class AnsiParser:
             if current_run:
                 line_html.append(self._render_run(current_run, current_state))
 
-            lines.append(''.join(line_html))
+            lines.append("".join(line_html))
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     def _states_equal(self, s1, s2):
         """Check if two AnsiState objects are equal."""
         if s1 is None or s2 is None:
             return s1 == s2
         return (
-            s1.bold == s2.bold and
-            s1.dim == s2.dim and
-            s1.italic == s2.italic and
-            s1.underline == s2.underline and
-            s1.reverse == s2.reverse and
-            s1.fg_color == s2.fg_color and
-            s1.bg_color == s2.bg_color
+            s1.bold == s2.bold
+            and s1.dim == s2.dim
+            and s1.italic == s2.italic
+            and s1.underline == s2.underline
+            and s1.reverse == s2.reverse
+            and s1.fg_color == s2.fg_color
+            and s1.bg_color == s2.bg_color
         )
 
     def _render_run(self, chars, state):
@@ -488,7 +515,7 @@ class AnsiParser:
         Returns:
             HTML string
         """
-        text = ''.join(chars)
+        text = "".join(chars)
         # Escape HTML
         text = html.escape(text)
 
@@ -509,11 +536,11 @@ class AnsiParser:
                 palette = get_256_color_palette()
                 if 0 <= fg[0] < len(palette):
                     r, g, b = palette[fg[0]]
-                    styles.append(f'color: rgb({r}, {g}, {b})')
+                    styles.append(f"color: rgb({r}, {g}, {b})")
             else:
                 # Truecolor
                 r, g, b = fg
-                styles.append(f'color: rgb({r}, {g}, {b})')
+                styles.append(f"color: rgb({r}, {g}, {b})")
 
         if bg:
             if len(bg) == 1:
@@ -521,37 +548,37 @@ class AnsiParser:
                 palette = get_256_color_palette()
                 if 0 <= bg[0] < len(palette):
                     r, g, b = palette[bg[0]]
-                    styles.append(f'background-color: rgb({r}, {g}, {b})')
+                    styles.append(f"background-color: rgb({r}, {g}, {b})")
             else:
                 # Truecolor
                 r, g, b = bg
-                styles.append(f'background-color: rgb({r}, {g}, {b})')
+                styles.append(f"background-color: rgb({r}, {g}, {b})")
 
         if state.bold:
-            styles.append('font-weight: bold')
+            styles.append("font-weight: bold")
 
         if state.dim:
-            styles.append('opacity: 0.6')
+            styles.append("opacity: 0.6")
 
         if state.italic:
-            styles.append('font-style: italic')
+            styles.append("font-style: italic")
 
         if state.underline:
-            styles.append('text-decoration: underline')
+            styles.append("text-decoration: underline")
 
-        style_str = '; '.join(styles)
+        style_str = "; ".join(styles)
         return f'<span style="{style_str}">{text}</span>'
 
     def _has_any_style(self, state):
         """Check if state has any non-default styling."""
         return (
-            state.bold or
-            state.dim or
-            state.italic or
-            state.underline or
-            state.reverse or
-            state.fg_color is not None or
-            state.bg_color is not None
+            state.bold
+            or state.dim
+            or state.italic
+            or state.underline
+            or state.reverse
+            or state.fg_color is not None
+            or state.bg_color is not None
         )
 
 
@@ -572,7 +599,7 @@ def render_ansi_to_html(text):
         match = parser.CSI_PATTERN.search(text, pos)
         if match:
             # Process text before the escape sequence
-            before_text = text[pos:match.start()]
+            before_text = text[pos : match.start()]
             parser._write_text(before_text)
 
             # Process the escape sequence

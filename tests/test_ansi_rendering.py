@@ -16,34 +16,34 @@ class TestDetectionAndExtraction:
 
     def test_detects_context_output_with_wrapper_and_header(self):
         """Detect /context output with wrapper tags and Context Usage header."""
-        content = '<local-command-stdout>\x1b[?2026h Context Usage\n⛁ ⛁ ⛁</local-command-stdout>'
+        content = "<local-command-stdout>\x1b[?2026h Context Usage\n⛁ ⛁ ⛁</local-command-stdout>"
         assert is_context_output(content) is True
 
     def test_does_not_detect_without_wrapper(self):
         """Do not detect content without wrapper tags."""
-        content = 'Context Usage\n⛁ ⛁ ⛁'
+        content = "Context Usage\n⛁ ⛁ ⛁"
         assert is_context_output(content) is False
 
     def test_does_not_detect_without_context_usage_header(self):
         """Do not detect content without Context Usage header."""
-        content = '<local-command-stdout>Some other output</local-command-stdout>'
+        content = "<local-command-stdout>Some other output</local-command-stdout>"
         assert is_context_output(content) is False
 
     def test_does_not_detect_regular_command_output(self):
         """Do not detect regular command output."""
-        content = '<local-command-stdout>npm install completed</local-command-stdout>'
+        content = "<local-command-stdout>npm install completed</local-command-stdout>"
         assert is_context_output(content) is False
 
     def test_extracts_content_by_stripping_wrapper(self):
         """Extract content by removing wrapper tags."""
-        content = '<local-command-stdout>Context Usage\n⛁ ⛁ ⛁</local-command-stdout>'
-        expected = 'Context Usage\n⛁ ⛁ ⛁'
+        content = "<local-command-stdout>Context Usage\n⛁ ⛁ ⛁</local-command-stdout>"
+        expected = "Context Usage\n⛁ ⛁ ⛁"
         assert extract_context_content(content) == expected
 
     def test_extracts_content_with_ansi_codes(self):
         """Extract content preserving ANSI escape sequences."""
-        content = '<local-command-stdout>\x1b[1mContext Usage\x1b[22m\n\x1b[38;2;136;136;136m⛁\x1b[39m</local-command-stdout>'
-        expected = '\x1b[1mContext Usage\x1b[22m\n\x1b[38;2;136;136;136m⛁\x1b[39m'
+        content = "<local-command-stdout>\x1b[1mContext Usage\x1b[22m\n\x1b[38;2;136;136;136m⛁\x1b[39m</local-command-stdout>"
+        expected = "\x1b[1mContext Usage\x1b[22m\n\x1b[38;2;136;136;136m⛁\x1b[39m"
         assert extract_context_content(content) == expected
 
     def test_extracts_multiline_context_output(self):
@@ -199,7 +199,7 @@ class TestNonSGRCSI:
         parser = AnsiParser()
         # Write first line, move down, write second line
         result = parser.parse("Line1\x1b[1BLine2")
-        lines = result.split('\n')
+        lines = result.split("\n")
         # Should have created a blank line between
         assert len(lines) >= 2
 
@@ -224,11 +224,11 @@ class TestNonSGRCSI:
         parser = AnsiParser()
         # Move to row 2, col 5 (1-indexed)
         result = parser.parse("\x1b[2;5HX")
-        lines = result.split('\n')
+        lines = result.split("\n")
         # Should have at least 2 lines
         assert len(lines) >= 2
         # Second line should have X at position 4 (0-indexed)
-        assert 'X' in lines[1]
+        assert "X" in lines[1]
 
     def test_horizontal_position_absolute(self):
         """Horizontal position (G) moves to column."""
@@ -292,7 +292,7 @@ class TestNonSGRCSI:
         """Newline advances to next line."""
         parser = AnsiParser()
         result = parser.parse("Line1\nLine2\nLine3")
-        lines = result.split('\n')
+        lines = result.split("\n")
         assert len(lines) == 3
         assert lines[0].strip() == "Line1"
         assert lines[1].strip() == "Line2"
@@ -341,19 +341,29 @@ class TestHTMLRendering:
     def test_underline_renders_with_text_decoration(self):
         """Underline text renders with text-decoration."""
         html = render_ansi_to_html("\x1b[4mUnderline\x1b[24m")
-        assert "text-decoration: underline" in html or "text-decoration:underline" in html
+        assert (
+            "text-decoration: underline" in html or "text-decoration:underline" in html
+        )
         assert "Underline" in html
 
     def test_truecolor_foreground_renders(self):
         """Truecolor foreground renders with RGB color."""
         html = render_ansi_to_html("\x1b[38;2;255;0;0mRed\x1b[39m")
-        assert "color: rgb(255,0,0)" in html or "color:rgb(255,0,0)" in html or "color: rgb(255, 0, 0)" in html
+        assert (
+            "color: rgb(255,0,0)" in html
+            or "color:rgb(255,0,0)" in html
+            or "color: rgb(255, 0, 0)" in html
+        )
         assert "Red" in html
 
     def test_truecolor_background_renders(self):
         """Truecolor background renders with RGB background."""
         html = render_ansi_to_html("\x1b[48;2;0;255;0mGreen BG\x1b[49m")
-        assert "background-color: rgb(0,255,0)" in html or "background-color:rgb(0,255,0)" in html or "background-color: rgb(0, 255, 0)" in html
+        assert (
+            "background-color: rgb(0,255,0)" in html
+            or "background-color:rgb(0,255,0)" in html
+            or "background-color: rgb(0, 255, 0)" in html
+        )
         assert "Green BG" in html
 
     def test_256_color_palette_renders(self):
@@ -365,7 +375,9 @@ class TestHTMLRendering:
 
     def test_reverse_video_swaps_colors(self):
         """Reverse video swaps foreground and background."""
-        html = render_ansi_to_html("\x1b[38;2;255;0;0m\x1b[48;2;0;0;255m\x1b[7mReversed\x1b[27m")
+        html = render_ansi_to_html(
+            "\x1b[38;2;255;0;0m\x1b[48;2;0;0;255m\x1b[7mReversed\x1b[27m"
+        )
         # When reversed, fg and bg should be swapped in the HTML
         # This means blue (0,0,255) should be in color, and red (255,0,0) in background
         assert "Reversed" in html
@@ -402,7 +414,7 @@ class TestHTMLRendering:
         # Should preserve the spaces
         assert "  indented" in html or "&nbsp;" in html
         # Should have newlines preserved (might be <br> or actual newlines in pre)
-        lines = html.split('\n')
+        lines = html.split("\n")
         assert len(lines) >= 2 or "<br" in html
 
     def test_dim_renders_with_opacity(self):
@@ -445,7 +457,7 @@ class TestIntegration:
         assert "mcp__chrome-devtools__click" in html
 
         # Verify HTML structure
-        assert "<pre class=\"ansi-context\">" in html
+        assert '<pre class="ansi-context">' in html
         assert "</pre>" in html
 
         # Verify colors are rendered (should have RGB colors from the escape codes)
