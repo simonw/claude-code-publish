@@ -1,7 +1,7 @@
 """Convert Claude Code session JSON to a clean mobile-friendly HTML page with pagination."""
 
-import json
 import html
+import json
 import os
 import platform
 import re
@@ -13,11 +13,11 @@ from datetime import datetime
 from pathlib import Path
 
 import click
-from click_default_group import DefaultGroup
 import httpx
-from jinja2 import Environment, PackageLoader
 import markdown
 import questionary
+from click_default_group import DefaultGroup
+from jinja2 import Environment, PackageLoader
 
 # Set up Jinja2 environment
 _jinja_env = Environment(
@@ -158,6 +158,20 @@ def _get_jsonl_summary(filepath, max_length=200):
     return "(no summary)"
 
 
+def _should_include_session(filepath, include_agents=False):
+    """Check if a session file should be included in listings.
+
+    Returns (True, summary) if the session should be included,
+    (False, None) if it should be skipped.
+    """
+    if not include_agents and filepath.name.startswith("agent-"):
+        return False, None
+    summary = get_session_summary(filepath)
+    if summary.lower() == "warmup" or summary == "(no summary)":
+        return False, None
+    return True, summary
+
+
 def find_local_sessions(folder, limit=10):
     """Find recent JSONL session files in the given folder.
 
@@ -170,15 +184,58 @@ def find_local_sessions(folder, limit=10):
 
     results = []
     for f in folder.glob("**/*.jsonl"):
-        if f.name.startswith("agent-"):
-            continue
-        summary = get_session_summary(f)
-        # Skip boring/empty sessions
-        if summary.lower() == "warmup" or summary == "(no summary)":
+        include, summary = _should_include_session(f)
+        if not include:
             continue
         results.append((f, summary))
 
     # Sort by modification time, most recent first
+    results.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+    return results[:limit]
+
+
+def find_sessions_for_project(projects_folder, project_path, limit=10):
+    """Find sessions for a specific project directory.
+
+    Returns (sessions_list, project_folder_exists) where:
+    - sessions_list: list of (Path, summary) tuples sorted by modification time
+    - project_folder_exists: True if the project folder exists, False otherwise
+    """
+    projects_folder = Path(projects_folder)
+    encoded = encode_path_to_folder_name(project_path)
+    project_folder = projects_folder / encoded
+
+    if not project_folder.exists():
+        return [], False
+
+    results = []
+    for f in project_folder.glob("*.jsonl"):
+        include, summary = _should_include_session(f)
+        if not include:
+            continue
+        results.append((f, summary))
+
+    results.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+    return results[:limit], True
+
+
+def find_sessions_excluding_project(projects_folder, exclude_project_path, limit=10):
+    """Find recent sessions from all projects except the specified one.
+
+    Returns a list of (Path, summary) tuples sorted by modification time.
+    """
+    projects_folder = Path(projects_folder)
+    exclude_encoded = encode_path_to_folder_name(exclude_project_path)
+
+    results = []
+    for f in projects_folder.glob("**/*.jsonl"):
+        if f.parent.name == exclude_encoded:
+            continue
+        include, summary = _should_include_session(f)
+        if not include:
+            continue
+        results.append((f, summary))
+
     results.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
     return results[:limit]
 
@@ -242,6 +299,29 @@ def get_project_display_name(folder_name):
     return folder_name
 
 
+def encode_path_to_folder_name(path):
+    """Encode a filesystem path to Claude's project folder naming convention.
+
+    This is the inverse of how Claude Code stores project folders:
+    - /Users/foo/bar -> -Users-foo-bar
+    - /Users/foo/.hidden -> -Users-foo--hidden
+
+    Note: This is NOT the inverse of get_project_display_name(), which is
+    a one-way beautifier that extracts meaningful project names for display.
+    """
+    # Convert to absolute path but don't resolve symlinks
+    # (resolve() doesn't work well with non-existent paths)
+    p = Path(path)
+    if not p.is_absolute():
+        p = Path.cwd() / p
+    path = str(p)
+    # Hidden directories: /. becomes --
+    encoded = path.replace("/.", "--")
+    # All other slashes become dashes
+    encoded = encoded.replace("/", "-")
+    return encoded
+
+
 def find_all_sessions(folder, include_agents=False):
     """Find all sessions in a Claude projects folder, grouped by project.
 
@@ -260,13 +340,8 @@ def find_all_sessions(folder, include_agents=False):
     projects = {}
 
     for session_file in folder.glob("**/*.jsonl"):
-        # Skip agent files unless requested
-        if not include_agents and session_file.name.startswith("agent-"):
-            continue
-
-        # Get summary and skip boring sessions
-        summary = get_session_summary(session_file)
-        if summary.lower() == "warmup" or summary == "(no summary)":
+        include, summary = _should_include_session(session_file, include_agents)
+        if not include:
             continue
 
         # Get project folder
@@ -1457,15 +1532,17 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         return
 
     click.echo("Loading local sessions...")
-    results = find_local_sessions(projects_folder, limit=limit)
+    cwd = os.getcwd()
 
-    if not results:
-        click.echo("No local sessions found.")
-        return
+    current_sessions, project_exists = find_sessions_for_project(
+        projects_folder, cwd, limit=limit
+    )
 
-    # Build choices for questionary
+    other_sessions = find_sessions_excluding_project(projects_folder, cwd, limit=limit)
+
     choices = []
-    for filepath, summary in results:
+
+    def format_session(filepath, summary, include_project=False):
         stat = filepath.stat()
         mod_time = datetime.fromtimestamp(stat.st_mtime)
         size_kb = stat.st_size / 1024
@@ -1474,7 +1551,31 @@ def local_cmd(output, output_auto, repo, gist, include_json, open_browser, limit
         if len(summary) > 50:
             summary = summary[:47] + "..."
         display = f"{date_str}  {size_kb:5.0f} KB  {summary}"
-        choices.append(questionary.Choice(title=display, value=filepath))
+        if include_project:
+            project_name = get_project_display_name(filepath.parent.name)
+            display = f"{display}  [{project_name}]"
+        return display
+
+    if current_sessions:
+        choices.append(questionary.Separator("── Current Project ──"))
+        for filepath, summary in current_sessions:
+            display = format_session(filepath, summary, include_project=False)
+            choices.append(questionary.Choice(title=display, value=filepath))
+    elif project_exists:
+        choices.append(questionary.Separator("── Current Project ──"))
+        choices.append(questionary.Separator("  (no sessions found)"))
+    else:
+        choices.append(questionary.Separator("── No sessions for this project ──"))
+
+    if other_sessions:
+        choices.append(questionary.Separator("── Other Projects ──"))
+        for filepath, summary in other_sessions:
+            display = format_session(filepath, summary, include_project=True)
+            choices.append(questionary.Choice(title=display, value=filepath))
+
+    if not current_sessions and not other_sessions:
+        click.echo("No local sessions found.")
+        return
 
     selected = questionary.select(
         "Select a session to convert:",

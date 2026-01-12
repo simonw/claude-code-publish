@@ -8,9 +8,12 @@ from click.testing import CliRunner
 
 from claude_code_transcripts import (
     cli,
+    encode_path_to_folder_name,
     find_all_sessions,
-    get_project_display_name,
+    find_sessions_excluding_project,
+    find_sessions_for_project,
     generate_batch_html,
+    get_project_display_name,
 )
 
 
@@ -86,6 +89,150 @@ class TestGetProjectDisplayName:
     def test_handles_simple_name(self):
         """Test handling already simple names."""
         assert get_project_display_name("simple-project") == "simple-project"
+
+
+class TestEncodePathToFolderName:
+    """Tests for encode_path_to_folder_name function."""
+
+    def test_encodes_simple_path(self):
+        """Test encoding simple filesystem path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_path = Path(tmpdir) / "foo" / "bar"
+            test_path.mkdir(parents=True)
+            encoded = encode_path_to_folder_name(str(test_path))
+            assert encoded.startswith("-")
+            assert "foo-bar" in encoded
+
+    def test_encodes_hidden_directory(self):
+        """Test encoding path with hidden directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_path = Path(tmpdir) / ".config"
+            test_path.mkdir(parents=True)
+            encoded = encode_path_to_folder_name(str(test_path))
+            assert "--config" in encoded
+
+    def test_encodes_root_path(self):
+        """Test encoding root path."""
+        encoded = encode_path_to_folder_name("/")
+        assert encoded == "-"
+
+    def test_encodes_multiple_hidden_directories(self):
+        """Test encoding path with multiple hidden directories."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_path = Path(tmpdir) / ".config" / ".cache"
+            test_path.mkdir(parents=True)
+            encoded = encode_path_to_folder_name(str(test_path))
+            assert "--config--cache" in encoded
+
+
+class TestFindSessionsForProject:
+    """Tests for find_sessions_for_project function."""
+
+    def test_finds_sessions_only_for_specified_project(self, mock_projects_dir):
+        """Test that only sessions from the specified project are returned."""
+        project_a_path = "/home/user/projects/project-a"
+        sessions, exists = find_sessions_for_project(
+            mock_projects_dir, project_a_path, limit=10
+        )
+
+        assert len(sessions) == 2
+        assert exists is True
+
+        for filepath, summary in sessions:
+            assert filepath.parent.name == "-home-user-projects-project-a"
+
+    def test_respects_limit_parameter(self, mock_projects_dir):
+        """Test that limit parameter is respected."""
+        project_a_path = "/home/user/projects/project-a"
+        sessions, exists = find_sessions_for_project(
+            mock_projects_dir, project_a_path, limit=1
+        )
+
+        assert len(sessions) == 1
+        assert exists is True
+
+    def test_returns_empty_for_nonexistent_project(self, mock_projects_dir):
+        """Test handling of non-existent project."""
+        nonexistent_path = "/home/user/projects/nonexistent"
+        sessions, exists = find_sessions_for_project(
+            mock_projects_dir, nonexistent_path, limit=10
+        )
+
+        assert sessions == []
+        assert exists is False
+
+    def test_returns_empty_for_project_with_only_agent_files(self, mock_projects_dir):
+        """Test that project with only agent files returns empty list."""
+        agent_only_project = mock_projects_dir / "-home-user-projects-agent-only"
+        agent_only_project.mkdir(parents=True)
+        agent_file = agent_only_project / "agent-test.jsonl"
+        agent_file.write_text(
+            '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "test"}}\n'
+        )
+
+        agent_only_path = "/home/user/projects/agent-only"
+        sessions, exists = find_sessions_for_project(
+            mock_projects_dir, agent_only_path, limit=10
+        )
+
+        assert sessions == []
+        assert exists is True
+
+    def test_excludes_warmup_sessions(self, mock_projects_dir):
+        """Test that warmup sessions are excluded."""
+        project_b_path = "/home/user/projects/project-b"
+        sessions, exists = find_sessions_for_project(
+            mock_projects_dir, project_b_path, limit=10
+        )
+
+        assert len(sessions) == 1
+        assert exists is True
+
+
+class TestFindSessionsExcludingProject:
+    """Tests for find_sessions_excluding_project function."""
+
+    def test_finds_sessions_excluding_specified_project(self, mock_projects_dir):
+        """Test that sessions from the excluded project are not returned."""
+        exclude_path = "/home/user/projects/project-a"
+        sessions = find_sessions_excluding_project(
+            mock_projects_dir, exclude_path, limit=10
+        )
+
+        assert len(sessions) == 1
+
+        for filepath, summary in sessions:
+            assert filepath.parent.name != "-home-user-projects-project-a"
+            assert filepath.parent.name == "-home-user-projects-project-b"
+
+    def test_respects_limit_parameter(self, mock_projects_dir):
+        """Test that limit parameter is respected."""
+        exclude_path = "/home/user/projects/project-a"
+        sessions = find_sessions_excluding_project(
+            mock_projects_dir, exclude_path, limit=1
+        )
+
+        assert len(sessions) == 1
+
+    def test_excludes_agent_files(self, mock_projects_dir):
+        """Test that agent files are excluded."""
+        exclude_path = "/home/user/projects/nonexistent"
+        sessions = find_sessions_excluding_project(
+            mock_projects_dir, exclude_path, limit=10
+        )
+
+        for filepath, summary in sessions:
+            assert not filepath.name.startswith("agent-")
+
+    def test_excludes_warmup_sessions(self, mock_projects_dir):
+        """Test that warmup sessions are excluded."""
+        exclude_path = "/home/user/projects/nonexistent"
+        sessions = find_sessions_excluding_project(
+            mock_projects_dir, exclude_path, limit=10
+        )
+
+        for filepath, summary in sessions:
+            assert summary.lower() != "warmup"
 
 
 class TestFindAllSessions:
@@ -420,7 +567,7 @@ class TestJsonCommandWithUrl:
 
     def test_json_command_accepts_url(self, output_dir):
         """Test that json command can accept a URL starting with http:// or https://."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         # Sample JSONL content
         jsonl_content = (
@@ -458,7 +605,7 @@ class TestJsonCommandWithUrl:
 
     def test_json_command_accepts_http_url(self, output_dir):
         """Test that json command can accept http:// URLs."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         jsonl_content = '{"type": "user", "timestamp": "2025-01-01T10:00:00.000Z", "message": {"role": "user", "content": "Hello"}}\n'
 
@@ -486,6 +633,7 @@ class TestJsonCommandWithUrl:
     def test_json_command_url_fetch_error(self, output_dir):
         """Test that json command handles URL fetch errors gracefully."""
         from unittest.mock import patch
+
         import httpx
 
         runner = CliRunner()
