@@ -1177,6 +1177,26 @@ class TestGetSessionSummary:
         assert len(summary) <= 100
         assert summary.endswith("...")
 
+    def test_gets_custom_title_from_jsonl(self, tmp_path):
+        """Test extracting custom title from JSONL file (set via /rename)."""
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(
+            '{"type":"custom-title","customTitle":"GIT stuff","sessionId":"abc123"}\n'
+            '{"type":"user","message":{"content":"Hello"}}\n'
+        )
+        summary = get_session_summary(jsonl_file)
+        assert summary == "GIT stuff"
+
+    def test_custom_title_takes_priority_over_summary(self, tmp_path):
+        """Test that custom title takes priority over summary entry."""
+        jsonl_file = tmp_path / "test.jsonl"
+        jsonl_file.write_text(
+            '{"type":"custom-title","customTitle":"My Custom Title","sessionId":"abc123"}\n'
+            '{"type":"summary","summary":"Auto-generated summary"}\n'
+        )
+        summary = get_session_summary(jsonl_file)
+        assert summary == "My Custom Title"
+
 
 class TestFindLocalSessions:
     """Tests for find_local_sessions which discovers local JSONL files."""
