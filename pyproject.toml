@@ -9,6 +9,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    "boto3",
     "click",
     "click-default-group",
     "httpx",
@@ -32,6 +33,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "moto[s3]>=5.0.0",
     "pytest>=9.0.2",
     "pytest-httpx>=0.35.0",
     "syrupy>=5.0.0",
