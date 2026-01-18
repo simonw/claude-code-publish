@@ -415,6 +415,57 @@ class TestAllCommand:
         assert not (output_dir / "index.html").exists()
 
 
+class TestAllCommandNewUi:
+    """Tests for the --new-ui flag on the all command."""
+
+    def test_all_command_has_new_ui_flag(self):
+        """Test that all command accepts --new-ui flag."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["all", "--help"])
+        assert result.exit_code == 0
+        assert "--new-ui" in result.output
+
+    def test_all_new_ui_generates_unified_html(self, mock_projects_dir, output_dir):
+        """Test that --new-ui generates unified.html for each session."""
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "all",
+                "--source",
+                str(mock_projects_dir),
+                "--output",
+                str(output_dir),
+                "--new-ui",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # Check that master index exists
+        assert (output_dir / "index.html").exists()
+        # Check that sessions have unified.html instead of index.html
+        project_a_dir = output_dir / "project-a"
+        session_dirs = [d for d in project_a_dir.iterdir() if d.is_dir()]
+        assert len(session_dirs) > 0
+        # At least one session should have unified.html
+        for session_dir in session_dirs:
+            assert (session_dir / "unified.html").exists()
+
+    def test_generate_batch_html_new_ui_parameter(self, mock_projects_dir, output_dir):
+        """Test that generate_batch_html accepts and uses new_ui parameter."""
+        stats = generate_batch_html(mock_projects_dir, output_dir, new_ui=True)
+
+        # Should succeed
+        assert stats["total_sessions"] >= 1
+
+        # Sessions should have unified.html
+        for project_dir in output_dir.iterdir():
+            if project_dir.is_dir() and project_dir.name != "index.html":
+                for session_dir in project_dir.iterdir():
+                    if session_dir.is_dir():
+                        assert (session_dir / "unified.html").exists()
+
+
 class TestJsonCommandWithUrl:
     """Tests for the json command with URL support."""
 

@@ -304,7 +304,11 @@ def find_all_sessions(folder, include_agents=False):
 
 
 def generate_batch_html(
-    source_folder, output_dir, include_agents=False, progress_callback=None
+    source_folder,
+    output_dir,
+    include_agents=False,
+    progress_callback=None,
+    new_ui=False,
 ):
     """Generate HTML archive for all sessions in a Claude projects folder.
 
@@ -319,6 +323,7 @@ def generate_batch_html(
         include_agents: Whether to include agent-* session files
         progress_callback: Optional callback(project_name, session_name, current, total)
             called after each session is processed
+        new_ui: Whether to generate unified single-page UI for each session
 
     Returns statistics dict with total_projects, total_sessions, failed_sessions, output_dir.
     """
@@ -347,7 +352,10 @@ def generate_batch_html(
 
             # Generate transcript HTML with error handling
             try:
-                generate_html(session["path"], session_dir)
+                if new_ui:
+                    generate_unified_html(session["path"], session_dir)
+                else:
+                    generate_html(session["path"], session_dir)
                 successful_sessions += 1
             except Exception as e:
                 failed_sessions.append(
@@ -3650,7 +3658,13 @@ def web_cmd(
     is_flag=True,
     help="Suppress all output except errors.",
 )
-def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
+@click.option(
+    "--new-ui",
+    "new_ui",
+    is_flag=True,
+    help="Generate a modern unified single-page UI with sidebar navigation and search for each session.",
+)
+def all_cmd(source, output, include_agents, dry_run, open_browser, quiet, new_ui):
     """Convert all local Claude Code sessions to a browsable HTML archive.
 
     Creates a directory structure with:
@@ -3716,6 +3730,7 @@ def all_cmd(source, output, include_agents, dry_run, open_browser, quiet):
         output,
         include_agents=include_agents,
         progress_callback=on_progress,
+        new_ui=new_ui,
     )
 
     # Report any failures

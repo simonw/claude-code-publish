@@ -65,6 +65,7 @@ Use the `--new-ui` flag to generate a modern single-page transcript view with en
 claude-code-transcripts --new-ui
 claude-code-transcripts json session.json --new-ui
 claude-code-transcripts local --new-ui
+claude-code-transcripts all --new-ui
 ```
 
 The unified UI includes:
@@ -197,6 +198,7 @@ Options:
 - `--include-agents` - include agent session files (excluded by default)
 - `--dry-run` - show what would be converted without creating files
 - `--open` - open the generated archive in your default browser
+- `--new-ui` - generate modern unified single-page UI for each session
 - `-q, --quiet` - suppress all output except errors
 
 Examples:
@@ -213,6 +215,12 @@ claude-code-transcripts all -o ./my-archive
 
 # Include agent sessions
 claude-code-transcripts all --include-agents
+
+# Convert all sessions with the modern unified UI
+claude-code-transcripts all --new-ui --open
+
+# Full example with all options
+claude-code-transcripts all -o ./my-archive --include-agents --new-ui --open
 ```
 
 ## Development
