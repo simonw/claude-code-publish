@@ -131,6 +131,22 @@ class TestRenderFunctions:
         assert render_markdown_text("") == ""
         assert render_markdown_text(None) == ""
 
+    def test_render_markdown_text_bullets_without_blank_line(self):
+        """Test that bullet points work even without a blank line before them.
+
+        This is a common pattern in Claude's responses where lists immediately
+        follow text without a blank line separator.
+        """
+        text = "Here's a list:\n- Item 1\n- Item 2\n- Item 3"
+        result = render_markdown_text(text)
+        # Should render as a proper list, not as plain text
+        assert "<ul>" in result
+        assert "<li>Item 1</li>" in result
+        assert "<li>Item 2</li>" in result
+        assert "<li>Item 3</li>" in result
+        # Should NOT render the dashes as literal text
+        assert "- Item 1" not in result
+
     def test_format_json(self, snapshot_html):
         """Test JSON formatting."""
         result = format_json({"key": "value", "number": 42, "nested": {"a": 1}})

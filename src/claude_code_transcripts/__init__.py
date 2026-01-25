@@ -701,7 +701,11 @@ def format_json(obj):
 def render_markdown_text(text):
     if not text:
         return ""
-    return markdown.markdown(text, extensions=["fenced_code", "tables"])
+    # Use mdx_breakless_lists extension to handle lists without blank lines
+    # This allows GitHub-flavored markdown style lists
+    return markdown.markdown(
+        text, extensions=["fenced_code", "tables", "mdx_breakless_lists"]
+    )
 
 
 def is_json_like(text):
