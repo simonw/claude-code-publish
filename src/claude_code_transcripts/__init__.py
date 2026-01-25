@@ -619,6 +619,49 @@ def detect_github_repo(loglines):
     return None
 
 
+def enrich_sessions_with_repos(sessions, token, org_uuid, fetch_fn=None):
+    """Enrich sessions with repo information by fetching each session's details.
+
+    Args:
+        sessions: List of session dicts from the API
+        token: API access token
+        org_uuid: Organization UUID
+        fetch_fn: Optional function to fetch session data (for testing)
+
+    Returns:
+        List of session dicts with 'repo' key added
+    """
+    if fetch_fn is None:
+        fetch_fn = fetch_session
+
+    enriched = []
+    for session in sessions:
+        session_copy = dict(session)
+        try:
+            session_data = fetch_fn(token, org_uuid, session["id"])
+            loglines = session_data.get("loglines", [])
+            session_copy["repo"] = detect_github_repo(loglines)
+        except Exception:
+            session_copy["repo"] = None
+        enriched.append(session_copy)
+    return enriched
+
+
+def filter_sessions_by_repo(sessions, repo):
+    """Filter sessions by repo.
+
+    Args:
+        sessions: List of session dicts with 'repo' key
+        repo: Repo to filter by (owner/name), or None to return all
+
+    Returns:
+        Filtered list of sessions
+    """
+    if repo is None:
+        return sessions
+    return [s for s in sessions if s.get("repo") == repo]
+
+
 def format_json(obj):
     try:
         if isinstance(obj, str):
@@ -1691,15 +1734,19 @@ def resolve_credentials(token, org_uuid):
 def format_session_for_display(session_data):
     """Format a session for display in the list or picker.
 
+    Shows repo first (if available), then date, then title.
     Returns a formatted string.
     """
-    session_id = session_data.get("id", "unknown")
     title = session_data.get("title", "Untitled")
     created_at = session_data.get("created_at", "")
+    repo = session_data.get("repo")
     # Truncate title if too long
-    if len(title) > 60:
-        title = title[:57] + "..."
-    return f"{session_id}  {created_at[:19] if created_at else 'N/A':19}  {title}"
+    if len(title) > 50:
+        title = title[:47] + "..."
+    # Format: repo (or placeholder)  date  title
+    repo_display = repo if repo else "(no repo)"
+    date_display = created_at[:19] if created_at else "N/A"
+    return f"{repo_display:30}  {date_display:19}  {title}"
 
 
 def generate_html_from_session_data(session_data, output_dir, github_repo=None):
@@ -1891,7 +1938,7 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
 )
 @click.option(
     "--repo",
-    help="GitHub repo (owner/name) for commit links. Auto-detected from git push output if not specified.",
+    help="GitHub repo (owner/name). Filters session list and sets default for commit links.",
 )
 @click.option(
     "--gist",
@@ -1945,16 +1992,21 @@ def web_cmd(
         if not sessions:
             raise click.ClickException("No sessions found.")
 
+        # Enrich sessions with repo information
+        click.echo("Fetching session details to detect repos...")
+        sessions = enrich_sessions_with_repos(sessions, token, org_uuid)
+
+        # Filter by repo if specified
+        if repo:
+            sessions = filter_sessions_by_repo(sessions, repo)
+            if not sessions:
+                raise click.ClickException(f"No sessions found for repo: {repo}")
+
         # Build choices for questionary
         choices = []
         for s in sessions:
             sid = s.get("id", "unknown")
-            title = s.get("title", "Untitled")
-            created_at = s.get("created_at", "")
-            # Truncate title if too long
-            if len(title) > 50:
-                title = title[:47] + "..."
-            display = f"{created_at[:19] if created_at else 'N/A':19}  {title}"
+            display = format_session_for_display(s)
             choices.append(questionary.Choice(title=display, value=sid))
 
         selected = questionary.select(
