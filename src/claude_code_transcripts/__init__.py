@@ -87,45 +87,80 @@ ANTHROPIC_VERSION = "2023-06-01"
 MODEL_PRICING = {
     # Claude Opus 4.5
     "claude-opus-4-5-20250514": {
+        "input": 5.0,  # $5 per million input tokens
+        "output": 25.0,  # $25 per million output tokens
+        "cache_read": 0.50,  # Cache hits & refreshes
+        "cache_write": 6.25,  # 5m cache writes
+    },
+    # Claude Opus 4.1
+    "claude-opus-4-1-20250514": {
         "input": 15.0,  # $15 per million input tokens
         "output": 75.0,  # $75 per million output tokens
-        "cache_read": 1.50,  # 90% discount on cached reads
-        "cache_write": 18.75,  # 25% premium for cache creation
-    },
-    # Claude Sonnet 4.5
-    "claude-sonnet-4-5-20250514": {
-        "input": 3.0,  # $3 per million input tokens
-        "output": 15.0,  # $15 per million output tokens
-        "cache_read": 0.30,  # 90% discount on cached reads
-        "cache_write": 3.75,  # 25% premium for cache creation
-    },
-    # Claude Sonnet 4
-    "claude-sonnet-4-20250514": {
-        "input": 3.0,  # $3 per million input tokens
-        "output": 15.0,  # $15 per million output tokens
-        "cache_read": 0.30,  # 90% discount on cached reads
-        "cache_write": 3.75,  # 25% premium for cache creation
+        "cache_read": 1.50,  # Cache hits & refreshes
+        "cache_write": 18.75,  # 5m cache writes
     },
     # Claude Opus 4
     "claude-opus-4-20250514": {
         "input": 15.0,  # $15 per million input tokens
         "output": 75.0,  # $75 per million output tokens
-        "cache_read": 1.50,  # 90% discount on cached reads
-        "cache_write": 18.75,  # 25% premium for cache creation
+        "cache_read": 1.50,  # Cache hits & refreshes
+        "cache_write": 18.75,  # 5m cache writes
     },
-    # Claude Sonnet 4.1
-    "claude-sonnet-4-1-20250514": {
+    # Claude Sonnet 4.5
+    "claude-sonnet-4-5-20250514": {
         "input": 3.0,  # $3 per million input tokens
         "output": 15.0,  # $15 per million output tokens
-        "cache_read": 0.30,  # 90% discount on cached reads
-        "cache_write": 3.75,  # 25% premium for cache creation
+        "cache_read": 0.30,  # Cache hits & refreshes
+        "cache_write": 3.75,  # 5m cache writes
     },
-    # Claude 3.5 Sonnet (legacy)
+    # Claude Sonnet 4
+    "claude-sonnet-4-20250514": {
+        "input": 3.0,  # $3 per million input tokens
+        "output": 15.0,  # $15 per million output tokens
+        "cache_read": 0.30,  # Cache hits & refreshes
+        "cache_write": 3.75,  # 5m cache writes
+    },
+    # Claude Haiku 4.5
+    "claude-haiku-4-5-20250514": {
+        "input": 1.0,  # $1 per million input tokens
+        "output": 5.0,  # $5 per million output tokens
+        "cache_read": 0.10,  # Cache hits & refreshes
+        "cache_write": 1.25,  # 5m cache writes
+    },
+    # Claude Haiku 3.5
+    "claude-3-5-haiku-20241022": {
+        "input": 0.80,  # $0.80 per million input tokens
+        "output": 4.0,  # $4 per million output tokens
+        "cache_read": 0.08,  # Cache hits & refreshes
+        "cache_write": 1.0,  # 5m cache writes
+    },
+    # Claude 3.5 Sonnet (deprecated)
     "claude-3-5-sonnet-20241022": {
         "input": 3.0,
         "output": 15.0,
         "cache_read": 0.30,
         "cache_write": 3.75,
+    },
+    # Claude Sonnet 3.7 (deprecated)
+    "claude-3-7-sonnet-20250219": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_read": 0.30,
+        "cache_write": 3.75,
+    },
+    # Claude Opus 3 (deprecated)
+    "claude-3-opus-20240229": {
+        "input": 15.0,
+        "output": 75.0,
+        "cache_read": 1.50,
+        "cache_write": 18.75,
+    },
+    # Claude Haiku 3
+    "claude-3-haiku-20240307": {
+        "input": 0.25,
+        "output": 1.25,
+        "cache_read": 0.03,
+        "cache_write": 0.30,
     },
     # Default pricing (use Sonnet pricing as default)
     "default": {
