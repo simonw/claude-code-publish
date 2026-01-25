@@ -115,6 +115,7 @@ def get_session_summary(filepath, max_length=200):
 def _get_jsonl_summary(filepath, max_length=200):
     """Extract summary from JSONL file."""
     try:
+        # First priority: custom title (user renamed session via /rename)
         with open(filepath, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -122,7 +123,22 @@ def _get_jsonl_summary(filepath, max_length=200):
                     continue
                 try:
                     obj = json.loads(line)
-                    # First priority: summary type entries
+                    if obj.get("type") == "custom-title" and obj.get("customTitle"):
+                        title = obj["customTitle"]
+                        if len(title) > max_length:
+                            return title[: max_length - 3] + "..."
+                        return title
+                except json.JSONDecodeError:
+                    continue
+
+        # Second priority: summary type entries
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
                     if obj.get("type") == "summary" and obj.get("summary"):
                         summary = obj["summary"]
                         if len(summary) > max_length:
@@ -131,7 +147,7 @@ def _get_jsonl_summary(filepath, max_length=200):
                 except json.JSONDecodeError:
                     continue
 
-        # Second pass: find first non-meta user message
+        # Third pass: find first non-meta user message
         with open(filepath, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
