@@ -12,6 +12,8 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
+import boto3
+from botocore.exceptions import ClientError
 import click
 from click_default_group import DefaultGroup
 import httpx
@@ -1633,6 +1635,52 @@ def fetch_url_to_tempfile(url):
     return temp_file
 
 
+def is_s3_url(path):
+    """Check if a path is an S3 URL (starts with s3://)."""
+    return path.startswith("s3://")
+
+
+def fetch_s3_to_tempfile(s3_url):
+    """Fetch an S3 object and save to a temporary file.
+
+    Returns the Path to the temporary file.
+    Raises click.ClickException on S3 errors.
+    """
+    # Parse s3://bucket/key format
+    if not s3_url.startswith("s3://"):
+        raise click.ClickException(f"Invalid S3 URL: {s3_url}")
+
+    parts = s3_url[5:].split("/", 1)  # Remove "s3://" prefix
+    if len(parts) < 2:
+        raise click.ClickException(f"Invalid S3 URL (missing key): {s3_url}")
+
+    bucket = parts[0]
+    key = parts[1]
+
+    try:
+        s3 = boto3.client("s3")
+        response = s3.get_object(Bucket=bucket, Key=key)
+        content = response["Body"].read().decode("utf-8")
+    except ClientError as e:
+        raise click.ClickException(f"Failed to fetch S3 object: {e}")
+
+    # Determine file extension from key
+    if key.endswith(".jsonl"):
+        suffix = ".jsonl"
+    elif key.endswith(".json"):
+        suffix = ".json"
+    else:
+        suffix = ".jsonl"  # Default to JSONL
+
+    # Extract a name from the key for the temp file
+    key_name = Path(key).stem or "session"
+
+    temp_dir = Path(tempfile.gettempdir())
+    temp_file = temp_dir / f"claude-s3-{key_name}{suffix}"
+    temp_file.write_text(content, encoding="utf-8")
+    return temp_file
+
+
 @cli.command("json")
 @click.argument("json_file", type=click.Path())
 @click.option(
@@ -1677,6 +1725,13 @@ def json_cmd(json_file, output, output_auto, repo, gist, include_json, open_brow
         json_file_path = temp_file
         # Use URL path for naming
         url_name = Path(json_file.split("?")[0]).stem or "session"
+    elif is_s3_url(json_file):
+        click.echo(f"Fetching {json_file}...")
+        temp_file = fetch_s3_to_tempfile(json_file)
+        json_file_path = temp_file
+        # Use S3 key for naming
+        s3_key = json_file[5:].split("/", 1)[1] if "/" in json_file[5:] else "session"
+        url_name = Path(s3_key).stem or "session"
     else:
         # Validate that local file exists
         json_file_path = Path(json_file)
