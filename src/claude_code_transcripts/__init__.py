@@ -43,10 +43,165 @@ GITHUB_REPO_PATTERN = re.compile(
     r"github\.com/([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)/pull/new/"
 )
 
+# Regex to strip ANSI escape codes from terminal output
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[\?[0-9]+[hl]"
+)
+
+# Regex patterns for slash command detection
+COMMAND_NAME_PATTERN = re.compile(r"<command-name>([^<]+)</command-name>")
+LOCAL_STDOUT_PATTERN = re.compile(
+    r"<local-command-stdout>(.*?)</local-command-stdout>", re.DOTALL
+)
+
 PROMPTS_PER_PAGE = 5
 LONG_TEXT_THRESHOLD = (
     300  # Characters - text blocks longer than this are shown in index
 )
+
+
+# 256-color palette to hex mapping for common colors used in Claude Code output
+ANSI_256_COLORS = {
+    37: "#00afaf",  # cyan/teal
+    135: "#af5fd7",  # purple
+    174: "#d78787",  # pink/salmon
+    244: "#808080",  # gray
+    246: "#949494",  # lighter gray
+}
+
+# Icons used in Claude Code context display that need fixed-width rendering
+CONTEXT_ICONS = {"⛁", "⛀", "⛶"}
+
+
+def ansi_to_html(text):
+    """Convert ANSI escape codes to HTML with colored spans.
+
+    Converts 256-color ANSI codes to HTML spans with appropriate colors.
+    Converts bold codes to <strong> tags.
+    Strips other ANSI codes (reset, private mode sequences).
+    """
+    if not text:
+        return text
+
+    # First strip private mode sequences using the compiled pattern
+    text = ANSI_ESCAPE_PATTERN.sub(
+        lambda m: m.group() if m.group().endswith("m") else "", text
+    )
+
+    result = []
+    current_color = None
+    in_bold = False
+    i = 0
+
+    while i < len(text):
+        # Check for ANSI escape sequence
+        if text[i : i + 2] == "\x1b[":
+            # Find the end of the sequence
+            end = i + 2
+            while end < len(text) and text[end] not in "mABCDHJKfnsu":
+                end += 1
+            if end < len(text):
+                seq = text[i + 2 : end]
+                code_char = text[end]
+
+                if code_char == "m":  # Color/style code
+                    # Parse the sequence
+                    if seq == "0" or seq == "":
+                        # Full reset - close any open tags
+                        if current_color:
+                            result.append("</span>")
+                            current_color = None
+                        if in_bold:
+                            result.append("</strong>")
+                            in_bold = False
+                    elif seq == "39":
+                        # Reset foreground color only
+                        if current_color:
+                            result.append("</span>")
+                            current_color = None
+                    elif seq.startswith("38;5;"):
+                        # 256-color foreground - close previous color span first
+                        if current_color:
+                            result.append("</span>")
+                            current_color = None
+                        try:
+                            color_num = int(seq[5:])
+                            if color_num in ANSI_256_COLORS:
+                                hex_color = ANSI_256_COLORS[color_num]
+                                result.append(f'<span style="color:{hex_color}">')
+                                current_color = hex_color
+                        except ValueError:
+                            pass
+                    elif seq == "1":
+                        # Bold - only open if not already bold
+                        if not in_bold:
+                            result.append("<strong>")
+                            in_bold = True
+                    elif seq == "22":
+                        # End bold - only close if currently bold
+                        if in_bold:
+                            result.append("</strong>")
+                            in_bold = False
+
+                i = end + 1
+                continue
+
+        # Regular character - escape HTML and handle fixed-width icons
+        char = text[i]
+        if char == "<":
+            result.append("&lt;")
+        elif char == ">":
+            result.append("&gt;")
+        elif char == "&":
+            result.append("&amp;")
+        elif char in CONTEXT_ICONS:
+            # Wrap icons in fixed-width span for grid alignment
+            result.append(f'<span class="ctx-icon">{char}</span>')
+        else:
+            result.append(char)
+        i += 1
+
+    # Close any open tags
+    if current_color:
+        result.append("</span>")
+    if in_bold:
+        result.append("</strong>")
+
+    return "".join(result)
+
+
+def is_slash_command_message(content):
+    """Check if content is a slash command invocation message."""
+    if not isinstance(content, str):
+        return False
+    return bool(COMMAND_NAME_PATTERN.search(content))
+
+
+def parse_slash_command(content):
+    """Parse slash command name from content.
+
+    Returns the command name (e.g., '/context') or None if not a command.
+    """
+    match = COMMAND_NAME_PATTERN.search(content)
+    return match.group(1) if match else None
+
+
+def is_command_stdout_message(content):
+    """Check if content is command stdout output."""
+    if not isinstance(content, str):
+        return False
+    return "<local-command-stdout>" in content
+
+
+def extract_command_stdout(content):
+    """Extract and clean command stdout content.
+
+    Removes the XML wrapper and converts ANSI escape codes to HTML colors.
+    """
+    match = LOCAL_STDOUT_PATTERN.search(content)
+    if not match:
+        return content
+    return ansi_to_html(match.group(1).strip())
 
 
 def extract_text_from_content(content):
@@ -466,7 +621,7 @@ def parse_session_file(filepath):
 
 def _parse_jsonl_file(filepath):
     """Parse JSONL file and convert to standard format."""
-    loglines = []
+    raw_entries = []
 
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
@@ -492,9 +647,41 @@ def _parse_jsonl_file(filepath):
                 if obj.get("isCompactSummary"):
                     entry["isCompactSummary"] = True
 
-                loglines.append(entry)
+                raw_entries.append(entry)
             except json.JSONDecodeError:
                 continue
+
+    # Merge slash command entries with their stdout output
+    loglines = []
+    i = 0
+    while i < len(raw_entries):
+        entry = raw_entries[i]
+        content = entry.get("message", {}).get("content", "")
+
+        if isinstance(content, str) and is_slash_command_message(content):
+            cmd_name = parse_slash_command(content)
+            stdout = ""
+
+            # Look ahead for stdout entry
+            if i + 1 < len(raw_entries):
+                next_content = raw_entries[i + 1].get("message", {}).get("content", "")
+                if isinstance(next_content, str) and is_command_stdout_message(
+                    next_content
+                ):
+                    stdout = extract_command_stdout(next_content)
+                    i += 1  # Skip the stdout entry
+
+            # Store merged slash command info
+            entry["_slash_command"] = {"name": cmd_name, "output": stdout}
+            loglines.append(entry)
+        elif isinstance(content, str) and is_command_stdout_message(content):
+            # Standalone stdout without preceding command - skip it
+            # (normally shouldn't happen, but handle gracefully)
+            pass
+        else:
+            loglines.append(entry)
+
+        i += 1
 
     return {"loglines": loglines}
 
@@ -841,6 +1028,11 @@ def render_content_block(block):
 
 
 def render_user_message_content(message_data):
+    # Check for slash command (merged from parsing)
+    slash_cmd = message_data.get("_slash_command")
+    if slash_cmd:
+        return _macros.slash_command(slash_cmd["name"], slash_cmd["output"])
+
     content = message_data.get("content", "")
     if isinstance(content, str):
         if is_json_like(content):
@@ -1107,6 +1299,14 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
 .search-result-content { padding: 12px; }
 .search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
+.slash-command { margin: 8px 0; }
+.slash-command-summary { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 6px; font-family: monospace; cursor: pointer; list-style: none; }
+.slash-command-summary::-webkit-details-marker { display: none; }
+.slash-command-summary:hover { background: #e1bee7; }
+.slash-command-icon { color: var(--tool-border); }
+.slash-command-name { font-weight: 600; color: var(--tool-border); }
+.slash-command-output { margin: 8px 0 0 0; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
+.ctx-icon { display: inline-block; width: 1.2em; text-align: center; }
 @media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 """
 
@@ -1327,6 +1527,10 @@ def generate_html(json_path, output_dir, github_repo=None):
         message_data = entry.get("message", {})
         if not message_data:
             continue
+        # Include slash command info if present
+        if entry.get("_slash_command"):
+            message_data = dict(message_data)  # Don't mutate original
+            message_data["_slash_command"] = entry["_slash_command"]
         # Convert message dict to JSON string for compatibility with existing render functions
         message_json = json.dumps(message_data)
         is_user_prompt = False
@@ -1408,6 +1612,9 @@ def generate_html(json_path, output_dir, github_repo=None):
         if conv.get("is_continuation"):
             continue
         if conv["user_text"].startswith("Stop hook feedback:"):
+            continue
+        # Skip slash command entries from index timeline
+        if is_slash_command_message(conv["user_text"]):
             continue
         prompt_num += 1
         page_num = (i // PROMPTS_PER_PAGE) + 1
@@ -1801,6 +2008,10 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         message_data = entry.get("message", {})
         if not message_data:
             continue
+        # Include slash command info if present
+        if entry.get("_slash_command"):
+            message_data = dict(message_data)  # Don't mutate original
+            message_data["_slash_command"] = entry["_slash_command"]
         # Convert message dict to JSON string for compatibility with existing render functions
         message_json = json.dumps(message_data)
         is_user_prompt = False
@@ -1882,6 +2093,9 @@ def generate_html_from_session_data(session_data, output_dir, github_repo=None):
         if conv.get("is_continuation"):
             continue
         if conv["user_text"].startswith("Stop hook feedback:"):
+            continue
+        # Skip slash command entries from index timeline
+        if is_slash_command_message(conv["user_text"]):
             continue
         prompt_num += 1
         page_num = (i // PROMPTS_PER_PAGE) + 1

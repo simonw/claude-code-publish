@@ -140,6 +140,14 @@ details.continuation[open] summary { border-radius: 12px 12px 0 0; margin-bottom
 .search-result-page { padding: 6px 12px; background: rgba(0,0,0,0.03); font-size: 0.8rem; color: var(--text-muted); border-bottom: 1px solid rgba(0,0,0,0.06); }
 .search-result-content { padding: 12px; }
 .search-result mark { background: #fff59d; padding: 1px 2px; border-radius: 2px; }
+.slash-command { margin: 8px 0; }
+.slash-command-summary { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 6px; font-family: monospace; cursor: pointer; list-style: none; }
+.slash-command-summary::-webkit-details-marker { display: none; }
+.slash-command-summary:hover { background: #e1bee7; }
+.slash-command-icon { color: var(--tool-border); }
+.slash-command-name { font-weight: 600; color: var(--tool-border); }
+.slash-command-output { margin: 8px 0 0 0; font-size: 0.85rem; max-height: 400px; overflow-y: auto; }
+.ctx-icon { display: inline-block; width: 1.2em; text-align: center; }
 @media (max-width: 600px) { body { padding: 8px; } .message, .index-item { border-radius: 8px; } .message-content, .index-item-content { padding: 12px; } pre { font-size: 0.8rem; padding: 8px; } #search-box input { width: 120px; } #search-modal[open] { width: 95vw; height: 90vh; } }
 </style>
 </head>

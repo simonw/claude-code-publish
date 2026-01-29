@@ -27,6 +27,11 @@ from claude_code_transcripts import (
     parse_session_file,
     get_session_summary,
     find_local_sessions,
+    ansi_to_html,
+    is_slash_command_message,
+    parse_slash_command,
+    is_command_stdout_message,
+    extract_command_stdout,
 )
 
 
@@ -1638,3 +1643,119 @@ class TestSearchFeature:
 
         # Total pages should be embedded for JS to know how many pages to fetch
         assert "totalPages" in index_html or "total_pages" in index_html
+
+
+class TestSlashCommandDetection:
+    """Tests for slash command detection functions."""
+
+    def test_detects_command_message(self):
+        """Test detecting a slash command message."""
+        content = "<command-name>/context</command-name>\n<command-message>context</command-message>\n<command-args></command-args>"
+        assert is_slash_command_message(content) is True
+
+    def test_rejects_normal_message(self):
+        """Test rejecting normal user messages."""
+        assert is_slash_command_message("Hello world") is False
+
+    def test_rejects_non_string(self):
+        """Test rejecting non-string content."""
+        assert is_slash_command_message(None) is False
+        assert is_slash_command_message(123) is False
+        assert is_slash_command_message([]) is False
+
+    def test_parses_command_name(self):
+        """Test parsing command name from message."""
+        content = "<command-name>/context</command-name>\n<command-message>context</command-message>\n<command-args></command-args>"
+        assert parse_slash_command(content) == "/context"
+
+    def test_parses_command_with_args(self):
+        """Test parsing command with arguments."""
+        content = "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"
+        assert parse_slash_command(content) == "/model"
+
+    def test_parse_returns_none_for_non_command(self):
+        """Test parse returns None for non-command content."""
+        assert parse_slash_command("Hello world") is None
+
+
+class TestCommandStdout:
+    """Tests for command stdout detection and extraction."""
+
+    def test_detects_stdout_message(self):
+        """Test detecting command stdout message."""
+        content = "<local-command-stdout>Output here</local-command-stdout>"
+        assert is_command_stdout_message(content) is True
+
+    def test_rejects_normal_message(self):
+        """Test rejecting normal messages."""
+        assert is_command_stdout_message("Hello world") is False
+
+    def test_rejects_non_string(self):
+        """Test rejecting non-string content."""
+        assert is_command_stdout_message(None) is False
+
+    def test_extracts_and_cleans_stdout(self):
+        """Test extracting and cleaning stdout content."""
+        content = "<local-command-stdout>\x1b[1mContext Usage\x1b[22m: 50%</local-command-stdout>"
+        result = extract_command_stdout(content)
+        # Now returns HTML with bold tags
+        assert result == "<strong>Context Usage</strong>: 50%"
+
+    def test_extracts_multiline_stdout(self):
+        """Test extracting multiline stdout."""
+        content = "<local-command-stdout>Line 1\nLine 2\nLine 3</local-command-stdout>"
+        result = extract_command_stdout(content)
+        assert result == "Line 1\nLine 2\nLine 3"
+
+    def test_wraps_context_icons_in_fixed_width_spans(self):
+        """Test that context icons get wrapped in fixed-width spans for grid alignment."""
+        content = "<local-command-stdout>\x1b[38;5;135m⛁ ⛁ \x1b[38;5;246m⛶ ⛶\x1b[39m</local-command-stdout>"
+        result = extract_command_stdout(content)
+        # Icons should be wrapped in ctx-icon spans with colors
+        assert '<span class="ctx-icon">⛁</span>' in result
+        assert '<span class="ctx-icon">⛶</span>' in result
+        assert 'style="color:#af5fd7"' in result  # purple for 135
+        assert 'style="color:#949494"' in result  # gray for 246
+
+
+class TestAnsiToHtml:
+    """Tests for ANSI to HTML conversion edge cases."""
+
+    def test_unclosed_bold_gets_closed(self):
+        """Test that unclosed bold tags are automatically closed."""
+        text = "\x1b[1mBold text without close"
+        result = ansi_to_html(text)
+        assert result == "<strong>Bold text without close</strong>"
+
+    def test_nested_bold_not_duplicated(self):
+        """Test that nested bold codes don't create duplicate tags."""
+        text = "\x1b[1m\x1b[1mDouble bold\x1b[22m"
+        result = ansi_to_html(text)
+        assert result == "<strong>Double bold</strong>"
+
+    def test_extra_close_bold_ignored(self):
+        """Test that extra close bold codes are ignored."""
+        text = "Normal\x1b[22m text"
+        result = ansi_to_html(text)
+        assert result == "Normal text"
+
+    def test_reset_closes_both_color_and_bold(self):
+        """Test that reset code closes both color and bold."""
+        text = "\x1b[1m\x1b[38;5;135mBold purple\x1b[0m normal"
+        result = ansi_to_html(text)
+        assert (
+            result
+            == '<strong><span style="color:#af5fd7">Bold purple</span></strong> normal'
+        )
+
+    def test_unclosed_color_gets_closed(self):
+        """Test that unclosed color spans are automatically closed."""
+        text = "\x1b[38;5;244mGray text"
+        result = ansi_to_html(text)
+        assert result == '<span style="color:#808080">Gray text</span>'
+
+    def test_html_entities_escaped(self):
+        """Test that HTML special characters are escaped."""
+        text = "<script>alert('xss')</script> & more"
+        result = ansi_to_html(text)
+        assert result == "&lt;script&gt;alert('xss')&lt;/script&gt; &amp; more"

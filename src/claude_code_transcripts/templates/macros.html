@@ -190,3 +190,11 @@
 {% macro index_long_text(rendered_content) %}
 <div class="index-item-long-text"><div class="truncatable"><div class="truncatable-content"><div class="index-item-long-text-content">{{ rendered_content|safe }}</div></div><button class="expand-btn">Show more</button></div></div>
 {%- endmacro %}
+
+{# Slash command with expandable output - output contains HTML from ANSI conversion #}
+{% macro slash_command(name, output) %}
+<details class="slash-command">
+<summary class="slash-command-summary"><span class="slash-command-icon">&#x25B6;</span> <span class="slash-command-name">{{ name }}</span></summary>
+<pre class="slash-command-output">{{ output|safe }}</pre>
+</details>
+{%- endmacro %}
