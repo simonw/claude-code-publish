@@ -71,21 +71,41 @@ def output_dir():
 class TestGetProjectDisplayName:
     """Tests for get_project_display_name function."""
 
-    def test_extracts_project_name_from_path(self):
+    def test_extracts_project_name_from_path(self, monkeypatch):
         """Test extracting readable project name from encoded path."""
+        monkeypatch.setattr("getpass.getuser", lambda: "user")
         assert get_project_display_name("-home-user-projects-myproject") == "myproject"
 
-    def test_handles_nested_paths(self):
+    def test_handles_nested_paths(self, monkeypatch):
         """Test handling nested project paths."""
+        monkeypatch.setattr("getpass.getuser", lambda: "user")
         assert get_project_display_name("-home-user-code-apps-webapp") == "apps-webapp"
 
-    def test_handles_windows_style_paths(self):
+    def test_handles_windows_style_paths(self, monkeypatch):
         """Test handling Windows-style encoded paths."""
+        monkeypatch.setattr("getpass.getuser", lambda: "name")
         assert get_project_display_name("-mnt-c-Users-name-Projects-app") == "app"
 
     def test_handles_simple_name(self):
         """Test handling already simple names."""
         assert get_project_display_name("simple-project") == "simple-project"
+
+    def test_skips_multipart_username_prefix(self, monkeypatch):
+        """Test that multi-part usernames are stripped as a prefix."""
+        monkeypatch.setattr("getpass.getuser", lambda: "first.last")
+        # first.last becomes first-last-, stripped after -Users-
+        assert (
+            get_project_display_name("-Users-first-last-code-github-org-repo")
+            == "github-org-repo"
+        )
+
+    def test_skips_all_skip_dirs(self, monkeypatch):
+        """Test that all skip_dirs are skipped (original behavior)."""
+        monkeypatch.setattr("getpass.getuser", lambda: "name")
+        # Both 'code' and 'work' are skip_dirs, both should be skipped
+        assert (
+            get_project_display_name("-Users-name-code-work-myproject") == "myproject"
+        )
 
 
 class TestFindAllSessions:

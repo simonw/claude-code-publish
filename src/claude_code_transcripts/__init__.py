@@ -1,5 +1,6 @@
 """Convert Claude Code session JSON to a clean mobile-friendly HTML page with pagination."""
 
+import getpass
 import json
 import html
 import os
@@ -207,30 +208,36 @@ def get_project_display_name(folder_name):
             name = name[len(prefix) :]
             break
 
+    # Strip username prefix if present (handles multi-part usernames like first.last)
+    username_stripped = False
+    try:
+        username = getpass.getuser().replace(".", "-") + "-"
+        if name.startswith(username):
+            name = name[len(username) :]
+            username_stripped = True
+    except Exception:
+        pass
+
     # Split on dashes and find meaningful parts
     parts = name.split("-")
 
     # Common intermediate directories to skip
     skip_dirs = {"projects", "code", "repos", "src", "dev", "work", "documents"}
 
-    # Find the first meaningful part (after skipping username and common dirs)
+    # Find meaningful parts (skipping common directories)
     meaningful_parts = []
-    found_project = False
-
     for i, part in enumerate(parts):
         if not part:
             continue
-        # Skip the first part if it looks like a username (before common dirs)
-        if i == 0 and not found_project:
-            # Check if next parts contain common dirs
-            remaining = [p.lower() for p in parts[i + 1 :]]
+        # Fallback: if username wasn't stripped and this is the first part,
+        # skip it if there's a skip_dir later in the path
+        if not username_stripped and i == 0:
+            remaining = [p.lower() for p in parts[1:]]
             if any(d in remaining for d in skip_dirs):
                 continue
         if part.lower() in skip_dirs:
-            found_project = True
             continue
         meaningful_parts.append(part)
-        found_project = True
 
     if meaningful_parts:
         return "-".join(meaningful_parts)
